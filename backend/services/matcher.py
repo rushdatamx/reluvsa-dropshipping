@@ -6,12 +6,14 @@ Estrategia:
 2. Si no, fuzzy match contra titulos de ventas del proveedor sin facturar (>= 0.6 = aceptamos
    con confidence; < 0.6 = no match).
 """
+from typing import Optional
+
 from rapidfuzz import fuzz, process
 
 CONFIDENCE_MIN_FUZZY = 0.6
 
 
-def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> dict | None:
+def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optional[dict]:
     codigo = (concepto.get("codigo") or "").strip()
     descripcion = (concepto.get("descripcion") or "").strip()
 

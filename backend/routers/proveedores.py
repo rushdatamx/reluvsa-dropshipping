@@ -14,7 +14,7 @@ def listar(user: UserInfo = Depends(get_current_user)):
         rows = conn.execute(
             "SELECT id, nombre, rfc, codigo_bodega, contacto_email, contacto_nombre, activo FROM proveedores ORDER BY nombre"
         ).fetchall()
-    return [Proveedor(**dict(r), activo=bool(r["activo"])) for r in rows]
+    return [Proveedor(**{**dict(r), "activo": bool(r["activo"])}) for r in rows]
 
 
 @router.post("", response_model=Proveedor, dependencies=[Depends(require_admin)])
@@ -29,7 +29,7 @@ def crear(data: ProveedorCreate):
             "SELECT id, nombre, rfc, codigo_bodega, contacto_email, contacto_nombre, activo FROM proveedores WHERE id = ?",
             (pid,),
         ).fetchone()
-    return Proveedor(**dict(row), activo=bool(row["activo"]))
+    return Proveedor(**{**dict(row), "activo": bool(row["activo"])})
 
 
 @router.get("/{proveedor_id}", response_model=Proveedor)
@@ -43,4 +43,4 @@ def obtener(proveedor_id: int, user: UserInfo = Depends(get_current_user)):
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-    return Proveedor(**dict(row), activo=bool(row["activo"]))
+    return Proveedor(**{**dict(row), "activo": bool(row["activo"])})
