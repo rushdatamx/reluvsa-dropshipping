@@ -197,7 +197,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-05-28)
+## 8. Estado actual (último update: 2026-06-01)
 
 ### ✅ Completado
 - Esqueleto completo del repo (46 archivos, ~2,860 líneas) commiteado en GitHub.
@@ -207,10 +207,18 @@ Convenciones:
   - Matcher con código exacto + fallback fuzzy (rapidfuzz token_set_ratio).
   - Frontend con todas las pantallas funcionales y estilo RELUVSA replicado de catalogo-reluvsa.
 - **Frontend desplegado en Vercel** ✅ (Root Directory = `frontend`, framework CRA).
+- **Backend probado en local (2026-06-01)** ✅
+  - venv en `backend/.venv` con 41 paquetes (FastAPI 0.128, Pydantic 2.13, bcrypt 5.0, lxml 6.1, rapidfuzz 3.13).
+  - `init_database()` corre sin errores; seed de los 5 proveedores OK.
+  - `/api/auth/login` emite JWT y `/api/proveedores` con token responde 200 con los 5 proveedores.
+  - 2 bugs encontrados y arreglados (commit `714e363`):
+    1. `services/matcher.py` usaba `dict | None` (PEP 604) — incompatible con Python 3.9. Cambiado a `Optional[dict]`. Sigue siendo válido en 3.11 (Railway).
+    2. `routers/proveedores.py` tenía `Proveedor(**dict(r), activo=bool(...))` en 3 funciones → TypeError por kwarg duplicado. Cambiado a `Proveedor(**{**dict(r), "activo": bool(...)})`.
+  - Usuario admin local de prueba (NO usar en prod): `test@local.dev` / `TestLocal123!`.
 
 ### ⏳ En proceso / siguiente
-- **Backend NO desplegado**. Sin backend, el login no funciona aunque hubiera usuarios.
-- **No hay usuarios creados** todavía. Se crean con `backend/scripts/crear_usuario.py` desde la consola del backend.
+- **Backend NO desplegado a Railway todavía**. Plan completo en sección 9, Paso A (actualizado con valores concretos).
+- **No hay usuarios reales** todavía (el `test@local.dev` solo vive en la SQLite local).
 - Variable `REACT_APP_API_URL` en Vercel **no configurada** (apunta a localhost por default).
 
 ### ❌ No iniciado
@@ -223,15 +231,26 @@ Convenciones:
 
 ## 9. Siguientes pasos (orden recomendado)
 
-### Paso A — Desplegar backend a Railway
-1. Crear proyecto en Railway desde el repo de GitHub.
-2. Root Directory = `backend`.
-3. Railway autodetecta Procfile y arranca `uvicorn main:app --host 0.0.0.0 --port $PORT`.
-4. Variables de entorno:
-   - `JWT_SECRET_KEY` = un valor aleatorio largo (importante: no dejarlo en default, los tokens no sobreviven reinicios).
-   - `CORS_ORIGINS` = `https://reluvsa-dropshipping.vercel.app` (la URL real del frontend).
-   - `DATABASE_PATH` = `/data/dropshipping.db` si se monta volume persistente; si no, ignorar (la BD vive en el filesystem efímero del container).
-5. Anotar la URL pública generada (algo como `https://reluvsa-dropshipping-production.up.railway.app`).
+### Paso A — Desplegar backend a Railway (EN CURSO — esperando que el usuario termine en la UI)
+Decisiones tomadas en sesión 2026-06-01:
+- Usuario opera Railway desde la **UI web** (no CLI).
+- Frontend Vercel confirmado en `https://reluvsa-dropshipping.vercel.app`.
+- Se configura **volumen persistente** (sin él los usuarios se borran en cada redeploy).
+
+Pasos:
+1. railway.com/new → "Deploy from GitHub repo" → `rushdatamx/reluvsa-dropshipping`.
+2. Settings del servicio:
+   - Root Directory: `backend`
+   - Builder: Nixpacks (default)
+   - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT` (autodetectado por Procfile)
+3. Variables de entorno (las 3):
+   - `JWT_SECRET_KEY` = un valor aleatorio largo de 64+ chars. **Importante: la próxima sesión debe regenerar uno nuevo con `python -c "import secrets; print(secrets.token_urlsafe(64))"`** y no reutilizar el que aparezca en el historial del chat (queda expuesto).
+   - `CORS_ORIGINS` = `https://reluvsa-dropshipping.vercel.app`
+   - `DATABASE_PATH` = `/data/dropshipping.db`
+4. Settings → Volumes → "+ Add Volume":
+   - Mount Path: `/data`
+   - Size: 1 GB
+5. Settings → Networking → "Generate Domain" → anotar la URL pública (algo como `https://reluvsa-dropshipping-production.up.railway.app`).
 
 ### Paso B — Crear usuarios desde Railway shell
 ```
@@ -273,6 +292,10 @@ Diseño preliminar en este CLAUDE.md (sección Reglas de Gaby). A construir:
 - **MATRIZ no es proveedor** — es bodega propia. Importante en el mapeo de col K → proveedor.
 - **Cada proveedor usa su propio SKU**. Por eso el matcher tiene fallback fuzzy: ARGENPARTS tiene descripciones tan pobres ("Base de amortiguador Del") que sin el código numérico no hay match.
 - **Los archivos del cliente NO van al repo** — están en `archivos/` y excluidos por `.gitignore`. Tienen PII (nombres de compradores, RFCs, direcciones).
+- **Python 3.9 en local, 3.11 en Railway**. El Mac tiene Python 3.9.6 del sistema (sin python3.11 instalado). El código del repo usa PEP 604 (`X | None`) que requiere 3.10+. Decisión: arreglar lo que truene con `Optional[X]` en lugar de instalar Python nuevo. Solo apareció en `services/matcher.py:14` (commit `714e363`); si aparece más en futuras adiciones, mismo fix.
+- **Bug pattern `Proveedor(**dict(r), activo=bool(...))`**: si la columna ya viene en el SELECT, pasarla otra vez como kwarg explota con `TypeError: got multiple values for keyword argument`. Patrón correcto: `Proveedor(**{**dict(r), "activo": bool(r["activo"])})`. Aplicado en proveedores.py; si se replica en otros routers que serialicen booleanos, mismo fix.
+- **Volumen persistente en Railway es obligatorio**: sin él, SQLite vive en el filesystem efímero y los usuarios/datos se borran en cada redeploy (incluyendo redeploys automáticos por push). Mount path `/data` + `DATABASE_PATH=/data/dropshipping.db`.
+- **JWT_SECRET_KEY no se commitea ni se reutiliza entre sesiones**. Regenerar siempre con `secrets.token_urlsafe(64)` y pegarlo solo en Railway. Si se filtra (p.ej. en historial de chat), regenerar — invalida todos los tokens activos pero como aún no hay usuarios reales el costo es cero.
 
 ---
 
