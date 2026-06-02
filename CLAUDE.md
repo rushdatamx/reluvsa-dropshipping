@@ -199,6 +199,16 @@ Convenciones:
 
 ## 8. Estado actual (último update: 2026-06-02)
 
+### ✅ Pasos A, B, C COMPLETADOS + Paso D validado en local (2026-06-02)
+- **Paso B** ✅: admin Gaby creado vía bootstrap por env vars (`gaby@reluvsa.com`), login verificado. Los 5 proveedores se sembraron OK.
+- **Paso C** ✅: Vercel `REACT_APP_API_URL` = `https://reluvsa-dropshipping-production.up.railway.app/api`, bundle de prod verificado apuntando a Railway (no localhost), login real funciona desde el navegador.
+- **Paso D (parsers vs datos reales)** — 3 bugs encontrados y arreglados (commit `3fbc087`):
+  1. Fechas Ventas ML en español largo ("13 de mayo de 2026 23:43"), no ISO → `_parse_fecha` con regex de mes español. Sin esto, fecha_venta quedaba None en las 2053 ventas.
+  2. Celdas numéricas con espacios (' ') y floats ('1.0') → helpers `_to_int`/`_to_float` defensivos (antes `int(' ')` abortaba todo el parseo).
+  3. `envios_colecta.num_venta` era FK estricta a ventas_ml; 88% de envíos reales no tienen su venta en el reporte ML (cortes de fecha distintos) → se quitó la FK + migración idempotente `_migrar_envios_sin_fk` (preserva filas y `lugar_override`).
+  - **Cifras esperadas con los archivos reales** (corte 14-may-2026): Ventas ML = **2053** (100% con fecha), Envíos colecta = **1789**, cruces envío↔venta = **217**, proveedor CAUPLAS = 121, KIM = 13. El resto sin proveedor = MATRIZ (bodega propia) o "Sin información".
+  - **PENDIENTE**: que Mario suba los 2 Excels desde el portal en prod y confirme estos números end-to-end. Facturas (XML+PDF) aún no probadas con datos reales.
+
 ### ✅ Paso A COMPLETADO — Backend desplegado a Railway (2026-06-02)
 - Proyecto Railway: `reluvsa-dropshipping` (antes nombre random `zoological-youthfulness`); servicio conectado a `rushdatamx/reluvsa-dropshipping`, branch `main`, auto-deploy ON.
 - Root Directory = `/backend`. Builder: Railpack 0.25.0 (Railway ya no usa Nixpacks por default en proyectos nuevos; igual buildea Python por `requirements.txt`).
