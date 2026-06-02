@@ -219,7 +219,9 @@ Convenciones:
 
 ---
 
-## 8.bis Estado anterior (último update: 2026-06-01)
+## 8.bis Estado anterior (histórico, 2026-06-01 — superado por la sección 8)
+
+> ⚠️ Esta subsección es un snapshot del 2026-06-01, antes del deploy. Lo que aquí aparece como "pendiente" (backend a Railway, usuarios, REACT_APP_API_URL) **ya está resuelto** — ver sección 8. Se conserva solo como registro histórico.
 
 ### ✅ Completado
 - Esqueleto completo del repo (46 archivos, ~2,860 líneas) commiteado en GitHub.
@@ -253,56 +255,40 @@ Convenciones:
 
 ## 9. Siguientes pasos (orden recomendado)
 
-### Paso A — Desplegar backend a Railway (EN CURSO — esperando que el usuario termine en la UI)
-Decisiones tomadas en sesión 2026-06-01:
-- Usuario opera Railway desde la **UI web** (no CLI).
-- Frontend Vercel confirmado en `https://reluvsa-dropshipping-ghov.vercel.app` (proyecto recreado; el viejo `reluvsa-dropshipping.vercel.app` crasheaba con `react-scripts: command not found` por Root Directory mal configurado; el nuevo buildea OK con Root Directory = `frontend`).
-- Se configura **volumen persistente** (sin él los usuarios se borran en cada redeploy).
+> **Pasos A, B, C completados y Paso D validado en local el 2026-06-02.** Detalle del cómo en la sección 8. Aquí abajo queda SOLO lo pendiente. Los pasos A–C originales (deploy, crear admin, conectar frontend) ya están hechos — su procedimiento histórico se conserva en la sección 8.bis y en las memorias `project_railway_deploy.md`.
 
-Pasos:
-1. railway.com/new → "Deploy from GitHub repo" → `rushdatamx/reluvsa-dropshipping`.
-2. Settings del servicio:
-   - Root Directory: `backend`
-   - Builder: Nixpacks (default)
-   - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT` (autodetectado por Procfile)
-3. Variables de entorno (las 3):
-   - `JWT_SECRET_KEY` = un valor aleatorio largo de 64+ chars. **Importante: la próxima sesión debe regenerar uno nuevo con `python -c "import secrets; print(secrets.token_urlsafe(64))"`** y no reutilizar el que aparezca en el historial del chat (queda expuesto).
-   - `CORS_ORIGINS` = `https://reluvsa-dropshipping-ghov.vercel.app`
-   - `DATABASE_PATH` = `/data/dropshipping.db`
-4. Settings → Volumes → "+ Add Volume":
-   - Mount Path: `/data`
-   - Size: 1 GB
-5. Settings → Networking → "Generate Domain" → anotar la URL pública (algo como `https://reluvsa-dropshipping-production.up.railway.app`).
+### ▶️ Pendiente inmediato (arrancar aquí la próxima sesión)
 
-### Paso B — Crear usuarios desde Railway shell
-```
-python3 scripts/crear_usuario.py admin gaby@reluvsa.com "PASSWORD_SEGURO"
-python3 scripts/crear_usuario.py proveedor CAUPLAS quality@hoses.com "PASSWORD_CAUPLAS"
-python3 scripts/crear_usuario.py proveedor KIM contacto@kimsauto.com "PASSWORD_KIM"
-python3 scripts/crear_usuario.py proveedor AG contacto@argenparts.com "PASSWORD_AG"
-python3 scripts/crear_usuario.py proveedor VAZLO contacto@vazlocomercial.com "PASSWORD_VAZLO"
-python3 scripts/crear_usuario.py proveedor KG contacto@keepongreen.com "PASSWORD_KG"
-```
+**P1 — Confirmar Paso D end-to-end en el portal (lo hace Mario en el navegador).**
+- Login en `https://reluvsa-dropshipping-ghov.vercel.app` como `gaby@reluvsa.com`.
+- Cargar reportes → subir `archivos/detalle-envios/20260514_Ventas_MX_...xlsx` → esperar **2053 ventas**.
+- Cargar reportes → subir `archivos/detalle-envios/Detalle envios de colecta.xlsx` → esperar **1789 envíos**.
+- Ventas y cruces → tabla poblada con fechas correctas y proveedores (CAUPLAS 121, KIM 13; resto MATRIZ o "Sin información").
+- Métricas proveedores → ver las 4 métricas poblándose.
+- Si los números no cuadran, Claude puede verificar el estado real consultando la API con el token de admin.
 
-### Paso C — Conectar frontend con backend
-1. En Vercel → Settings → Environment Variables:
-   - `REACT_APP_API_URL` = `https://<railway-url>.up.railway.app/api`
-2. Vercel → Deployments → Redeploy del último build.
+**P2 — Higiene de seguridad (pendiente, no urgente).**
+- Borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway (ya cumplió su función; el admin vive en el volumen). Dejar `ADMIN_BOOTSTRAP_EMAIL` no hace nada sin la password.
 
-### Paso D — Probar end-to-end
-1. Login con `gaby@reluvsa.com`.
-2. Cargar reportes → subir el Excel de Ventas ML.
-3. Cargar reportes → subir el Excel de Detalle Colecta.
-4. Ventas y cruces → ver tabla con proveedores asignados; reasignar las "Sin información".
-5. Login con un proveedor → subir un XML+PDF de factura → ver match automático.
-6. Métricas proveedores → ver las 4 métricas pobladas.
+**P3 — Crear los 5 usuarios proveedor.**
+- Método recomendado: igual que el admin, por **bootstrap de env vars NO existe para proveedores todavía** — para proveedores hay que usar `scripts/crear_usuario.py` desde la **Console de Railway** (ojo: la Console rompe el formato al pegar; alternativa = agregar un bootstrap de proveedores análogo al de admin, o crear un endpoint temporal protegido). Definir antes con Mario los correos reales de cada proveedor.
+- Comando del script (si se usa la Console): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"`. Códigos: CAUPLAS, KIM, AG, VAZLO, KG.
 
-### Paso E — Módulo 2: publicaciones masivas
-Diseño preliminar en este CLAUDE.md (sección Reglas de Gaby). A construir:
+**P4 — Probar facturas con datos reales.**
+- Login como un proveedor → subir XML+PDF de `archivos/facturas-ejemplos/` → ver match automático concepto→venta.
+- Ejemplos disponibles: `KAC1601193F6_Factura_K26533_...pdf` (KIMS AUTO), `cfdi_timbrados_I_8075_...pdf`, `pemitt (2) 1.pdf`. NOTA: el matcher cruza por `NoIdentificacion` del XML (== SKU proveedor) contra SKU de venta; fallback fuzzy por descripción. Los parsers de CFDI (parser_cfdi.py) AÚN NO se han probado con XML real (solo PDFs en archivos/; verificar si hay XML o si el proveedor sube ambos).
+
+### Paso E — Módulo 2: publicaciones masivas (no iniciado)
+Diseño preliminar en este CLAUDE.md (sección 3, Reglas de Gaby). A construir:
 - Uploader de catálogos de proveedor (LISTA PRECIOS KG y similares).
-- Detector de SKUs faltantes contra `Publicaciones ML` (col Q).
-- Editor de plantilla ML con campos fijos por proveedor (la fila amarilla).
+- Detector de SKUs faltantes contra `Publicaciones ML` (col Q = `Att_SellerSKU`).
+- Editor de plantilla ML con campos fijos por proveedor (la fila amarilla de `PENDIENTES ACDELCO.xlsx`).
 - Export a CSV en formato Mercado Libre.
+- Archivos fuente en `archivos/publicaciones-masivas/`: `LISTA PRECIOS KG.xlsx`, `Publicaciones - ML_...xlsx`, `PENDIENTES ACDELCO.xlsx`.
+
+### Otros pendientes menores
+- UI para reasignación manual de bodega (botón en Ventas.jsx) — el backend ya lo soporta (`PATCH /api/envios/{id}/reasignar` + `lugar_override`).
+- Logo real de RELUVSA (hoy placeholder de texto).
 
 ---
 
@@ -318,6 +304,10 @@ Diseño preliminar en este CLAUDE.md (sección Reglas de Gaby). A construir:
 - **Bug pattern `Proveedor(**dict(r), activo=bool(...))`**: si la columna ya viene en el SELECT, pasarla otra vez como kwarg explota con `TypeError: got multiple values for keyword argument`. Patrón correcto: `Proveedor(**{**dict(r), "activo": bool(r["activo"])})`. Aplicado en proveedores.py; si se replica en otros routers que serialicen booleanos, mismo fix.
 - **Volumen persistente en Railway es obligatorio**: sin él, SQLite vive en el filesystem efímero y los usuarios/datos se borran en cada redeploy (incluyendo redeploys automáticos por push). Mount path `/data` + `DATABASE_PATH=/data/dropshipping.db`.
 - **JWT_SECRET_KEY no se commitea ni se reutiliza entre sesiones**. Regenerar siempre con `secrets.token_urlsafe(64)` y pegarlo solo en Railway. Si se filtra (p.ej. en historial de chat), regenerar — invalida todos los tokens activos pero como aún no hay usuarios reales el costo es cero.
+- **La Console web de Railway rompe el formato al pegar comandos largos.** Por eso el admin se crea por **bootstrap de env vars** (`ADMIN_BOOTSTRAP_EMAIL` + `ADMIN_BOOTSTRAP_PASSWORD`) que `init_database()` lee al arrancar (commit `bbdbe34`, idempotente). Borrar la password de Railway tras crear el admin. Para proveedores aún no hay bootstrap análogo (ver P3).
+- **Gotchas de la UI nueva de Railway** (gastamos tiempo): Root Directory está en **Service Settings → Source** (no en Project Settings); el **volumen** se adjunta con **clic derecho sobre la cajita del servicio en el canvas → Attach Volume** (no hay sección Volumes en Settings); builder por default es Railpack (no Nixpacks). Detalle en `project_railway_deploy.md`.
+- **Datos reales rompen los parsers de formas que la sintaxis no detecta** (commit `3fbc087`): fechas en español ("13 de mayo de 2026" en ventas, "viernes 8 may 2026" en colecta — dos formatos distintos), celdas numéricas con espacios sueltos (' ') y floats ('1.0') que `int()/float()` directos no toleran, y la FK `envios_colecta.num_venta → ventas_ml` que rechaza el 88% de envíos reales (cortes de fecha distintos). Detalle en `project_datos_reales_parsers.md`.
+- **`CREATE TABLE IF NOT EXISTS` no altera tablas ya creadas.** Cualquier cambio de schema sobre una BD existente (el volumen de Railway) requiere migración explícita idempotente en `init_database()`. Patrón aplicado en `_migrar_envios_sin_fk`: detectar con `PRAGMA foreign_key_list`, rename → recrear → copiar filas (preservando `lugar_override`) → drop. Apagar `PRAGMA foreign_keys` durante el swap.
 
 ---
 
@@ -328,5 +318,9 @@ En `~/.claude/projects/-Users-jmariopgarcia-Desktop-2026-RushData-RELUVSA-dropsh
 - `project_proveedores_dropshipping.md` — los 5 proveedores con detalle
 - `project_receptor_pemit.md` — relación RELUVSA / GRUPO PEMIT
 - `project_reglas_gaby.md` — reglas de cada archivo según notas de Gaby
+- `project_backend_python_compat.md` — Python 3.9 local vs 3.11 Railway (PEP 604)
+- `project_backend_kwarg_duplicado.md` — bug pattern kwarg duplicado en routers
+- `project_railway_deploy.md` — deploy Railway: URLs, env vars, volumen, gotchas de la UI
+- `project_datos_reales_parsers.md` — bugs de parsers con datos reales y cifras de referencia
 - `reference_catalogo_reluvsa.md` — repo base copiado
 - `user_mario_rushdata.md` — perfil del usuario
