@@ -197,7 +197,19 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-01)
+## 8. Estado actual (último update: 2026-06-02)
+
+### ✅ Paso A COMPLETADO — Backend desplegado a Railway (2026-06-02)
+- Proyecto Railway: `reluvsa-dropshipping` (antes nombre random `zoological-youthfulness`); servicio conectado a `rushdatamx/reluvsa-dropshipping`, branch `main`, auto-deploy ON.
+- Root Directory = `/backend`. Builder: Railpack 0.25.0 (Railway ya no usa Nixpacks por default en proyectos nuevos; igual buildea Python por `requirements.txt`).
+- 3 variables configuradas: `JWT_SECRET_KEY`, `CORS_ORIGINS=https://reluvsa-dropshipping-ghov.vercel.app`, `DATABASE_PATH=/data/dropshipping.db`.
+- Volumen persistente montado en `/data` (se adjunta con **clic derecho sobre el servicio en el canvas → Attach Volume**, NO desde Settings → la UI nueva no tiene sección Volumes en Settings).
+- URL pública: **`https://reluvsa-dropshipping-production.up.railway.app`**.
+- Health-checks OK: `GET /` → 200 JSON; `GET /api/proveedores` sin token → 401; preflight CORS desde el origen Vercel devuelve el `access-control-allow-origin` correcto.
+
+---
+
+## 8.bis Estado anterior (último update: 2026-06-01)
 
 ### ✅ Completado
 - Esqueleto completo del repo (46 archivos, ~2,860 líneas) commiteado en GitHub.
@@ -234,7 +246,7 @@ Convenciones:
 ### Paso A — Desplegar backend a Railway (EN CURSO — esperando que el usuario termine en la UI)
 Decisiones tomadas en sesión 2026-06-01:
 - Usuario opera Railway desde la **UI web** (no CLI).
-- Frontend Vercel confirmado en `https://reluvsa-dropshipping.vercel.app`.
+- Frontend Vercel confirmado en `https://reluvsa-dropshipping-ghov.vercel.app` (proyecto recreado; el viejo `reluvsa-dropshipping.vercel.app` crasheaba con `react-scripts: command not found` por Root Directory mal configurado; el nuevo buildea OK con Root Directory = `frontend`).
 - Se configura **volumen persistente** (sin él los usuarios se borran en cada redeploy).
 
 Pasos:
@@ -245,7 +257,7 @@ Pasos:
    - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT` (autodetectado por Procfile)
 3. Variables de entorno (las 3):
    - `JWT_SECRET_KEY` = un valor aleatorio largo de 64+ chars. **Importante: la próxima sesión debe regenerar uno nuevo con `python -c "import secrets; print(secrets.token_urlsafe(64))"`** y no reutilizar el que aparezca en el historial del chat (queda expuesto).
-   - `CORS_ORIGINS` = `https://reluvsa-dropshipping.vercel.app`
+   - `CORS_ORIGINS` = `https://reluvsa-dropshipping-ghov.vercel.app`
    - `DATABASE_PATH` = `/data/dropshipping.db`
 4. Settings → Volumes → "+ Add Volume":
    - Mount Path: `/data`

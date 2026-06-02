@@ -209,6 +209,32 @@ def init_database():
                 SEED_PROVEEDORES,
             )
 
+        _bootstrap_admin(cursor)
+
+
+def _bootstrap_admin(cursor):
+    """Crea el admin inicial desde variables de entorno (ADMIN_BOOTSTRAP_EMAIL /
+    ADMIN_BOOTSTRAP_PASSWORD) si todavía no existe ningún admin. Idempotente:
+    no duplica en redeploys. Evita tener que usar la Console de Railway.
+    """
+    email = (os.getenv("ADMIN_BOOTSTRAP_EMAIL") or "").strip().lower()
+    password = os.getenv("ADMIN_BOOTSTRAP_PASSWORD") or ""
+    if not email or not password:
+        return
+
+    cursor.execute("SELECT id FROM usuarios WHERE email = ?", (email,))
+    if cursor.fetchone():
+        return  # ya existe ese email; no tocar
+
+    import bcrypt
+
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    cursor.execute(
+        "INSERT INTO usuarios (email, password_hash, rol) VALUES (?, ?, 'admin')",
+        (email, password_hash),
+    )
+    print(f"[bootstrap] Admin {email} creado desde variables de entorno.")
+
 
 if __name__ == "__main__":
     init_database()
