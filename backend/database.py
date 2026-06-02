@@ -77,7 +77,11 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
 
 CREATE TABLE IF NOT EXISTS envios_colecta (
     num_envio TEXT PRIMARY KEY,
-    num_venta TEXT REFERENCES ventas_ml(num_venta) ON DELETE SET NULL,
+    -- num_venta NO es FK a ventas_ml a propósito: los reportes de colecta y de
+    -- ventas ML llegan en cortes de fecha distintos, así que un envío puede
+    -- existir antes de que su venta esté cargada (~88% de los casos en datos
+    -- reales). El cruce se resuelve por JOIN cuando ambas filas existan.
+    num_venta TEXT,
     fecha_venta TIMESTAMP,
     titulo TEXT,
     tiempo_max_envio TEXT,
@@ -202,6 +206,8 @@ def init_database():
         cursor = conn.cursor()
         cursor.executescript(SCHEMA)
 
+        _migrar_envios_sin_fk(cursor)
+
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
             cursor.executemany(
@@ -210,6 +216,56 @@ def init_database():
             )
 
         _bootstrap_admin(cursor)
+
+
+def _migrar_envios_sin_fk(cursor):
+    """Migración idempotente: versiones viejas crearon envios_colecta con una FK
+    num_venta -> ventas_ml(num_venta), que rechaza envíos cuya venta aún no está
+    cargada (cortes de fecha distintos). Si la tabla todavía tiene esa FK, la
+    recreamos sin ella preservando las filas existentes. CREATE TABLE IF NOT
+    EXISTS por sí solo no altera una tabla ya creada, por eso hace falta esto.
+    """
+    fks = cursor.execute("PRAGMA foreign_key_list(envios_colecta)").fetchall()
+    tiene_fk_ventas = any(fk["table"] == "ventas_ml" for fk in fks)
+    if not tiene_fk_ventas:
+        return  # ya está migrada (o es BD nueva con el schema correcto)
+
+    # foreign_keys está ON; hay que apagarlo para el swap de tablas.
+    cursor.execute("PRAGMA foreign_keys=OFF")
+    cursor.execute("ALTER TABLE envios_colecta RENAME TO envios_colecta_old")
+    # Recreamos solo esta tabla (sin la FK a ventas_ml), no todo el SCHEMA.
+    cursor.execute(
+        """CREATE TABLE envios_colecta (
+            num_envio TEXT PRIMARY KEY,
+            num_venta TEXT,
+            fecha_venta TIMESTAMP,
+            titulo TEXT,
+            tiempo_max_envio TEXT,
+            tiempo_real_envio TEXT,
+            lugar_indicado TEXT,
+            lugar_real TEXT,
+            lugar_override TEXT,
+            proveedor_id INTEGER REFERENCES proveedores(id) ON DELETE SET NULL,
+            cumplio_sla INTEGER,
+            excluido_analisis INTEGER DEFAULT 0,
+            fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    cursor.execute(
+        """INSERT INTO envios_colecta
+           (num_envio, num_venta, fecha_venta, titulo, tiempo_max_envio, tiempo_real_envio,
+            lugar_indicado, lugar_real, lugar_override, proveedor_id, cumplio_sla,
+            excluido_analisis, fecha_subida)
+           SELECT num_envio, num_venta, fecha_venta, titulo, tiempo_max_envio, tiempo_real_envio,
+                  lugar_indicado, lugar_real, lugar_override, proveedor_id, cumplio_sla,
+                  excluido_analisis, fecha_subida
+           FROM envios_colecta_old"""
+    )
+    cursor.execute("DROP TABLE envios_colecta_old")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_venta ON envios_colecta(num_venta)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_proveedor ON envios_colecta(proveedor_id)")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    print("[migracion] envios_colecta recreada sin FK a ventas_ml.")
 
 
 def _bootstrap_admin(cursor):

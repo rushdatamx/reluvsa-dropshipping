@@ -1,12 +1,16 @@
 """
 Parser del reporte de Ventas Mercado Libre.
 
-El archivo tiene 66 columnas con 2 niveles de header (fila 5 = categorías mergeadas,
-fila 6 = nombres reales). Datos arrancan en fila 7. Solo nos importan:
+El archivo tiene 66 columnas con 2 niveles de header (fila índice 4 = categorías
+mergeadas tipo 'Ventas'/'Publicaciones', fila índice 5 = nombres reales). Datos
+arrancan en fila índice 6. El header se detecta dinámicamente. Solo nos importan:
 - # de venta, Fecha de venta, Estado, Unidades, Total
 - SKU, Título, Comprador, Estado del comprador, Forma de entrega
 - Factura adjunta, Unidades devueltas, Reclamos
+
+Las fechas vienen en español largo: "13 de mayo de 2026 23:43".
 """
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +18,13 @@ from typing import Optional
 import openpyxl
 
 from database import get_db
+
+# Meses en español, nombre completo (formato del reporte de Ventas ML).
+MESES_ES_LARGO = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11,
+    "diciembre": 12,
+}
 
 COLS_INTERES = {
     "# de venta": "num_venta",
@@ -44,10 +55,51 @@ def _parse_fecha(val):
         return None
     if isinstance(val, datetime):
         return val
+    s = str(val).strip()
+    # Formato real de ML: "13 de mayo de 2026 23:43" (hora opcional).
+    m = re.search(
+        r"(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?",
+        s.lower(),
+    )
+    if m:
+        day, mes_nom, year, hh, mm = m.groups()
+        month = MESES_ES_LARGO.get(mes_nom)
+        if month:
+            try:
+                return datetime(int(year), month, int(day), int(hh or 0), int(mm or 0))
+            except Exception:
+                pass
+    # Fallback: ISO (por si algún día el reporte cambia de formato).
     try:
-        return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _to_int(val, default=None):
+    """Cast defensivo a int. Las celdas reales traen espacios sueltos (' '),
+    floats ('1.0') y vacíos que int() no tolera."""
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s:
+        return default
+    try:
+        return int(float(s))  # tolera '1.0'
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_float(val, default=None):
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s:
+        return default
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
 
 
 def parse_ventas_ml(path: Path) -> dict:
@@ -117,13 +169,13 @@ def parse_ventas_ml(path: Path) -> dict:
                 "fecha_venta": _parse_fecha(row[idx_fecha]) if idx_fecha is not None else None,
                 "estado": str(row[idx_estado]).strip() if idx_estado is not None and row[idx_estado] else None,
                 "titulo": str(row[idx_titulo]).strip() if idx_titulo is not None and row[idx_titulo] else None,
-                "unidades": int(row[idx_unidades]) if idx_unidades is not None and row[idx_unidades] else None,
-                "total": float(row[idx_total]) if idx_total is not None and row[idx_total] else None,
+                "unidades": _to_int(row[idx_unidades]) if idx_unidades is not None else None,
+                "total": _to_float(row[idx_total]) if idx_total is not None else None,
                 "comprador": str(row[idx_comprador]).strip() if idx_comprador is not None and row[idx_comprador] else None,
                 "comprador_estado": str(row[idx_comp_estado]).strip() if idx_comp_estado is not None and row[idx_comp_estado] else None,
                 "forma_entrega": str(row[idx_forma_entrega]).strip() if idx_forma_entrega is not None and row[idx_forma_entrega] else None,
                 "factura_adjunta_ml": str(row[idx_factura_ml]).strip() if idx_factura_ml is not None and row[idx_factura_ml] else None,
-                "devolucion_unidades": int(row[idx_devolucion]) if idx_devolucion is not None and row[idx_devolucion] else 0,
+                "devolucion_unidades": _to_int(row[idx_devolucion], default=0) if idx_devolucion is not None else 0,
                 "reclamo_abierto": 1 if idx_reclamo_abierto is not None and row[idx_reclamo_abierto] else 0,
                 "reclamo_cerrado": 1 if idx_reclamo_cerrado is not None and row[idx_reclamo_cerrado] else 0,
             }
