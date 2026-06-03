@@ -197,7 +197,19 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-02)
+## 8. Estado actual (último update: 2026-06-03)
+
+### ✅ P1 CERRADO — Paso D confirmado end-to-end en producción (2026-06-03)
+- Mario subió los 2 Excels desde el portal en prod (`gaby@reluvsa.com`). Resultados del uploader:
+  - Ventas ML → `{"inserted": 2053, "updated": 0, "skipped": 0}`.
+  - Colecta → `{"sheet_used": "Últimas 4 semanas", "inserted": 1789, "updated": 0, "envios_sin_proveedor_inferido": 533}`.
+- Verificado vía API con token de admin (`/api/metricas/resumen` + `/api/metricas/proveedores`) — **todos los números cuadran**:
+  - Ventas = **2053** ✅, Envíos = **1789** ✅, Proveedores activos = 5 ✅.
+  - QUALITY HOSES (CAUPLAS) = **121 envíos, 94.2% a tiempo** ✅; KIMS AUTO (KIM) = **13 envíos, 100% a tiempo** ✅.
+  - AG / KG / VAZLO = 0 envíos este corte (sus envíos cayeron en MATRIZ o "Sin información"; esperado).
+  - El motor completo corre en prod: parseo → asignación por col K → cálculo de SLA. La métrica de SLA ya se puebla.
+- Nota: los "217 cruces envío↔venta" del Paso D no se exponen por endpoint; el desglose 121+13=134 con proveedor dropshipping confirma que el match funcionó (el resto cruzan pero caen en MATRIZ).
+- ⚠️ **P2 ahora es URGENTE**: la password del admin (`bXubgXKQQsxxFz6e`) quedó expuesta en el historial del chat de esta sesión. Rotar password de `gaby@reluvsa.com` Y borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway en la próxima sesión (Mario eligió posponerlo el 2026-06-03).
 
 ### ✅ Pasos A, B, C COMPLETADOS + Paso D validado en local (2026-06-02)
 - **Paso B** ✅: admin Gaby creado vía bootstrap por env vars (`gaby@reluvsa.com`), login verificado. Los 5 proveedores se sembraron OK.
@@ -259,20 +271,26 @@ Convenciones:
 
 ### ▶️ Pendiente inmediato (arrancar aquí la próxima sesión)
 
-**P1 — Confirmar Paso D end-to-end en el portal (lo hace Mario en el navegador).**
-- Login en `https://reluvsa-dropshipping-ghov.vercel.app` como `gaby@reluvsa.com`.
-- Cargar reportes → subir `archivos/detalle-envios/20260514_Ventas_MX_...xlsx` → esperar **2053 ventas**.
-- Cargar reportes → subir `archivos/detalle-envios/Detalle envios de colecta.xlsx` → esperar **1789 envíos**.
-- Ventas y cruces → tabla poblada con fechas correctas y proveedores (CAUPLAS 121, KIM 13; resto MATRIZ o "Sin información").
-- Métricas proveedores → ver las 4 métricas poblándose.
-- Si los números no cuadran, Claude puede verificar el estado real consultando la API con el token de admin.
+**P1 — Confirmar Paso D end-to-end en el portal. ✅ CERRADO 2026-06-03.** Ver sección 8: números confirmados en prod (2053 / 1789 / CAUPLAS 121 a 94.2% / KIM 13 a 100%).
 
-**P2 — Higiene de seguridad (pendiente, no urgente).**
+**P2 — Higiene de seguridad. ⚠️ AHORA URGENTE (pospuesto por Mario el 2026-06-03).**
+- La password del admin (`bXubgXKQQsxxFz6e`) quedó expuesta en el historial del chat al verificar P1 → **rotar la password de `gaby@reluvsa.com`**.
 - Borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway (ya cumplió su función; el admin vive en el volumen). Dejar `ADMIN_BOOTSTRAP_EMAIL` no hace nada sin la password.
 
-**P3 — Crear los 5 usuarios proveedor.**
-- Método recomendado: igual que el admin, por **bootstrap de env vars NO existe para proveedores todavía** — para proveedores hay que usar `scripts/crear_usuario.py` desde la **Console de Railway** (ojo: la Console rompe el formato al pegar; alternativa = agregar un bootstrap de proveedores análogo al de admin, o crear un endpoint temporal protegido). Definir antes con Mario los correos reales de cada proveedor.
-- Comando del script (si se usa la Console): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"`. Códigos: CAUPLAS, KIM, AG, VAZLO, KG.
+**P3 — Crear los 5 usuarios proveedor. ✅ BOOTSTRAP IMPLEMENTADO 2026-06-03 (falta pegar la var en Railway).**
+- Se implementó `database._bootstrap_proveedores()` análogo al del admin (commit pendiente de push). Idempotente, se ejecuta en `init_database()` al arrancar.
+- **Los proveedores entran con USERNAME, no con correo real** (decisión de Mario): el username es el código de bodega en minúsculas (`cauplas`, `kim`, `ag`, `vazlo`, `kg`). El login (`username_a_email()` en `database.py`) expande cualquier identificador sin `@` a `<user>@reluvsa.local`; los correos reales (admin Gaby) siguen funcionando igual. El frontend Login.jsx cambió de `type=email` a `type=text` para permitirlo.
+- **Para activarlos**: en Railway agregar la variable `PROVEEDOR_BOOTSTRAP` (multi-línea, una por proveedor, formato `CODIGO:password`). Ejemplo:
+  ```
+  CAUPLAS:<pass>
+  KIM:<pass>
+  AG:<pass>
+  VAZLO:<pass>
+  KG:<pass>
+  ```
+  Al redeploy, los 5 usuarios se crean solos. Definir las passwords reales con Mario/Gaby. Tras crear, se puede borrar la var (como con el admin) — pero ojo: a diferencia del admin, dejar `PROVEEDOR_BOOTSTRAP` no recrea passwords (es idempotente por email existente), así que para **rotar** una password hay que borrar el usuario y volver a bootstrappear, o usar `scripts/crear_usuario.py`.
+- Probado en local: los 5 se crean, idempotencia OK, login con `cauplas`/`CAUPLAS` + password OK, password incorrecta rechazada, asociación a proveedor correcta.
+- Alternativa CLI (sigue disponible): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"` desde la Console de Railway (rompe formato al pegar — preferir el bootstrap).
 
 **P4 — Probar facturas con datos reales.**
 - Login como un proveedor → subir XML+PDF de `archivos/facturas-ejemplos/` → ver match automático concepto→venta.

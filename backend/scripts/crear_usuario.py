@@ -6,6 +6,12 @@ Uso:
     python3 scripts/crear_usuario.py proveedor VAZLO contacto@vazlo.com "PassVazlo!"
 
 El segundo argumento para proveedor es el codigo_bodega (AG | CAUPLAS | KG | KIM | VAZLO).
+
+NOTA: en producción los proveedores se crean por bootstrap de la variable
+PROVEEDOR_BOOTSTRAP (ver database._bootstrap_proveedores). Ese flujo crea
+usuarios con username = código en minúsculas (p.ej. 'cauplas') que el login
+expande a 'cauplas@reluvsa.local'. Este script CLI sigue aceptando un email
+explícito por si se quiere un usuario con correo real.
 """
 import sys
 from pathlib import Path

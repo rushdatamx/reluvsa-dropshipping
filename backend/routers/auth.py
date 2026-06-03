@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from database import get_db
+from database import get_db, username_a_email
 from models import LoginRequest, LoginResponse, UserInfo
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -47,7 +47,7 @@ def login(data: LoginRequest):
             LEFT JOIN proveedores p ON p.id = u.proveedor_id
             WHERE u.email = ? AND u.activo = 1
             """,
-            (data.email.strip().lower(),),
+            (username_a_email(data.email),),
         )
         row = cur.fetchone()
 

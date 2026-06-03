@@ -216,6 +216,22 @@ def init_database():
             )
 
         _bootstrap_admin(cursor)
+        _bootstrap_proveedores(cursor)
+
+
+# Dominio interno para usuarios proveedor que entran con username (no email real).
+# El login normaliza "cauplas" -> "cauplas@reluvsa.local" antes de buscar.
+PROVEEDOR_LOGIN_DOMAIN = "reluvsa.local"
+
+
+def username_a_email(identificador: str) -> str:
+    """Normaliza un identificador de login: si no trae '@', le agrega el dominio
+    interno de proveedores. Así un proveedor entra con 'cauplas' (su código en
+    minúsculas) en lugar de un correo real."""
+    ident = (identificador or "").strip().lower()
+    if not ident or "@" in ident:
+        return ident
+    return f"{ident}@{PROVEEDOR_LOGIN_DOMAIN}"
 
 
 def _migrar_envios_sin_fk(cursor):
@@ -290,6 +306,72 @@ def _bootstrap_admin(cursor):
         (email, password_hash),
     )
     print(f"[bootstrap] Admin {email} creado desde variables de entorno.")
+
+
+def _bootstrap_proveedores(cursor):
+    """Crea los usuarios proveedor desde la variable PROVEEDOR_BOOTSTRAP.
+
+    Cada proveedor entra con un username simple (su código de bodega en
+    minúsculas, p.ej. 'cauplas') + password, sin necesidad de un correo real.
+    Internamente el username se guarda en la columna email como
+    'cauplas@reluvsa.local' para no tocar el schema ni el login.
+
+    Formato (una línea por proveedor, ':' como separador):
+        CODIGO:password
+    p.ej.:
+        CAUPLAS:Pass1
+        KIM:Pass2
+    También se acepta CODIGO:username:password si en el futuro se quiere un
+    username distinto del código de bodega.
+
+    Idempotente: no duplica usuarios ya existentes en redeploys. Solo crea
+    proveedores cuyo codigo_bodega ya esté sembrado en la tabla proveedores.
+    """
+    import bcrypt
+
+    raw = os.getenv("PROVEEDOR_BOOTSTRAP") or ""
+    if not raw.strip():
+        return
+
+    for linea in raw.splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#"):
+            continue
+
+        partes = [p.strip() for p in linea.split(":")]
+        if len(partes) == 2:
+            codigo, password = partes
+            username = codigo.lower()
+        elif len(partes) == 3:
+            codigo, username, password = partes
+            username = username.lower()
+        else:
+            print(f"[bootstrap] Línea PROVEEDOR_BOOTSTRAP ignorada (formato inválido): {linea}")
+            continue
+
+        codigo = codigo.upper()
+        if not codigo or not password:
+            print(f"[bootstrap] Línea PROVEEDOR_BOOTSTRAP ignorada (código o password vacío): {linea}")
+            continue
+
+        prov = cursor.execute(
+            "SELECT id, nombre FROM proveedores WHERE codigo_bodega = ?", (codigo,)
+        ).fetchone()
+        if not prov:
+            print(f"[bootstrap] No existe proveedor con codigo_bodega={codigo}; usuario no creado.")
+            continue
+
+        email = username_a_email(username)
+        existing = cursor.execute("SELECT id FROM usuarios WHERE email = ?", (email,)).fetchone()
+        if existing:
+            continue  # ya existe; no tocar (idempotente)
+
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        cursor.execute(
+            "INSERT INTO usuarios (email, password_hash, rol, proveedor_id) VALUES (?, ?, 'proveedor', ?)",
+            (email, password_hash, prov["id"]),
+        )
+        print(f"[bootstrap] Proveedor '{username}' creado para {prov['nombre']} ({codigo}).")
 
 
 if __name__ == "__main__":

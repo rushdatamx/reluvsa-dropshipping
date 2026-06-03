@@ -44,14 +44,17 @@ export default function Login() {
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-sm font-semibold text-reluvsa-black mb-2">
-              Correo
+              Usuario o correo
             </label>
             <input
-              type="email"
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-reluvsa-yellow focus:border-reluvsa-black transition-all"
-              placeholder="tu@correo.com"
+              placeholder="usuario o tu@correo.com"
               required
             />
           </div>
