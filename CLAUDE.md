@@ -208,7 +208,20 @@ Convenciones:
   - QUALITY HOSES (CAUPLAS) = **121 envíos, 94.2% a tiempo** ✅; KIMS AUTO (KIM) = **13 envíos, 100% a tiempo** ✅.
   - AG / KG / VAZLO = 0 envíos este corte (sus envíos cayeron en MATRIZ o "Sin información"; esperado).
   - El motor completo corre en prod: parseo → asignación por col K → cálculo de SLA. La métrica de SLA ya se puebla.
-- Nota: los "217 cruces envío↔venta" del Paso D no se exponen por endpoint; el desglose 121+13=134 con proveedor dropshipping confirma que el match funcionó (el resto cruzan pero caen en MATRIZ).
+- Nota: los "217 cruces envío↔venta" del Paso D no se exponen por endpoint; el desglose 121+13=134 con proveedor dropshipping confirma que el parseo y la asignación por col K funcionan. ⚠️ PERO ver P4: esos 134 con proveedor NO son los mismos que los 217 que cruzan venta (periodos disjuntos).
+
+### 🚨 P4 BLOQUEADO POR DATOS — desfase de periodos entre los 2 Excels (2026-06-03)
+- Al preparar P4 (facturas) se descubrió que **0 ventas tienen envío cruzado con proveedor**, aunque hay 2053 ventas, 1789 envíos y 134 envíos con proveedor (CAUPLAS 121 + KIM 13). El match de facturas cruzaría contra 0.
+- **Causa raíz (NO es bug de código, es desfase de datos)**: los dos Excels cubren periodos distintos.
+  - Envíos **con proveedor identificado** (col K = CAUPLAS/KIM): **TODOS de ABRIL** (11–29 abr).
+  - Envíos que **cruzan** con una venta (217): todos de **mayo** (1–8 may), y esos tienen proveedor NULL.
+  - Ventas ML: **todas de mayo** (1–13 may).
+  - En mayo, **ningún envío tiene proveedor dropshipping** (0 CAUPLAS, 0 KIM): los de mayo son MATRIZ (140), "Sin info" (189) o "Agencia de Mercado Libre" (93).
+  - → Intersección (envío con proveedor ∩ venta cargada) = **0**. Por eso `GET /api/ventas?proveedor_id=N` y el matcher de facturas dan 0.
+- Verificación: `JOIN envios e ON v.num_venta=e.num_venta` da 217, pero `... WHERE e.proveedor_id IS NOT NULL` da 0.
+- Aclaración: "Agencia de Mercado Libre" (185 envíos, col K) NO es un proveedor faltante — es recolección por agencia ML, correcto que no mapee.
+- Los 3 PDFs de `facturas-ejemplos/` son CFDIs reales con texto extraíble (pdfplumber), receptor GRUPO PEMIT ✅, traen NoIdentificacion (M2622638, 9030175-Z, 4905967) — pero **no hay XML** y el endpoint exige XML. El parser CFDI 4.0 se validó con un XML sintético y funciona (extrae UUID/RFC/conceptos).
+- **DESBLOQUEO (pedido a Gaby)**: exportar Ventas ML y Detalle de colecta cubriendo **el mismo rango de fechas** (idealmente abril completo, donde SÍ hay proveedores identificados, + sus ventas). Con periodos solapados, cruces y match de facturas funcionarán. Además, conseguir el **XML** (no solo PDF) de las facturas de ejemplo.
 - ⚠️ **P2 ahora es URGENTE**: la password del admin (`bXubgXKQQsxxFz6e`) quedó expuesta en el historial del chat de esta sesión. Rotar password de `gaby@reluvsa.com` Y borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway en la próxima sesión (Mario eligió posponerlo el 2026-06-03).
 
 ### ✅ Pasos A, B, C COMPLETADOS + Paso D validado en local (2026-06-02)
@@ -298,9 +311,12 @@ Convenciones:
 - Probado en local: los 5 se crean, idempotencia OK, login con `cauplas`/`CAUPLAS` + password OK, password incorrecta rechazada, asociación a proveedor correcta.
 - Alternativa CLI (sigue disponible): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"` desde la Console de Railway (rompe formato al pegar — preferir el bootstrap).
 
-**P4 — Probar facturas con datos reales.**
-- Login como un proveedor → subir XML+PDF de `archivos/facturas-ejemplos/` → ver match automático concepto→venta.
-- Ejemplos disponibles: `KAC1601193F6_Factura_K26533_...pdf` (KIMS AUTO), `cfdi_timbrados_I_8075_...pdf`, `pemitt (2) 1.pdf`. NOTA: el matcher cruza por `NoIdentificacion` del XML (== SKU proveedor) contra SKU de venta; fallback fuzzy por descripción. Los parsers de CFDI (parser_cfdi.py) AÚN NO se han probado con XML real (solo PDFs en archivos/; verificar si hay XML o si el proveedor sube ambos).
+**P4 — Probar facturas con datos reales. 🚨 BLOQUEADO POR DATOS (2026-06-03). Ver sección 8 para el diagnóstico completo.**
+- DOS bloqueos descubiertos al preparar P4:
+  1. **Sin XML**: los ejemplos de `facturas-ejemplos/` son solo PDFs/foto; el endpoint exige XML (el CFDI legal). El parser CFDI ya está validado con XML sintético. → **Pedir a Gaby el XML** de las facturas (todo CFDI timbrado tiene XML).
+  2. **Desfase de periodos**: envíos con proveedor = abril, ventas = mayo → 0 cruces con proveedor → el match daría 0 aunque hubiera XML. → **Pedir a Gaby exportar ambos Excels del MISMO rango de fechas** (idealmente abril, donde hay proveedores identificados).
+- Una vez con datos solapados + XML: login como proveedor → subir XML(+PDF) → el matcher cruza por `NoIdentificacion` (== SKU venta) y fallback fuzzy por descripción contra título.
+- Recordatorio del flujo de prueba: proveedor `cauplas` (QUALITY HOSES) tiene la factura `cfdi_timbrados_I_8075` (códigos M2622638); `kim` tiene `KAC...K26533` (9030175-Z); ARGENPARTS `ag` tiene `pemitt (2) 1` (4905967).
 
 ### Paso E — Módulo 2: publicaciones masivas (no iniciado)
 Diseño preliminar en este CLAUDE.md (sección 3, Reglas de Gaby). A construir:
