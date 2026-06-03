@@ -43,6 +43,14 @@ class ProveedorCreate(BaseModel):
     contacto_nombre: Optional[str] = None
 
 
+class ProveedorUsuarioUpsert(BaseModel):
+    """Crear o resetear la password del usuario de login de un proveedor.
+    Identifica al proveedor por su codigo_bodega; el username de login se
+    deriva del código en minúsculas (p.ej. CAUPLAS -> 'cauplas')."""
+    codigo_bodega: str
+    password: str
+
+
 class VentaML(BaseModel):
     num_venta: str
     sku: Optional[str]
