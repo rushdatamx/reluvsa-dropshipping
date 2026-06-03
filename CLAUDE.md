@@ -277,7 +277,13 @@ Convenciones:
 - La password del admin (`bXubgXKQQsxxFz6e`) quedó expuesta en el historial del chat al verificar P1 → **rotar la password de `gaby@reluvsa.com`**.
 - Borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway (ya cumplió su función; el admin vive en el volumen). Dejar `ADMIN_BOOTSTRAP_EMAIL` no hace nada sin la password.
 
-**P3 — Crear los 5 usuarios proveedor. ✅ BOOTSTRAP IMPLEMENTADO 2026-06-03 (falta pegar la var en Railway).**
+**P3 — Crear los 5 usuarios proveedor. ✅ COMPLETADO 2026-06-03. Los 5 entran (cauplas/kim/ag/vazlo/kg + password).**
+- ⚠️ La UI de Railway **corta líneas al pegar variables multi-línea**: la primera línea (`CAUPLAS:...`) se perdió DOS veces, y en un intento el usuario `cauplas` se creó con una password alterada. Como el bootstrap es idempotente (no recrea passwords de usuarios existentes), reeditar la variable NO lo arreglaba.
+- **Solución definitiva**: se agregó `POST /api/admin/proveedor-password` (router `routers/admin.py`, solo admin) que crea O resetea la password de un proveedor por `codigo_bodega` vía API. Con esto se arregló CAUPLAS (acción "reseteada") sin depender de pegar en Railway. Reutilizable para rotar passwords a futuro. Commit `4d6b2b1`.
+- Uso: `POST /api/admin/proveedor-password` con token admin, body `{"codigo_bodega":"CAUPLAS","password":"..."}`.
+- **Lección**: para proveedores nuevos o rotación de passwords, usar el endpoint admin, NO la variable PROVEEDOR_BOOTSTRAP (que sigue sirviendo solo para el primer alta masiva, y aún así hay que verificar que las 5 líneas hayan quedado).
+
+**P3.bis (histórico) — Bootstrap por env var implementado 2026-06-03.**
 - Se implementó `database._bootstrap_proveedores()` análogo al del admin (commit pendiente de push). Idempotente, se ejecuta en `init_database()` al arrancar.
 - **Los proveedores entran con USERNAME, no con correo real** (decisión de Mario): el username es el código de bodega en minúsculas (`cauplas`, `kim`, `ag`, `vazlo`, `kg`). El login (`username_a_email()` en `database.py`) expande cualquier identificador sin `@` a `<user>@reluvsa.local`; los correos reales (admin Gaby) siguen funcionando igual. El frontend Login.jsx cambió de `type=email` a `type=text` para permitirlo.
 - **Para activarlos**: en Railway agregar la variable `PROVEEDOR_BOOTSTRAP` (multi-línea, una por proveedor, formato `CODIGO:password`). Ejemplo:
