@@ -199,6 +199,22 @@ Convenciones:
 
 ## 8. Estado actual (último update: 2026-06-03)
 
+### 📍 CIERRE SESIÓN 2026-06-03 — leer esto primero para retomar
+**Lo que se hizo hoy:**
+- ✅ **P1 cerrado**: Mario subió los 2 Excels en prod; números verificados vía API (2053 ventas, 1789 envíos, CAUPLAS 121/94.2%, KIM 13/100%).
+- ✅ **P3 cerrado**: los 5 usuarios proveedor entran (`cauplas`/`kim`/`ag`/`vazlo`/`kg` + password). Se implementó bootstrap por env var + endpoint admin `POST /api/admin/proveedor-password` (se necesitó porque Railway corta líneas al pegar multi-línea y CAUPLAS quedó mal 2 veces).
+- 🚨 **P4 bloqueado por DATOS** (no por código): desfase de periodos (envíos con proveedor=abril, ventas=mayo → 0 cruces con proveedor) + facturas de ejemplo sin XML. Diagnóstico completo abajo.
+
+**Lo que sigue (próxima sesión):**
+- **Reunión Mario↔Gaby el 2026-06-04** (día siguiente). Mario hará demo del portal y pedirá los 3 insumos del MISMO periodo (idealmente abril): Ventas ML + Colecta + Facturas en **XML**. Guion en `~/Desktop/GUION_DEMO_GABY.md` (fuera del repo).
+- Cuando Gaby entregue esos datos → **ejecutar P4** (subir XML como proveedor, ver match concepto→venta). Sin tocar código.
+- ⚠️ **P2 (seguridad) PENDIENTE Y URGENTE**: rotar password de Gaby (`bXubgXKQQsxxFz6e`, expuesta en chat) + las 5 de proveedores (también expuestas) usando el endpoint admin; borrar `ADMIN_BOOTSTRAP_PASSWORD` y `PROVEEDOR_BOOTSTRAP` de Railway. Mario pospuso esto el 2026-06-03.
+- **Módulo 2** (publicaciones masivas): no iniciado.
+
+**Archivos temporales en el escritorio de Mario (fuera del repo, contienen secretos/PII — recordar borrar):**
+- `~/Desktop/PROVEEDOR_BOOTSTRAP.txt` (passwords de proveedor en claro).
+- `~/Desktop/GUION_DEMO_GABY.md` (guion de la demo).
+
 ### ✅ P1 CERRADO — Paso D confirmado end-to-end en producción (2026-06-03)
 - Mario subió los 2 Excels desde el portal en prod (`gaby@reluvsa.com`). Resultados del uploader:
   - Ventas ML → `{"inserted": 2053, "updated": 0, "skipped": 0}`.
