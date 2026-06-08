@@ -212,21 +212,26 @@ Convenciones:
 ### 📍 CIERRE SESIÓN 2026-06-08 — leer esto primero para retomar
 **Contexto:** Mario tuvo la junta con Gaby. Demo OK. Gaby entregó por fin los 3 reportes del **mismo periodo** en `prueba-junio/` (raíz del repo, ignorado por PII): Ventas ML (corte 4-jun) + Colecta (corte 1-jun, ambos cubren ventas de mayo 9–12) + **facturas en XML** (KIM x2, CAUPLAS x1). Marcó 6 ventas en amarillo en ambos Excels.
 
-**Lo que se hizo hoy (commit `ffe4e19`, ya en `main` → Railway + Vercel redeployean):**
-- 🔑 **Cambio de regla de cruce (Gaby): ventas↔colecta por fecha+título, NO por # de venta.** ML asigna 2 folios a la misma venta. Verificado: por num_venta cruzan 456/944 envíos; por fecha+título **875/944**. Nueva columna `num_venta_ml` + `match_cruce_confianza`, resueltas en `resolver_cruce_ventas()`. 6 JOINs cambiados. Migración idempotente para el volumen de Railway.
+**Lo que se hizo hoy — TODO DESPLEGADO Y VIVO EN PROD** (Railway verificado: `GET /`→200, `/api/proveedores`→401):
+- 🔑 **Cambio de regla de cruce (Gaby): ventas↔colecta por fecha+título, NO por # de venta.** ML asigna 2 folios a la misma venta. Verificado: por num_venta cruzan 456/944 envíos; por fecha+título **875/944**. Nueva columna `num_venta_ml` + `match_cruce_confianza`, resueltas en `resolver_cruce_ventas()`. 6 JOINs cambiados. Migración idempotente. Commit `ffe4e19`.
 - 🔧 **Matcher CAUPLAS**: paso nuevo por ID interno (`CAU2692` venta vs `2692 M2626339` factura). Antes 0 matches, ahora 12/28.
 - 🖱️ **UI**: selector de bodega en `Ventas.jsx` para reasignar envíos sin proveedor (col K = Agencia ML / Sin info).
+- 🐛 **Fix crash Railway (commit `3447912`)**: el `CREATE INDEX idx_envios_venta_ml` estaba en el SCHEMA (corre con executescript ANTES de las migraciones); en el volumen la columna aún no existía → reventaba todo el script → crash loop. Movido a `_migrar_columnas_cruce()` tras el ALTER. **Lección: probar migraciones con BD VIEJA, no solo nueva.** La migración aplicó OK en prod sin perder datos.
 - 🔒 `.gitignore`: `prueba-junio/` (PII).
 
-**P4 — probado end-to-end en LOCAL con datos reales** (no en prod aún):
+**P4 — probado end-to-end en LOCAL con datos reales** (FALTA validar en prod):
 - KIM: 2/2 facturas cruzan concepto→venta por código exacto ✅.
-- CAUPLAS: 12/28 por id_interno cuando los envíos están asignados. El cuello de botella NO es el matcher sino la **asignación de proveedor en colecta** (las ventas CAUPLAS de prueba-junio salieron como "Agencia de Mercado Libre" → requieren override de Gaby).
+- CAUPLAS: 12/28 por id_interno cuando los envíos están asignados. El cuello de botella NO es el matcher sino la **asignación de proveedor en colecta** (las ventas CAUPLAS de prueba-junio salieron como "Agencia de Mercado Libre" → requieren override de Gaby con el botón nuevo).
 
-**Lo que sigue (próxima sesión):**
-- **Validar P4 en PROD**: subir los 2 Excels de `prueba-junio/` + los 3 XML como proveedor en el portal desplegado, y confirmar cruces + matches end-to-end (incluye probar el botón de reasignar bodega con las ventas CAUPLAS).
-- 🚨 **P2 (seguridad) SIGUE PENDIENTE Y URGENTE** (sin tocar desde 06-03): rotar password de Gaby + las 5 de proveedores; borrar `ADMIN_BOOTSTRAP_PASSWORD` y `PROVEEDOR_BOOTSTRAP` de Railway. Usar `POST /api/admin/proveedor-password`.
+**Cargas repetidas (Gaby subiendo a diario):** ambos parsers hacen **upsert por clave** (ventas=`num_venta`, colecta=`num_envio`): fila nueva→INSERT, existente→UPDATE. Respeta `lugar_override` al re-subir. Nada se borra (BD solo crece). Apto para subidas frecuentes. Pendiente menor: prueba E2E de doble carga con solape.
+
+**Lo que sigue (próxima sesión — arrancar aquí):**
+- ▶️ **VALIDAR P4 EN PROD (sesión dedicada, lo más importante)**: subir los 2 Excels de `prueba-junio/` + los 3 XML como proveedor en el portal real; confirmar cruces + matches end-to-end (incluye probar el botón de reasignar bodega con las 2 ventas CAUPLAS). No requiere tocar código.
 - **Pedir XML de Vazlo** a Gaby (2 de las 6 ventas amarillas son Vazlo y no llegó su XML).
 - **Módulo 2** (publicaciones masivas): no iniciado.
+- Menores sin probar con datos reales: flujo de incidencias E2E; la métrica "frecuencia actualización de stock" sale vacía hasta que exista Módulo 2.
+
+**P2 (seguridad): ✅ CERRADO.** Mario confirmó el 2026-06-08 que ya rotó las passwords y limpió las vars de bootstrap. Ya NO es pendiente.
 
 ---
 
@@ -333,9 +338,7 @@ Convenciones:
 
 **P1 — Confirmar Paso D end-to-end en el portal. ✅ CERRADO 2026-06-03.** Ver sección 8: números confirmados en prod (2053 / 1789 / CAUPLAS 121 a 94.2% / KIM 13 a 100%).
 
-**P2 — Higiene de seguridad. ⚠️ AHORA URGENTE (pospuesto por Mario el 2026-06-03).**
-- La password del admin (`bXubgXKQQsxxFz6e`) quedó expuesta en el historial del chat al verificar P1 → **rotar la password de `gaby@reluvsa.com`**.
-- Borrar `ADMIN_BOOTSTRAP_PASSWORD` de Railway (ya cumplió su función; el admin vive en el volumen). Dejar `ADMIN_BOOTSTRAP_EMAIL` no hace nada sin la password.
+**P2 — Higiene de seguridad. ✅ CERRADO 2026-06-08.** Mario rotó la password de `gaby@reluvsa.com` y las 5 de proveedores, y limpió las vars de bootstrap (`ADMIN_BOOTSTRAP_PASSWORD` / `PROVEEDOR_BOOTSTRAP`) de Railway. (Las passwords que aparecen más abajo en bloques históricos ya no son válidas.)
 
 **P3 — Crear los 5 usuarios proveedor. ✅ COMPLETADO 2026-06-03. Los 5 entran (cauplas/kim/ag/vazlo/kg + password).**
 - ⚠️ La UI de Railway **corta líneas al pegar variables multi-línea**: la primera línea (`CAUPLAS:...`) se perdió DOS veces, y en un intento el usuario `cauplas` se creó con una password alterada. Como el bootstrap es idempotente (no recrea passwords de usuarios existentes), reeditar la variable NO lo arreglaba.
@@ -358,12 +361,11 @@ Convenciones:
 - Probado en local: los 5 se crean, idempotencia OK, login con `cauplas`/`CAUPLAS` + password OK, password incorrecta rechazada, asociación a proveedor correcta.
 - Alternativa CLI (sigue disponible): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"` desde la Console de Railway (rompe formato al pegar — preferir el bootstrap).
 
-**P4 — Probar facturas con datos reales. 🚨 BLOQUEADO POR DATOS (2026-06-03). Ver sección 8 para el diagnóstico completo.**
-- DOS bloqueos descubiertos al preparar P4:
-  1. **Sin XML**: los ejemplos de `facturas-ejemplos/` son solo PDFs/foto; el endpoint exige XML (el CFDI legal). El parser CFDI ya está validado con XML sintético. → **Pedir a Gaby el XML** de las facturas (todo CFDI timbrado tiene XML).
-  2. **Desfase de periodos**: envíos con proveedor = abril, ventas = mayo → 0 cruces con proveedor → el match daría 0 aunque hubiera XML. → **Pedir a Gaby exportar ambos Excels del MISMO rango de fechas** (idealmente abril, donde hay proveedores identificados).
-- Una vez con datos solapados + XML: login como proveedor → subir XML(+PDF) → el matcher cruza por `NoIdentificacion` (== SKU venta) y fallback fuzzy por descripción contra título.
-- Recordatorio del flujo de prueba: proveedor `cauplas` (QUALITY HOSES) tiene la factura `cfdi_timbrados_I_8075` (códigos M2622638); `kim` tiene `KAC...K26533` (9030175-Z); ARGENPARTS `ag` tiene `pemitt (2) 1` (4905967).
+**P4 — Probar facturas con datos reales. ✅ DESBLOQUEADO y probado en LOCAL (2026-06-08). FALTA validar en PROD.**
+- Los 2 bloqueos del 06-03 (sin XML + desfase de periodos) se resolvieron: Gaby entregó en `prueba-junio/` los 3 reportes del mismo periodo + facturas en XML. Además se descubrió que el cruce ni siquiera era por num_venta sino por fecha+título (ver sección 3 y [[project_cruce_fecha_titulo]]).
+- **Probado en local con prueba-junio**: KIM 2/2 por código exacto; CAUPLAS por ID interno (12/28 con envíos asignados). El límite es la asignación de proveedor en colecta, no el matcher.
+- **Pendiente: ejecutar P4 en PROD** — login como proveedor → subir XML(+PDF) en el portal real → verificar match. Para CAUPLAS hay que reasignar antes la bodega de sus 2 ventas (salen como "Agencia ML") con el botón nuevo en Ventas.jsx.
+- Flujo de prueba en prueba-junio: `cauplas` tiene `cfdi_timbrados_I_8075` (28 conceptos, códigos `<id> M26263xx`); `kim` tiene `K26802` (23530559-Z) y `K26804` (23542930-Z). **Falta el XML de Vazlo** (2 ventas amarillas son Vazlo) → pedírselo a Gaby.
 
 ### Paso E — Módulo 2: publicaciones masivas (no iniciado)
 Diseño preliminar en este CLAUDE.md (sección 3, Reglas de Gaby). A construir:
