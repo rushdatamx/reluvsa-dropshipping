@@ -49,12 +49,18 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 
 ### Ventas ML
 - La columna relevante para identificar el producto es **T = SKU**.
-- El cruce con el detalle de colecta se hace por **`# de venta`**, no por SKU.
+- ⚠️ **El cruce con el detalle de colecta NO es por `# de venta`** (regla corregida por Gaby el 2026-06-08). Mercado Libre asigna a veces **2 folios distintos a la misma venta** (uno en cada reporte), así que el número no cruza fiable. **El cruce es por fecha + título**:
+  - Ventas ML: fecha = col **B**, título = col **X**.
+  - Colecta: fecha = col **A**, título = col **E**.
+  - Implementado: `envios_colecta.num_venta_ml` (el num_venta canónico de ML) se resuelve **una vez** en `services/parser_colecta.py::resolver_cruce_ventas` (directo por num_venta → fallback fecha ±5 min + título fuzzy ≥85). Todos los JOIN venta↔colecta usan `e.num_venta_ml = v.num_venta`. Ver memoria [[project_cruce_fecha_titulo]].
 
 ### Facturas
 - Cada proveedor sube **XML + PDF** desde su cuenta.
-- El match concepto-venta intenta primero por **`NoIdentificacion`** del XML (== SKU del proveedor) contra SKU de la venta.
-- Fallback: fuzzy match por descripción contra título de la venta (umbral 0.6).
+- El match concepto-venta (`services/matcher.py`) tiene **3 pasos en orden**:
+  1. **Código exacto**: `NoIdentificacion` del XML == SKU de la venta (o substring). Ej. KIM: `23530559-Z` == `23530559-Z`.
+  2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
+  3. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
+- ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col K = Agencia ML / Sin info) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
 
 ### PENDIENTES ACDELCO y LISTA PRECIOS KG
@@ -178,8 +184,12 @@ usuarios          (id, email, password_hash, rol[admin|proveedor], proveedor_id)
 ventas_ml         (num_venta PK, sku, fecha_venta, estado, titulo, total,
                    comprador, comprador_estado, forma_entrega,
                    factura_adjunta_ml, devolucion_unidades, reclamos)
-envios_colecta    (num_envio PK, num_venta FK, lugar_indicado, lugar_real,
+envios_colecta    (num_envio PK, num_venta, num_venta_ml, match_cruce_confianza,
+                   fecha_venta, titulo, lugar_indicado, lugar_real,
                    lugar_override, proveedor_id, cumplio_sla, excluido_analisis)
+                   -- num_venta_ml = cruce canónico a ventas_ml por fecha+título
+                   --   (NO por num_venta; ML usa 2 folios). Resuelto en el parser.
+                   -- match_cruce_confianza: 1.0 directo, <1 fuzzy, 0.8 ambiguo.
 facturas          (id, proveedor_id, uuid_cfdi, serie, folio,
                    rfc_emisor, rfc_receptor, fecha, total, moneda, pdf_path, xml_path)
 factura_conceptos (id, factura_id, codigo_prov, descripcion, cantidad, importe,
@@ -197,9 +207,30 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-03)
+## 8. Estado actual (último update: 2026-06-08)
 
-### 📍 CIERRE SESIÓN 2026-06-03 — leer esto primero para retomar
+### 📍 CIERRE SESIÓN 2026-06-08 — leer esto primero para retomar
+**Contexto:** Mario tuvo la junta con Gaby. Demo OK. Gaby entregó por fin los 3 reportes del **mismo periodo** en `prueba-junio/` (raíz del repo, ignorado por PII): Ventas ML (corte 4-jun) + Colecta (corte 1-jun, ambos cubren ventas de mayo 9–12) + **facturas en XML** (KIM x2, CAUPLAS x1). Marcó 6 ventas en amarillo en ambos Excels.
+
+**Lo que se hizo hoy (commit `ffe4e19`, ya en `main` → Railway + Vercel redeployean):**
+- 🔑 **Cambio de regla de cruce (Gaby): ventas↔colecta por fecha+título, NO por # de venta.** ML asigna 2 folios a la misma venta. Verificado: por num_venta cruzan 456/944 envíos; por fecha+título **875/944**. Nueva columna `num_venta_ml` + `match_cruce_confianza`, resueltas en `resolver_cruce_ventas()`. 6 JOINs cambiados. Migración idempotente para el volumen de Railway.
+- 🔧 **Matcher CAUPLAS**: paso nuevo por ID interno (`CAU2692` venta vs `2692 M2626339` factura). Antes 0 matches, ahora 12/28.
+- 🖱️ **UI**: selector de bodega en `Ventas.jsx` para reasignar envíos sin proveedor (col K = Agencia ML / Sin info).
+- 🔒 `.gitignore`: `prueba-junio/` (PII).
+
+**P4 — probado end-to-end en LOCAL con datos reales** (no en prod aún):
+- KIM: 2/2 facturas cruzan concepto→venta por código exacto ✅.
+- CAUPLAS: 12/28 por id_interno cuando los envíos están asignados. El cuello de botella NO es el matcher sino la **asignación de proveedor en colecta** (las ventas CAUPLAS de prueba-junio salieron como "Agencia de Mercado Libre" → requieren override de Gaby).
+
+**Lo que sigue (próxima sesión):**
+- **Validar P4 en PROD**: subir los 2 Excels de `prueba-junio/` + los 3 XML como proveedor en el portal desplegado, y confirmar cruces + matches end-to-end (incluye probar el botón de reasignar bodega con las ventas CAUPLAS).
+- 🚨 **P2 (seguridad) SIGUE PENDIENTE Y URGENTE** (sin tocar desde 06-03): rotar password de Gaby + las 5 de proveedores; borrar `ADMIN_BOOTSTRAP_PASSWORD` y `PROVEEDOR_BOOTSTRAP` de Railway. Usar `POST /api/admin/proveedor-password`.
+- **Pedir XML de Vazlo** a Gaby (2 de las 6 ventas amarillas son Vazlo y no llegó su XML).
+- **Módulo 2** (publicaciones masivas): no iniciado.
+
+---
+
+### 📍 CIERRE SESIÓN 2026-06-03 — (histórico, superado por el de 2026-06-08)
 **Lo que se hizo hoy:**
 - ✅ **P1 cerrado**: Mario subió los 2 Excels en prod; números verificados vía API (2053 ventas, 1789 envíos, CAUPLAS 121/94.2%, KIM 13/100%).
 - ✅ **P3 cerrado**: los 5 usuarios proveedor entran (`cauplas`/`kim`/`ag`/`vazlo`/`kg` + password). Se implementó bootstrap por env var + endpoint admin `POST /api/admin/proveedor-password` (se necesitó porque Railway corta líneas al pegar multi-línea y CAUPLAS quedó mal 2 veces).
