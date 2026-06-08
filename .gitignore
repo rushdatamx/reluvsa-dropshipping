@@ -30,6 +30,8 @@ data/*.db-wal
 .vscode/
 .idea/
 
-# Datos reales del cliente (mantener locales)
+# Datos reales del cliente (mantener locales) — contienen PII: RFCs, nombres de
+# compradores, direcciones, facturas timbradas. NUNCA al repo.
 archivos/
+prueba-junio/
 

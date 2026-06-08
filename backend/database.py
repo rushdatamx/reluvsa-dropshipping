@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS envios_colecta (
     -- existir antes de que su venta esté cargada (~88% de los casos en datos
     -- reales). El cruce se resuelve por JOIN cuando ambas filas existan.
     num_venta TEXT,
+    -- num_venta_ml: el # de venta del reporte de Ventas ML, resuelto al parsear.
+    -- ML asigna a veces 2 folios distintos a la misma venta (uno en el reporte de
+    -- ventas, otro en el de colecta), así que num_venta NO cruza de forma fiable.
+    -- Regla de Gaby: cruzar por fecha + título. Resolvemos ese cruce una sola vez
+    -- aquí y guardamos el num_venta canónico de ML para que los JOIN sean por
+    -- igualdad de columna indexada (rápidos), no fuzzy en cada query.
+    num_venta_ml TEXT,
+    -- Confianza del cruce envío->venta: 1.0 = num_venta directo, <1 = fecha+título
+    -- fuzzy, NULL = sin cruce. Sirve para que Gaby revise los cruces dudosos.
+    match_cruce_confianza REAL,
     fecha_venta TIMESTAMP,
     titulo TEXT,
     tiempo_max_envio TEXT,
@@ -182,6 +192,7 @@ CREATE TABLE IF NOT EXISTS plantillas_ml (
 CREATE INDEX IF NOT EXISTS idx_ventas_sku ON ventas_ml(sku);
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_ml(fecha_venta);
 CREATE INDEX IF NOT EXISTS idx_envios_venta ON envios_colecta(num_venta);
+CREATE INDEX IF NOT EXISTS idx_envios_venta_ml ON envios_colecta(num_venta_ml);
 CREATE INDEX IF NOT EXISTS idx_envios_proveedor ON envios_colecta(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_facturas_proveedor ON facturas(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_conceptos_factura ON factura_conceptos(factura_id);
@@ -207,6 +218,7 @@ def init_database():
         cursor.executescript(SCHEMA)
 
         _migrar_envios_sin_fk(cursor)
+        _migrar_columnas_cruce(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -282,6 +294,22 @@ def _migrar_envios_sin_fk(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_proveedor ON envios_colecta(proveedor_id)")
     cursor.execute("PRAGMA foreign_keys=ON")
     print("[migracion] envios_colecta recreada sin FK a ventas_ml.")
+
+
+def _migrar_columnas_cruce(cursor):
+    """Migración idempotente: agrega las columnas num_venta_ml y
+    match_cruce_confianza a envios_colecta si la BD existente (el volumen de
+    Railway) aún no las tiene. CREATE TABLE IF NOT EXISTS no altera una tabla ya
+    creada, por eso hace falta ALTER TABLE ADD COLUMN explícito.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(envios_colecta)").fetchall()}
+    if "num_venta_ml" not in cols:
+        cursor.execute("ALTER TABLE envios_colecta ADD COLUMN num_venta_ml TEXT")
+        print("[migracion] envios_colecta.num_venta_ml agregada.")
+    if "match_cruce_confianza" not in cols:
+        cursor.execute("ALTER TABLE envios_colecta ADD COLUMN match_cruce_confianza REAL")
+        print("[migracion] envios_colecta.match_cruce_confianza agregada.")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_venta_ml ON envios_colecta(num_venta_ml)")
 
 
 def _bootstrap_admin(cursor):

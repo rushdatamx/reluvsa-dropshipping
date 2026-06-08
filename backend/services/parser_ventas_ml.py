@@ -213,9 +213,15 @@ def parse_ventas_ml(path: Path) -> dict:
                 )
                 inserted += 1
 
+        # Re-resolver el cruce envío -> venta: si la colecta se cargó antes que
+        # las ventas, ahora ya hay ventas con qué cruzar (regla fecha + título).
+        from services.parser_colecta import resolver_cruce_ventas
+        cruce = resolver_cruce_ventas(conn)
+
     return {
         "ok": True,
         "inserted": inserted,
         "updated": updated,
         "skipped": skipped,
+        **cruce,
     }

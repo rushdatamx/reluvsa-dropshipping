@@ -52,7 +52,7 @@ def listar(
                e.proveedor_id, p.nombre as proveedor_nombre,
                (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count
         FROM ventas_ml v
-        LEFT JOIN envios_colecta e ON e.num_venta = v.num_venta
+        LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
         LEFT JOIN proveedores p ON p.id = e.proveedor_id
         {join_factura}
         WHERE {' AND '.join(where)}
@@ -66,7 +66,7 @@ def listar(
         count_sql = f"""
             SELECT COUNT(*) as c
             FROM ventas_ml v
-            LEFT JOIN envios_colecta e ON e.num_venta = v.num_venta
+            LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
             {join_factura}
             WHERE {' AND '.join(where)}
         """
@@ -87,7 +87,7 @@ def detalle(num_venta: str, user: UserInfo = Depends(get_current_user)):
             "SELECT * FROM ventas_ml WHERE num_venta = ?", (num_venta,)
         ).fetchone()
         envio = conn.execute(
-            "SELECT * FROM envios_colecta WHERE num_venta = ?", (num_venta,)
+            "SELECT * FROM envios_colecta WHERE num_venta_ml = ?", (num_venta,)
         ).fetchone()
         conceptos = conn.execute(
             """SELECT fc.*, f.uuid_cfdi, f.folio, f.fecha_factura

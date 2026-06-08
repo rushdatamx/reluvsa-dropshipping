@@ -47,7 +47,7 @@ def listar(
 def crear(data: IncidenciaCreate, user: UserInfo = Depends(get_current_user)):
     with get_db() as conn:
         envio = conn.execute(
-            "SELECT proveedor_id FROM envios_colecta WHERE num_venta = ?", (data.num_venta,)
+            "SELECT proveedor_id FROM envios_colecta WHERE num_venta_ml = ?", (data.num_venta,)
         ).fetchone()
         proveedor_id = envio["proveedor_id"] if envio else None
 

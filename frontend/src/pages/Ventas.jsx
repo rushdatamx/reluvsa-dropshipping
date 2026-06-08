@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Search, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { listarVentas } from '../services/api';
+import { listarVentas, listarProveedores, reasignarEnvio } from '../services/api';
 
 export default function Ventas() {
   const [data, setData] = useState({ items: [], total: 0, page: 1 });
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
   const [sinFactura, setSinFactura] = useState(false);
+  const [proveedores, setProveedores] = useState([]);
+  const [reasignando, setReasignando] = useState(null); // num_envio en curso
 
   const cargar = async () => {
     setLoading(true);
@@ -20,6 +22,24 @@ export default function Ventas() {
   };
 
   useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    listarProveedores().then(({ data }) => setProveedores(data)).catch(() => {});
+  }, []);
+
+  // Reasigna la bodega de un envío (caso col K = "Agencia de Mercado Libre" o
+  // "Sin información del lugar"). El backend resuelve el proveedor desde el código.
+  const onReasignar = async (numEnvio, codigoBodega) => {
+    if (!numEnvio || !codigoBodega) return;
+    setReasignando(numEnvio);
+    try {
+      await reasignarEnvio(numEnvio, { lugar_override: codigoBodega });
+      await cargar();
+    } catch (e) {
+      alert('No se pudo reasignar la bodega: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setReasignando(null);
+    }
+  };
 
   return (
     <div>
@@ -68,7 +88,7 @@ export default function Ventas() {
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Venta</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
-                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Proveedor</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Proveedor / Bodega</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SLA</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Factura</th>
               </tr>
@@ -85,10 +105,34 @@ export default function Ventas() {
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
                   <td className="px-4 py-3">
                     {v.proveedor_nombre ? (
-                      <span className="px-2 py-0.5 bg-reluvsa-black text-reluvsa-yellow text-xs rounded font-semibold">
-                        {v.proveedor_nombre}
-                      </span>
-                    ) : <span className="text-notion-text-secondary text-xs">Sin asignar</span>}
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-reluvsa-black text-reluvsa-yellow text-xs rounded font-semibold">
+                          {v.proveedor_nombre}
+                        </span>
+                        {v.lugar_override && (
+                          <span className="text-[10px] text-notion-text-secondary" title="Bodega reasignada manualmente">✎ manual</span>
+                        )}
+                      </div>
+                    ) : v.num_envio ? (
+                      // Hay envío de colecta pero sin proveedor (col K = Agencia ML /
+                      // Sin información). Gaby reasigna la bodega aquí.
+                      <select
+                        value=""
+                        disabled={reasignando === v.num_envio}
+                        onChange={(e) => onReasignar(v.num_envio, e.target.value)}
+                        className="text-xs border border-warning/50 bg-warning/5 rounded px-2 py-1 focus:outline-none focus:border-reluvsa-black"
+                        title={v.lugar_real ? `Lugar real: ${v.lugar_real}` : 'Sin información del lugar'}
+                      >
+                        <option value="">
+                          {reasignando === v.num_envio ? 'Asignando…' : '⚠ Asignar bodega…'}
+                        </option>
+                        {proveedores.map((p) => (
+                          <option key={p.id} value={p.codigo_bodega}>{p.codigo_bodega} — {p.nombre}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-notion-text-secondary text-xs">Sin envío</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {v.cumplio_sla === 1 ? (
