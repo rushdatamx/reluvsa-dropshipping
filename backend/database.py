@@ -192,7 +192,10 @@ CREATE TABLE IF NOT EXISTS plantillas_ml (
 CREATE INDEX IF NOT EXISTS idx_ventas_sku ON ventas_ml(sku);
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_ml(fecha_venta);
 CREATE INDEX IF NOT EXISTS idx_envios_venta ON envios_colecta(num_venta);
-CREATE INDEX IF NOT EXISTS idx_envios_venta_ml ON envios_colecta(num_venta_ml);
+-- idx_envios_venta_ml NO va aquí: en una BD existente la columna num_venta_ml aún
+-- no existe cuando corre este SCHEMA (CREATE TABLE IF NOT EXISTS no la agrega), y el
+-- índice reventaría todo el executescript antes de la migración. Lo crea
+-- _migrar_columnas_cruce() después del ALTER TABLE ADD COLUMN.
 CREATE INDEX IF NOT EXISTS idx_envios_proveedor ON envios_colecta(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_facturas_proveedor ON facturas(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_conceptos_factura ON factura_conceptos(factura_id);
