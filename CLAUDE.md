@@ -28,9 +28,9 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 |---|---|---|---|
 | `QHO180116NW0` | QUALITY HOSES | `CAUPLAS` | ID interno + `M2622638` |
 | `KAC1601193F6` | KIMS AUTO CORPORATION | `KIM` | `9030175-Z`, `39300-4A800-Z` |
-| `ARG041025AU2` | ARGENPARTS | `AG` | numérico `4905967` |
-| `VIM990605M8A` | VAZLO COMERCIAL | `VAZLO` | `10-293`, `10-750` |
-| pendiente | KEEPONGREEN | `KG` | `KGP-XXXX` |
+| `ARG041025AU2` | ARGENPARTS | `AG` | `P2172292` (factura) → `AG P2172292-2` (ML) |
+| `VIM990605M8A` | VAZLO COMERCIAL | `VAZLO` | `30-578` (factura) → `VAZLO-30-578&30-578` (ML) |
+| `STR910211DT2` | KEEPONGREEN (factura como SUMINISTRO TRANSAMERICANO DE REFACCIONES) | `KG` | `KR-1095WP` |
 
 ⚠️ `MATRIZ` aparece en stock pero es bodega propia de RELUVSA, **NO** es proveedor dropshipping.
 
@@ -225,7 +225,19 @@ Convenciones:
 **Bug cosmético menor (pendiente, no bloqueante):** `GET /api/facturas/{id}` (detalle) devuelve uuid/serie/folio/total/rfc_receptor como `null`, aunque el listado `GET /api/facturas` sí los trae correctos y los datos están bien guardados (UUID, total 4114.26, receptor GPE230915JWA). Arreglable en sesión de código.
 
 **Lo que sigue (próxima sesión — arrancar aquí):**
-- **Pedir XML de Vazlo** a Gaby (2 de las 6 ventas amarillas son Vazlo y no llegó su XML).
+- ✅ **LOS 5 PROVEEDORES VALIDADOS E2E (2026-06-09)**. El matcher genérico cruza los 5 esquemas de código distintos sin código a la medida:
+  | Proveedor | Factura | ML publica | Cruza por | Conf |
+  |---|---|---|---|---|
+  | KIM | `23530559-Z` | `23530559-Z` | exacto | 1.0 |
+  | CAUPLAS | `2692 M2626339` | `CAU2692` | id_interno | 0.9 |
+  | Vazlo | `30-578` | `VAZLO-30-578&30-578` | exacto substring | 1.0 |
+  | AG | `P2172292` | `AG P2172292-2` | exacto substring | 1.0 |
+  | KG | `KR-1095WP` | `KR-1095WP` | exacto | 1.0 |
+  - **Vazlo**: Mario entregó el XML (`VIM990605M8A_FMX0069127`). Validado en local con `backend/scripts/test_vazlo_e2e.py`. Ver [[project_vazlo_cruce_validado]].
+  - **AG y KG**: Gaby entregó facturas + reportes (ventas+colecta) en `prueba-junio/AG/` y `prueba-junio/KG/` (cada carpeta trae su propio par; el archivo "2" es ventas en AG y colecta en KG). Validados con `backend/scripts/test_ag_kg_e2e.py`. AG cruzó aunque solo hay PDF (concepto armado del PDF) → **falta su XML para subirla por el portal**. Ver [[project_ag_kg_rfc_y_codigos]].
+  - **Patrón confirmado en los 5**: el envío sale de ML con `proveedor_id=None` → SIN MATCH hasta reasignar la bodega (botón Ventas.jsx). El cuello de botella es la asignación de proveedor en colecta, NO el matcher.
+  - 🎯 **RFC real de KeepOnGreen descubierto: `STR910211DT2`** (factura como "Suministro Transamericano de Refacciones"). Estaba `"PENDIENTE"`. Corregido en `database.py`: seed actualizado + migración idempotente `_migrar_rfc_keepongreen()`. **PENDIENTE: deployar (push → Railway) para que prod tome el RFC nuevo.**
+- **Entrega con BD en blanco** (decidido 2026-06-09): la BD de prod actual (prueba-junio + 105 overrides CAUPLAS) es solo validación interna. Entregar a Gaby con la BD VACÍA (vaciar `ventas_ml`, `envios_colecta`, `facturas`, `factura_conceptos`, `incidencias`; conservar `proveedores` + `usuarios`) como ÚLTIMO paso antes de entregar. Esto cierra como **obsoleta** la nota "avisar a Gaby de los 105 overrides" (se borran, nunca llegan a Gaby). Ver [[project_entrega_bd_en_blanco]].
 - (Opcional) Arreglar el bug cosmético del `GET /api/facturas/{id}` detalle.
 - **Módulo 2** (publicaciones masivas): no iniciado.
 - Menores sin probar con datos reales: flujo de incidencias E2E.

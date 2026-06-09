@@ -210,7 +210,9 @@ SEED_PROVEEDORES = [
     ("KIMS AUTO CORPORATION", "KAC1601193F6", "KIM", None, None),
     ("ARGENPARTS", "ARG041025AU2", "AG", None, None),
     ("VAZLO COMERCIAL", "VIM990605M8A", "VAZLO", None, None),
-    ("KEEPONGREEN", "PENDIENTE", "KG", None, None),
+    # KeepOnGreen factura a través de SUMINISTRO TRANSAMERICANO DE REFACCIONES
+    # (RFC confirmado con su CFDI real el 2026-06-09; antes estaba "PENDIENTE").
+    ("KEEPONGREEN", "STR910211DT2", "KG", None, None),
 ]
 
 
@@ -222,6 +224,7 @@ def init_database():
 
         _migrar_envios_sin_fk(cursor)
         _migrar_columnas_cruce(cursor)
+        _migrar_rfc_keepongreen(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -313,6 +316,20 @@ def _migrar_columnas_cruce(cursor):
         cursor.execute("ALTER TABLE envios_colecta ADD COLUMN match_cruce_confianza REAL")
         print("[migracion] envios_colecta.match_cruce_confianza agregada.")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_venta_ml ON envios_colecta(num_venta_ml)")
+
+
+def _migrar_rfc_keepongreen(cursor):
+    """Migración idempotente: actualiza el RFC de KeepOnGreen de 'PENDIENTE' al
+    real (STR910211DT2, confirmado con su CFDI el 2026-06-09) en BDs ya sembradas
+    —el seed de proveedores no re-corre si la tabla ya tiene filas, así que el
+    cambio en SEED_PROVEEDORES no alcanza al volumen de Railway por sí solo.
+    """
+    cursor.execute(
+        "UPDATE proveedores SET rfc = ? WHERE codigo_bodega = 'KG' AND rfc = 'PENDIENTE'",
+        ("STR910211DT2",),
+    )
+    if cursor.rowcount:
+        print("[migracion] RFC de KeepOnGreen actualizado a STR910211DT2.")
 
 
 def _bootstrap_admin(cursor):
