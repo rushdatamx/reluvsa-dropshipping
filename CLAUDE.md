@@ -207,9 +207,34 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-08)
+## 8. Estado actual (último update: 2026-06-08, sesión P4)
 
-### 📍 CIERRE SESIÓN 2026-06-08 — leer esto primero para retomar
+### 📍 CIERRE SESIÓN 2026-06-08 (P4 VALIDADO EN PROD) — leer esto primero para retomar
+**Contexto:** Sesión dedicada a validar P4 en prod. Mario subió por el portal los 2 Excels de `prueba-junio/` (mismo periodo). Se subieron los 3 XML como proveedor contra el portal REAL vía API conducida por Claude. **P4 quedó validado end-to-end en producción** (antes solo estaba probado en local).
+
+**Resultados (verificados en prod):**
+- Envíos: 1789 → **2265** (entró la colecta de prueba-junio). KIM: 13 → **52 envíos**, 38 ventas cruzadas.
+- **KIM ✅**: K26802 (`23530559-Z`) y K26804 (`23542930-Z`) → 2/2 conceptos cruzan a su venta por `codigo_exact` conf 1.0.
+- **CAUPLAS ✅**: I_8075 → **12/28** conceptos por `codigo_id_interno` conf 0.9 (ej. `2692 M2626339` → venta `CAU2692`). Exactamente lo predicho.
+- **Reasigné 105 envíos CAUPLAS por API** (`PATCH /api/envios/{num_envio}/reasignar` body `{"lugar_override":"CAUPLAS"}`) — eran ventas SKU `CAU*` que salían como "Agencia de Mercado Libre" con prov=None. Esto es lo que hace el botón nuevo de Ventas.jsx. Pasaron de 0 → 105 ventas CAUPLAS cruzadas. ⚠️ **Estos overrides quedaron persistidos en prod — avisar a Gaby.**
+- **Los 16 conceptos CAUPLAS sin match NO son bug**: son piezas MATIZ (`5487, 5502, 5543...`) facturadas que no tienen venta cruzable (no existen en el reporte ML o la venta no trae envío). Se reflejaron como **16 errores de facturación** en métricas de CAUPLAS. Justo la señal de valor para Gaby.
+- **Las 4 métricas se poblaron en prod**: KIM facturación 2.8 días / SLA 100% / 0 errores; CAUPLAS facturación 7.8 días / SLA 96% / 16 errores. Facturas totales = 3.
+
+**Gotcha API (anotar):** `POST /api/auth/login` devuelve el JWT en el campo **`token`**, NO `access_token`.
+
+**Bug cosmético menor (pendiente, no bloqueante):** `GET /api/facturas/{id}` (detalle) devuelve uuid/serie/folio/total/rfc_receptor como `null`, aunque el listado `GET /api/facturas` sí los trae correctos y los datos están bien guardados (UUID, total 4114.26, receptor GPE230915JWA). Arreglable en sesión de código.
+
+**Lo que sigue (próxima sesión — arrancar aquí):**
+- **Pedir XML de Vazlo** a Gaby (2 de las 6 ventas amarillas son Vazlo y no llegó su XML).
+- (Opcional) Arreglar el bug cosmético del `GET /api/facturas/{id}` detalle.
+- **Módulo 2** (publicaciones masivas): no iniciado.
+- Menores sin probar con datos reales: flujo de incidencias E2E.
+
+Ver memoria [[project_estado_sesion_2026-06-08-p4]].
+
+---
+
+### 📍 CIERRE SESIÓN 2026-06-08 (primera, despliegue) — histórico
 **Contexto:** Mario tuvo la junta con Gaby. Demo OK. Gaby entregó por fin los 3 reportes del **mismo periodo** en `prueba-junio/` (raíz del repo, ignorado por PII): Ventas ML (corte 4-jun) + Colecta (corte 1-jun, ambos cubren ventas de mayo 9–12) + **facturas en XML** (KIM x2, CAUPLAS x1). Marcó 6 ventas en amarillo en ambos Excels.
 
 **Lo que se hizo hoy — TODO DESPLEGADO Y VIVO EN PROD** (Railway verificado: `GET /`→200, `/api/proveedores`→401):
@@ -361,11 +386,10 @@ Convenciones:
 - Probado en local: los 5 se crean, idempotencia OK, login con `cauplas`/`CAUPLAS` + password OK, password incorrecta rechazada, asociación a proveedor correcta.
 - Alternativa CLI (sigue disponible): `python3 scripts/crear_usuario.py proveedor <CODIGO_BODEGA> <email> "<password>"` desde la Console de Railway (rompe formato al pegar — preferir el bootstrap).
 
-**P4 — Probar facturas con datos reales. ✅ DESBLOQUEADO y probado en LOCAL (2026-06-08). FALTA validar en PROD.**
+**P4 — Probar facturas con datos reales. ✅ VALIDADO EN PROD (2026-06-08, segunda sesión).**
 - Los 2 bloqueos del 06-03 (sin XML + desfase de periodos) se resolvieron: Gaby entregó en `prueba-junio/` los 3 reportes del mismo periodo + facturas en XML. Además se descubrió que el cruce ni siquiera era por num_venta sino por fecha+título (ver sección 3 y [[project_cruce_fecha_titulo]]).
-- **Probado en local con prueba-junio**: KIM 2/2 por código exacto; CAUPLAS por ID interno (12/28 con envíos asignados). El límite es la asignación de proveedor en colecta, no el matcher.
-- **Pendiente: ejecutar P4 en PROD** — login como proveedor → subir XML(+PDF) en el portal real → verificar match. Para CAUPLAS hay que reasignar antes la bodega de sus 2 ventas (salen como "Agencia ML") con el botón nuevo en Ventas.jsx.
-- Flujo de prueba en prueba-junio: `cauplas` tiene `cfdi_timbrados_I_8075` (28 conceptos, códigos `<id> M26263xx`); `kim` tiene `K26802` (23530559-Z) y `K26804` (23542930-Z). **Falta el XML de Vazlo** (2 ventas amarillas son Vazlo) → pedírselo a Gaby.
+- **Validado end-to-end en PROD** (ver bloque de cierre arriba): KIM 2/2 por `codigo_exact`; CAUPLAS 12/28 por `codigo_id_interno`. Se reasignaron 105 envíos CAUPLAS por API (botón Ventas.jsx en la UI). Las 4 métricas se poblaron. Los 16 conceptos CAUPLAS sin match son piezas MATIZ sin venta cruzable → señal de error de facturación correcta, no bug.
+- **Falta el XML de Vazlo** (2 ventas amarillas son Vazlo) → pedírselo a Gaby.
 
 ### Paso E — Módulo 2: publicaciones masivas (no iniciado)
 Diseño preliminar en este CLAUDE.md (sección 3, Reglas de Gaby). A construir:
