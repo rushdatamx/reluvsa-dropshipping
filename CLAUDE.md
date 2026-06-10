@@ -222,7 +222,7 @@ Convenciones:
 
 **Gotcha API (anotar):** `POST /api/auth/login` devuelve el JWT en el campo **`token`**, NO `access_token`.
 
-**Bug cosmético menor (pendiente, no bloqueante):** `GET /api/facturas/{id}` (detalle) devuelve uuid/serie/folio/total/rfc_receptor como `null`, aunque el listado `GET /api/facturas` sí los trae correctos y los datos están bien guardados (UUID, total 4114.26, receptor GPE230915JWA). Arreglable en sesión de código.
+**~~Bug cosmético del `GET /api/facturas/{id}`~~ → CERRADO como NO-BUG (2026-06-09).** Se investigó en código: el endpoint `detalle()` hace `SELECT *` y devuelve TODOS los campos correctos (uuid/serie/folio/total/rfc_receptor), anidados bajo `{"factura": {...}, "conceptos": [...]}`. Además el frontend NO usa ese endpoint — no existe pantalla de detalle de factura; `Facturas.jsx` solo consume el listado `GET /api/facturas` (tabla). El `null` reportado en la sesión P4 fue por cómo se consultó por curl (probablemente se miró el campo en el nivel equivocado de la respuesta anidada), no un bug. Verificado reproduciendo el insert+detalle con la factura real de KIM K26802: todos los campos salen correctos. (Nota: el "total 4114.26" de la nota P4 era de la factura de CAUPLAS, no de KIM —K26802 totaliza $8.40, correcto según su XML.) Si en el futuro se quiere que Gaby vea el detalle de una factura con sus conceptos y el cruce a venta, eso sería una **pantalla nueva** (mejora), no un arreglo.
 
 **Lo que sigue (próxima sesión — arrancar aquí):**
 - ✅ **LOS 5 PROVEEDORES VALIDADOS E2E (2026-06-09)**. El matcher genérico cruza los 5 esquemas de código distintos sin código a la medida:
@@ -238,7 +238,7 @@ Convenciones:
   - **Patrón confirmado en los 5**: el envío sale de ML con `proveedor_id=None` → SIN MATCH hasta reasignar la bodega (botón Ventas.jsx). El cuello de botella es la asignación de proveedor en colecta, NO el matcher.
   - 🎯 **RFC real de KeepOnGreen descubierto: `STR910211DT2`** (factura como "Suministro Transamericano de Refacciones"). Estaba `"PENDIENTE"`. Corregido en `database.py`: seed actualizado + migración idempotente `_migrar_rfc_keepongreen()`. **PENDIENTE: deployar (push → Railway) para que prod tome el RFC nuevo.**
 - **Entrega con BD en blanco** (decidido 2026-06-09): la BD de prod actual (prueba-junio + 105 overrides CAUPLAS) es solo validación interna. Entregar a Gaby con la BD VACÍA (vaciar `ventas_ml`, `envios_colecta`, `facturas`, `factura_conceptos`, `incidencias`; conservar `proveedores` + `usuarios`) como ÚLTIMO paso antes de entregar. Esto cierra como **obsoleta** la nota "avisar a Gaby de los 105 overrides" (se borran, nunca llegan a Gaby). Ver [[project_entrega_bd_en_blanco]].
-- (Opcional) Arreglar el bug cosmético del `GET /api/facturas/{id}` detalle.
+- ~~Arreglar el bug cosmético del `GET /api/facturas/{id}` detalle~~ → cerrado como NO-BUG (2026-06-09): el endpoint devuelve todo correcto y el frontend no lo usa. Ver bloque de cierre arriba.
 - **Módulo 2** (publicaciones masivas): no iniciado.
 - Menores sin probar con datos reales: flujo de incidencias E2E.
 
