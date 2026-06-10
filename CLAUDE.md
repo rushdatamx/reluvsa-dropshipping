@@ -207,9 +207,31 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-08, sesión P4)
+## 8. Estado actual (último update: 2026-06-09, validación los 5 proveedores)
 
-### 📍 CIERRE SESIÓN 2026-06-08 (P4 VALIDADO EN PROD) — leer esto primero para retomar
+### 📍 CIERRE SESIÓN 2026-06-09 (LOS 5 PROVEEDORES VALIDADOS E2E) — leer esto primero para retomar
+**Contexto:** Mario preguntó si el match de KIM/CAUPLAS/Vazlo "no fallaría" y se cerró la validación de los 5 proveedores con datos reales. Gaby entregó el XML de Vazlo y las facturas+reportes de AG y KG. Commits `c415797` y `43eea2d` pusheados a `main` (auto-deploy Railway disparado).
+
+**Lo que se hizo y quedó cerrado hoy:**
+- ✅ **LOS 5 PROVEEDORES VALIDADOS E2E** con datos reales. El matcher genérico cruza los 5 esquemas distintos sin código a la medida (tabla completa abajo en "Lo que sigue"). Patrón confirmado en los 5: el envío sale de ML con `proveedor_id=None` → SIN MATCH hasta reasignar la bodega (botón Ventas.jsx). **El cuello de botella es la asignación de proveedor en colecta, NO el matcher.** Scripts reproducibles: `backend/scripts/test_vazlo_e2e.py`, `backend/scripts/test_ag_kg_e2e.py`. Ver [[project_vazlo_cruce_validado]], [[project_ag_kg_rfc_y_codigos]].
+- 🎯 **RFC real de KeepOnGreen descubierto: `STR910211DT2`** (factura como "Suministro Transamericano de Refacciones"; estaba "PENDIENTE"). Corregido en `database.py`: seed + migración idempotente `_migrar_rfc_keepongreen()`. **Deploy disparado por el push — falta que Mario verifique en prod con login (pantalla Proveedores: KG debe mostrar STR910211DT2).**
+- ✅ **XML de AG cerrado como NO-bloqueante.** AG solo mandó PDF, pero su cruce ya se validó sacando el código del PDF. Decisión de Mario: NO inferir/fabricar el XML (un CFDI lleva sello+UUID del SAT, no falsificable; sería factura falsa). El XML real llegará cuando AG opere en el portal. La estructura CFDI 4.0 es idéntica para todos (un solo parser sirve), pero eso ≠ tener el documento timbrado real.
+- ✅ **"Bug cosmético" del `GET /api/facturas/{id}` cerrado como NO-BUG.** El endpoint devuelve todo correcto; el frontend ni lo usa. El null de P4 fue artefacto de la consulta por curl. Commit `43eea2d`.
+
+**Decisión vigente — entrega con BD EN BLANCO:** la BD de prod (prueba-junio + overrides) es solo validación interna. Entregar a Gaby vacía (vaciar `ventas_ml`, `envios_colecta`, `facturas`, `factura_conceptos`, `incidencias`; conservar `proveedores` + `usuarios`) como ÚLTIMO paso antes de entregar. Ver [[project_entrega_bd_en_blanco]].
+
+**Lo que sigue (próxima sesión — arrancar aquí):**
+- **Verificar RFC de KG en prod** (Mario, con login): pantalla Proveedores → KEEPONGREEN debe mostrar `STR910211DT2`.
+- **Módulo 2** (publicaciones masivas): no iniciado — es el único bloque grande que falta. Mario lo pospuso; cuando se retome, primero descubrir/documentar su alcance.
+- **Pedir XML de AG a Gaby** cuando AG vaya a operar de verdad (no bloqueante).
+- **Limpieza BD en blanco**: último paso antes de entregar.
+- Menores sin probar con datos reales: flujo de incidencias E2E.
+
+El Módulo 1 (conciliación ventas↔envíos↔facturas) está **completo y validado para los 5 proveedores**.
+
+---
+
+### 📍 CIERRE SESIÓN 2026-06-08 (P4 VALIDADO EN PROD) — histórico (superado por 2026-06-09)
 **Contexto:** Sesión dedicada a validar P4 en prod. Mario subió por el portal los 2 Excels de `prueba-junio/` (mismo periodo). Se subieron los 3 XML como proveedor contra el portal REAL vía API conducida por Claude. **P4 quedó validado end-to-end en producción** (antes solo estaba probado en local).
 
 **Resultados (verificados en prod):**
@@ -236,7 +258,7 @@ Convenciones:
   - **Vazlo**: Mario entregó el XML (`VIM990605M8A_FMX0069127`). Validado en local con `backend/scripts/test_vazlo_e2e.py`. Ver [[project_vazlo_cruce_validado]].
   - **AG y KG**: Gaby entregó facturas + reportes (ventas+colecta) en `prueba-junio/AG/` y `prueba-junio/KG/` (cada carpeta trae su propio par; el archivo "2" es ventas en AG y colecta en KG). Validados con `backend/scripts/test_ag_kg_e2e.py`. AG cruzó aunque solo hay PDF (concepto armado del PDF) → **falta su XML para subirla por el portal**. Ver [[project_ag_kg_rfc_y_codigos]].
   - **Patrón confirmado en los 5**: el envío sale de ML con `proveedor_id=None` → SIN MATCH hasta reasignar la bodega (botón Ventas.jsx). El cuello de botella es la asignación de proveedor en colecta, NO el matcher.
-  - 🎯 **RFC real de KeepOnGreen descubierto: `STR910211DT2`** (factura como "Suministro Transamericano de Refacciones"). Estaba `"PENDIENTE"`. Corregido en `database.py`: seed actualizado + migración idempotente `_migrar_rfc_keepongreen()`. **PENDIENTE: deployar (push → Railway) para que prod tome el RFC nuevo.**
+  - 🎯 **RFC real de KeepOnGreen descubierto: `STR910211DT2`** (factura como "Suministro Transamericano de Refacciones"). Estaba `"PENDIENTE"`. Corregido en `database.py`: seed actualizado + migración idempotente `_migrar_rfc_keepongreen()`. **Pusheado en `c415797` (deploy disparado); falta que Mario verifique en prod con login.**
 - **Entrega con BD en blanco** (decidido 2026-06-09): la BD de prod actual (prueba-junio + 105 overrides CAUPLAS) es solo validación interna. Entregar a Gaby con la BD VACÍA (vaciar `ventas_ml`, `envios_colecta`, `facturas`, `factura_conceptos`, `incidencias`; conservar `proveedores` + `usuarios`) como ÚLTIMO paso antes de entregar. Esto cierra como **obsoleta** la nota "avisar a Gaby de los 105 overrides" (se borran, nunca llegan a Gaby). Ver [[project_entrega_bd_en_blanco]].
 - ~~Arreglar el bug cosmético del `GET /api/facturas/{id}` detalle~~ → cerrado como NO-BUG (2026-06-09): el endpoint devuelve todo correcto y el frontend no lo usa. Ver bloque de cierre arriba.
 - **Módulo 2** (publicaciones masivas): no iniciado.
