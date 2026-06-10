@@ -38,6 +38,8 @@ export const listarProveedores = () => api.get('/proveedores');
 // Ventas
 export const listarVentas = (params = {}) => api.get('/ventas', { params });
 export const getVenta = (numVenta) => api.get(`/ventas/${encodeURIComponent(numVenta)}`);
+export const exportarVentasCsv = (params = {}) =>
+  api.get('/ventas/export.csv', { params, responseType: 'blob' });
 
 // Envíos
 export const reasignarEnvio = (numEnvio, payload) =>

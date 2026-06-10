@@ -1,25 +1,73 @@
 import React, { useEffect, useState } from 'react';
-import { Search, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Search, CheckCircle, XCircle, AlertCircle, Download } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { listarVentas, listarProveedores, reasignarEnvio } from '../services/api';
+import { listarVentas, listarProveedores, reasignarEnvio, exportarVentasCsv } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+
+const FILTROS_VACIOS = {
+  q: '',
+  facturada: '',     // '' = todas | 'true' | 'false'
+  sla: '',           // '' = todas | 'a_tiempo' | 'tarde'
+  cruce: '',         // '' = todas | 'con_envio' | 'sin_envio' | 'sin_proveedor'
+  proveedor_id: '',  // solo admin
+  fecha_desde: '',
+  fecha_hasta: '',
+};
 
 export default function Ventas() {
+  const { isAdmin } = useAuth();
   const [data, setData] = useState({ items: [], total: 0, page: 1 });
   const [loading, setLoading] = useState(false);
-  const [q, setQ] = useState('');
-  const [sinFactura, setSinFactura] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  const [filtros, setFiltros] = useState(FILTROS_VACIOS);
   const [proveedores, setProveedores] = useState([]);
   const [reasignando, setReasignando] = useState(null); // num_envio en curso
+
+  // Convierte el estado de filtros a los query params del backend (omite vacíos).
+  const paramsDeFiltros = () => {
+    const p = {};
+    Object.entries(filtros).forEach(([k, v]) => { if (v) p[k] = v; });
+    return p;
+  };
 
   const cargar = async () => {
     setLoading(true);
     try {
-      const { data } = await listarVentas({ q: q || undefined, sin_factura: sinFactura || undefined, page: 1, limit: 100 });
+      const { data } = await listarVentas({ ...paramsDeFiltros(), page: 1, limit: 100 });
       setData(data);
     } finally {
       setLoading(false);
     }
   };
+
+  const onExportar = async () => {
+    setExportando(true);
+    try {
+      const { data: blob } = await exportarVentasCsv(paramsDeFiltros());
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ventas_cruces.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('No se pudo exportar: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const limpiar = async () => {
+    setFiltros(FILTROS_VACIOS);
+    setLoading(true);
+    try {
+      const { data } = await listarVentas({ page: 1, limit: 100 });
+      setData(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const set = (k, v) => setFiltros((f) => ({ ...f, [k]: v }));
 
   useEffect(() => { cargar(); }, []);
   useEffect(() => {
@@ -46,38 +94,98 @@ export default function Ventas() {
       <PageHeader
         title="Ventas y cruces"
         subtitle="Conciliación de ventas Mercado Libre con envíos de colecta y facturas de proveedor"
+        actions={
+          <button
+            onClick={onExportar}
+            disabled={exportando}
+            className="flex items-center gap-1.5 text-sm px-3 py-2 border border-notion-border rounded-lg font-semibold hover:bg-notion-bg-subtle disabled:opacity-50"
+          >
+            <Download size={16} /> {exportando ? 'Exportando…' : 'Exportar CSV'}
+          </button>
+        }
       />
 
-      <div className="bg-white rounded-xl border border-notion-border p-4 mb-4 flex gap-3 flex-wrap items-end">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Buscar</label>
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-notion-text-secondary" />
-            <input
-              type="text"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && cargar()}
-              placeholder="# venta, SKU o título"
-              className="w-full pl-9 pr-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black"
-            />
+      <div className="bg-white rounded-xl border border-notion-border p-4 mb-4 space-y-3">
+        <div className="flex gap-3 flex-wrap items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Buscar</label>
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-notion-text-secondary" />
+              <input
+                type="text"
+                value={filtros.q}
+                onChange={(e) => set('q', e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && cargar()}
+                placeholder="# venta, SKU o título"
+                className="w-full pl-9 pr-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black"
+              />
+            </div>
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Facturación</label>
+            <select value={filtros.facturada} onChange={(e) => set('facturada', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="">Todas</option>
+              <option value="true">Facturadas</option>
+              <option value="false">Sin factura</option>
+            </select>
+          </div>
+          <div className="min-w-[140px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Entrega (SLA)</label>
+            <select value={filtros.sla} onChange={(e) => set('sla', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="">Todas</option>
+              <option value="a_tiempo">A tiempo</option>
+              <option value="tarde">Tarde</option>
+            </select>
+          </div>
+          <div className="min-w-[170px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Cruce con colecta</label>
+            <select value={filtros.cruce} onChange={(e) => set('cruce', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="">Todas</option>
+              <option value="con_envio">Con envío</option>
+              <option value="sin_envio">Sin envío</option>
+              <option value="sin_proveedor">Envío sin proveedor</option>
+            </select>
           </div>
         </div>
-        <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sinFactura}
-            onChange={(e) => setSinFactura(e.target.checked)}
-            className="accent-reluvsa-black"
-          />
-          Solo sin factura
-        </label>
-        <button
-          onClick={cargar}
-          className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800"
-        >
-          Aplicar
-        </button>
+        <div className="flex gap-3 flex-wrap items-end">
+          {isAdmin() && (
+            <div className="min-w-[180px]">
+              <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Proveedor</label>
+              <select value={filtros.proveedor_id} onChange={(e) => set('proveedor_id', e.target.value)}
+                className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+                <option value="">Todos</option>
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Venta desde</label>
+            <input type="date" value={filtros.fecha_desde} onChange={(e) => set('fecha_desde', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black" />
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Venta hasta</label>
+            <input type="date" value={filtros.fecha_hasta} onChange={(e) => set('fecha_hasta', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black" />
+          </div>
+          <button
+            onClick={cargar}
+            className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800"
+          >
+            Aplicar
+          </button>
+          <button
+            onClick={limpiar}
+            className="px-4 py-2 border border-notion-border rounded-lg text-sm font-medium hover:bg-notion-bg-subtle"
+          >
+            Limpiar
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-notion-border overflow-hidden">
