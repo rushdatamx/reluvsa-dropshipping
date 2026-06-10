@@ -89,6 +89,25 @@ async def upload(
         raise HTTPException(status_code=400, detail=f"XML inválido: {exc}")
 
     with get_db() as conn:
+        # El RFC emisor del XML debe ser el del proveedor logueado: un proveedor no
+        # puede subir la factura de otro. Comparamos normalizado (strip/upper).
+        prov = conn.execute(
+            "SELECT rfc, nombre FROM proveedores WHERE id = ?", (user.proveedor_id,)
+        ).fetchone()
+        rfc_xml = (parsed.get("rfc_emisor") or "").strip().upper()
+        rfc_prov = (prov["rfc"] or "").strip().upper() if prov else ""
+        if not rfc_xml or rfc_xml != rfc_prov:
+            xml_path.unlink(missing_ok=True)
+            if pdf_path:
+                pdf_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"El RFC emisor del XML ({rfc_xml or 'vacío'}) no corresponde "
+                    f"a tu proveedor ({rfc_prov or '—'})."
+                ),
+            )
+
         existing = conn.execute(
             "SELECT id FROM facturas WHERE uuid_cfdi = ?", (parsed["uuid_cfdi"],)
         ).fetchone()
