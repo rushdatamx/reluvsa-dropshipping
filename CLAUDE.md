@@ -207,9 +207,49 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-09, validación los 5 proveedores)
+## 8. Estado actual (último update: 2026-06-11, ENTREGADO A GABY — esperando sus comentarios)
 
-### 📍 CIERRE SESIÓN 2026-06-09 (LOS 5 PROVEEDORES VALIDADOS E2E) — leer esto primero para retomar
+### 📍 PRÓXIMA SESIÓN: PROCESAR COMENTARIOS DE GABY — arrancar aquí
+**El portal ya se ENTREGÓ a Gaby y ella ya lo usó y pasó comentarios.** La próxima sesión arranca
+directamente en esos comentarios (Mario los traerá). Para cada uno: clasificar (bug / mejora /
+duda-capacitación) y resolver. Ver memoria [[project_comentarios_gaby]] (punto de entrada con todo
+el contexto fresco para procesarlos).
+
+### 📍 CIERRE SESIÓN 2026-06-10/11 (ENTREGA A GABY) — qué se hizo antes de entregar
+**Contexto:** Mario quiso entregar el portal para que Gaby lo probara con datos 100% reales. Se
+verificó EXHAUSTIVAMENTE cada pestaña/función (plan mode), se cerraron huecos, se agregaron filtros y
+export, se dejó la BD de prod en blanco, y se le mandó una guía de usuario en PDF.
+
+**Lo que se hizo y quedó cerrado (3 commits a `main`, deploys Railway+Vercel SUCCESS):**
+- ✅ **Verificación E2E de las 8 pestañas** con datos reales de `prueba-junio/` (BD desechable local).
+  Todo pasó: login, resumen, carga (875 cruces), reasignar bodega, match KIM 1.0 + CAUPLAS 12/28
+  id_interno, dedup 409, incidencias, las 4 métricas, proveedores con KG STR910211DT2.
+- ✅ **3 correcciones** (commit `fe70437`): (1) **formulario "Nueva incidencia"** (admin) en
+  `Incidencias.jsx` — antes la pestaña no dejaba crear; (2) **validación de RFC** en
+  `facturas.py::upload` — un proveedor ya no puede subir factura de otro RFC (400 + borra archivos);
+  (3) script `backend/scripts/wipe_transaccional.py` + test `test_cauplas_e2e.py`.
+- ✅ **Endpoint admin de wipe** (commit `6322f42`): `POST /api/admin/wipe-transaccional` body
+  `{"confirmar":"VACIAR"}` — vacía transaccionales, conserva proveedores+usuarios, backup VACUUM INTO.
+  Se agregó porque el Railway CLI no quedó logueado y el MCP de Railway no ejecuta comandos en el
+  contenedor. **Para futuros wipes de prod usar ESTE endpoint.**
+- ✅ **Filtros avanzados + export CSV en Ventas** (commit `0efc4a2`): filtros de facturación
+  (Todas/Facturadas/Sin factura), SLA (a tiempo/tarde), cruce con colecta (con envío/sin envío/envío
+  sin proveedor), proveedor (admin), rango por fecha de venta; + `GET /api/ventas/export.csv`
+  (server-side, respeta filtros) y botón Exportar. Para que el portal sea operable a diario.
+- ✅ **BD de prod VACIADA y verificada** (vía el endpoint, con backup en
+  `/data/dropshipping.db.bak-20260610_185809`): ventas/envíos/facturas → 0; proveedores(5)+usuarios(6)
+  intactos. **KG = STR910211DT2 confirmado en prod.**
+- ✅ **Guía de usuario** entregada: `Guia_Usuario_Portal_RELUVSA.pdf` (+ `.html`) en la raíz del repo
+  — manual visual paso a paso (paleta RELUVSA), generado con Chrome headless `--print-to-pdf`.
+
+**Dónde ve Gaby cada cosa:** SLA a tiempo/tarde por venta = columna SLA en Ventas (check/X) +
+"% a tiempo" por proveedor en Métricas. Facturadas/no = columna Factura + filtro. NO hay pantalla de
+Colecta independiente (los envíos se ven vía Ventas). Pendiente higiene: Mario iba a **rotar la
+password de admin** usada el 06-10 (quedó expuesta en chat) — confirmar.
+
+Ver [[project_estado_sesion_2026-06-10]].
+
+### 📍 CIERRE SESIÓN 2026-06-09 (LOS 5 PROVEEDORES VALIDADOS E2E) — histórico (superado por la entrega 06-10/11)
 **Contexto:** Mario preguntó si el match de KIM/CAUPLAS/Vazlo "no fallaría" y se cerró la validación de los 5 proveedores con datos reales. Gaby entregó el XML de Vazlo y las facturas+reportes de AG y KG. Commits `c415797` y `43eea2d` pusheados a `main` (auto-deploy Railway disparado).
 
 **Lo que se hizo y quedó cerrado hoy:**

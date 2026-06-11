@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Guía de Usuario — Portal Dropshipping RELUVSA</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #1a1a1a; line-height: 1.55; font-size: 13px;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; padding: 18mm 16mm; margin: 0 auto;
+    background: #fff; position: relative; page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---------- PORTADA ---------- */
+  .cover { background: #1a1a1a; color: #fff; display: flex; flex-direction: column; justify-content: center; }
+  .cover .badge {
+    display: inline-block; background: #FFED00; color: #1a1a1a; font-weight: 800;
+    font-size: 12px; padding: 6px 14px; border-radius: 6px; letter-spacing: .5px; align-self: flex-start;
+  }
+  .cover h1 { font-size: 42px; font-weight: 800; margin: 28px 0 10px; line-height: 1.1; }
+  .cover h1 .yellow { color: #FFED00; }
+  .cover .sub { font-size: 17px; color: #cfcfcf; max-width: 130mm; }
+  .cover .foot { position: absolute; bottom: 18mm; left: 16mm; right: 16mm; font-size: 12px; color: #9a9a9a; border-top: 1px solid #3a3a3a; padding-top: 12px; }
+  .cover .foot strong { color: #FFED00; }
+
+  /* ---------- ENCABEZADOS DE SECCIÓN ---------- */
+  .section-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px solid #FFED00; }
+  .num {
+    flex: 0 0 auto; width: 38px; height: 38px; background: #1a1a1a; color: #FFED00;
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 20px;
+  }
+  .section-head h2 { font-size: 21px; font-weight: 800; color: #1a1a1a; }
+  .section-head .where { font-size: 12px; color: #787774; font-weight: 600; margin-top: 2px; }
+  .where .menu { background: #f2f2f0; border: 1px solid #e5e5e3; border-radius: 5px; padding: 1px 7px; font-weight: 700; color: #1a1a1a; }
+
+  h3 { font-size: 14px; font-weight: 700; margin: 16px 0 8px; color: #1a1a1a; }
+  p { margin-bottom: 9px; }
+  .lead { color: #555; margin-bottom: 14px; }
+
+  /* ---------- PASOS ---------- */
+  ol.steps { list-style: none; counter-reset: s; margin: 6px 0 12px; }
+  ol.steps > li {
+    counter-increment: s; position: relative; padding: 8px 0 8px 34px; margin-bottom: 2px;
+    border-bottom: 1px solid #f0f0ee;
+  }
+  ol.steps > li:last-child { border-bottom: none; }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: 7px;
+    width: 22px; height: 22px; background: #FFED00; color: #1a1a1a; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;
+  }
+
+  /* ---------- CAJAS ---------- */
+  .box { border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: 12.5px; }
+  .tip { background: #fffbe6; border-left: 4px solid #FFED00; }
+  .alert { background: #fdecec; border-left: 4px solid #E31E24; }
+  .info { background: #f3f6fb; border-left: 4px solid #2d6cdf; }
+  .box .label { font-weight: 800; display: block; margin-bottom: 3px; font-size: 11px; letter-spacing: .4px; text-transform: uppercase; }
+  .alert .label { color: #E31E24; }
+  .tip .label { color: #a98b00; }
+  .info .label { color: #2d6cdf; }
+
+  /* ---------- TABLA DE FILTROS ---------- */
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+  th { background: #1a1a1a; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
+  td { padding: 8px 10px; border-bottom: 1px solid #ececea; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafaf9; }
+  td .f { font-weight: 700; color: #1a1a1a; }
+
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+  .pill.green { background: #e3f4e3; color: #0f7b0f; }
+  .pill.red { background: #fdecec; color: #E31E24; }
+  .pill.yellow { background: #FFED00; color: #1a1a1a; }
+  .pill.gray { background: #efefed; color: #787774; }
+
+  .mini { font-size: 11.5px; color: #787774; }
+  .kbd { background: #1a1a1a; color: #FFED00; border-radius: 5px; padding: 2px 9px; font-weight: 700; font-size: 11.5px; display: inline-block; }
+</style>
+</head>
+<body>
+
+<!-- ===================== PORTADA ===================== -->
+<section class="page cover">
+  <span class="badge">PORTAL DROPSHIPPING</span>
+  <h1>Guía de <span class="yellow">Usuario</span><br>Portal RELUVSA</h1>
+  <p class="sub">Cómo conciliar tus ventas de Mercado Libre con los envíos de colecta y las facturas de tus proveedores — paso a paso.</p>
+  <div class="foot">
+    Manual para <strong>administrador</strong> · Conciliación de ventas, envíos y facturas · Medición de desempeño por proveedor
+  </div>
+</section>
+
+<!-- ===================== INTRO + PASO 1 ===================== -->
+<section class="page">
+  <div class="section-head">
+    <div class="num">1</div>
+    <div>
+      <h2>Cargar tus reportes</h2>
+      <div class="where">Menú <span class="menu">Cargar reportes</span> · Es lo primero que haces cada vez que tengas datos nuevos</div>
+    </div>
+  </div>
+
+  <p class="lead">El portal arranca vacío. Todo lo que subas es tuyo desde cero. Empiezas cargando los dos reportes de Mercado Libre.</p>
+
+  <ol class="steps">
+    <li>Sube el Excel de <strong>Ventas de Mercado Libre</strong>.</li>
+    <li>Después sube el Excel de <strong>Detalle de colecta</strong>.</li>
+    <li>Listo: el sistema cruza automáticamente cada envío con su venta.</li>
+  </ol>
+
+  <div class="box tip">
+    <span class="label">Tip — el orden importa</span>
+    Sube <strong>siempre primero Ventas y luego Colecta</strong>. Así el cruce envío ↔ venta se hace correctamente.
+  </div>
+
+  <div class="box info">
+    <span class="label">Puedes subir cuando quieras</span>
+    Si vuelves a subir los reportes cuando se actualicen, el sistema <strong>actualiza lo que ya existía y agrega lo nuevo</strong>. No se borra nada.
+  </div>
+
+  <div class="section-head" style="margin-top:34px;">
+    <div class="num">2</div>
+    <div>
+      <h2>Revisar ventas y cruces</h2>
+      <div class="where">Menú <span class="menu">Ventas y cruces</span> · El corazón del portal</div>
+    </div>
+  </div>
+
+  <p class="lead">Cada venta aparece con su producto, su proveedor, si el envío llegó a tiempo y si ya está facturada.</p>
+
+  <table>
+    <tr><th>Columna</th><th>Qué te dice</th></tr>
+    <tr>
+      <td class="f">Entrega (SLA)</td>
+      <td><span class="pill green">✓ A tiempo</span> &nbsp; <span class="pill red">✕ Tarde</span> &nbsp; <span class="pill gray">— sin dato</span></td>
+    </tr>
+    <tr>
+      <td class="f">Factura</td>
+      <td><span class="pill green">✓ Facturado</span> &nbsp; <span class="pill yellow">⚠ Pendiente</span></td>
+    </tr>
+    <tr>
+      <td class="f">Proveedor / Bodega</td>
+      <td>El proveedor responsable del envío. Si dice <span class="pill yellow">⚠ Asignar bodega…</span>, hay que asignarlo (ver abajo).</td>
+    </tr>
+  </table>
+
+  <div class="box alert">
+    <span class="label">¡Atención! Reasignar bodega</span>
+    Algunas ventas salen de Mercado Libre como <em>“Agencia de Mercado Libre”</em> o <em>“Sin información”</em> y <strong>no traen proveedor</strong>. En esas filas verás un menú <strong>“⚠ Asignar bodega…”</strong>: elige el proveedor correcto.<br>
+    <strong>Esto es clave:</strong> mientras una venta no tenga proveedor asignado, su factura <u>no se podrá cruzar</u>. Si una factura no aparece, casi siempre es porque falta asignar la bodega aquí.
+  </div>
+</section>
+
+<!-- ===================== PASO 3: FILTROS ===================== -->
+<section class="page">
+  <div class="section-head">
+    <div class="num">3</div>
+    <div>
+      <h2>Filtrar y exportar</h2>
+      <div class="where">Dentro de <span class="menu">Ventas y cruces</span> · Arriba de la tabla</div>
+    </div>
+  </div>
+
+  <p class="lead">Puedes combinar varios filtros a la vez para encontrar exactamente lo que buscas. Según tu caso:</p>
+
+  <table>
+    <tr><th>Si quieres saber…</th><th>Usa el filtro</th></tr>
+    <tr>
+      <td>¿Qué se facturó y qué no?</td>
+      <td><span class="f">Facturación</span> → <span class="pill gray">Facturadas</span> o <span class="pill gray">Sin factura</span></td>
+    </tr>
+    <tr>
+      <td>¿Quién entregó tarde?</td>
+      <td><span class="f">Entrega (SLA)</span> → <span class="pill gray">A tiempo</span> o <span class="pill gray">Tarde</span></td>
+    </tr>
+    <tr>
+      <td>¿Qué falta cruzar o asignar?</td>
+      <td><span class="f">Cruce con colecta</span> → <span class="pill gray">Con envío</span> · <span class="pill gray">Sin envío</span> · <span class="pill gray">Envío sin proveedor</span></td>
+    </tr>
+    <tr>
+      <td>Un proveedor en específico</td>
+      <td><span class="f">Proveedor</span> → eliges de la lista</td>
+    </tr>
+    <tr>
+      <td>Un periodo de tiempo</td>
+      <td><span class="f">Venta desde / Venta hasta</span> → eliges las fechas</td>
+    </tr>
+  </table>
+
+  <div class="box tip">
+    <span class="label">Truco para perseguir pendientes</span>
+    Combina <strong>“Sin factura”</strong> + un <strong>proveedor</strong> + un <strong>periodo</strong> para ver exactamente qué le falta facturar a cada quién.
+  </div>
+
+  <h3>Exportar a Excel (CSV)</h3>
+  <p>Aplica los filtros que quieras y presiona el botón <span class="kbd">⬇ Exportar CSV</span> (arriba a la derecha). Se descarga un archivo con <strong>exactamente lo que filtraste</strong>, listo para abrir en Excel y armar tus reportes.</p>
+
+  <div class="section-head" style="margin-top:30px;">
+    <div class="num">4</div>
+    <div>
+      <h2>Facturas de proveedores</h2>
+      <div class="where">Cada proveedor entra con <span class="menu">su propio usuario</span></div>
+    </div>
+  </div>
+
+  <p class="lead">Cada proveedor sube su factura (el archivo XML) desde su cuenta. El sistema <strong>detecta solo a qué venta corresponde</strong> y la marca como facturada.</p>
+
+  <ol class="steps">
+    <li>El proveedor entra con su usuario y sube su XML.</li>
+    <li>El portal cruza la factura con la venta correcta automáticamente.</li>
+    <li>Tú lo ves en <span class="menu">Ventas y cruces</span> → columna Factura pasa a <span class="pill green">✓ Facturado</span>.</li>
+  </ol>
+
+  <div class="box info">
+    <span class="label">Protección automática</span>
+    El sistema <strong>solo acepta facturas cuyo RFC sea el del proveedor</strong> que la sube. Nadie puede subir facturas que no son suyas.
+  </div>
+</section>
+
+<!-- ===================== PASO 5 y 6 ===================== -->
+<section class="page">
+  <div class="section-head">
+    <div class="num">5</div>
+    <div>
+      <h2>Medir el desempeño</h2>
+      <div class="where">Menú <span class="menu">Métricas proveedores</span></div>
+    </div>
+  </div>
+
+  <p class="lead">El resumen por proveedor para decirle a cada uno, con números, qué debe mejorar.</p>
+
+  <table>
+    <tr><th>Métrica</th><th>Qué mide</th></tr>
+    <tr><td class="f">% entregas a tiempo</td><td>Qué tan puntual es el proveedor en la colecta. <span class="mini">(verde si ≥ 90%)</span></td></tr>
+    <tr><td class="f">Días promedio en facturar</td><td>Cuánto tarda en emitir la factura tras la venta. <span class="mini">(verde si ≤ 5 días)</span></td></tr>
+    <tr><td class="f">Errores de facturación</td><td>Conceptos facturados que no cruzan con una venta. <span class="mini">(verde si ≤ 3)</span></td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="label">Para qué te sirve</span>
+    Es la evidencia objetiva: “Proveedor X, este mes entregaste 82% a tiempo y tardaste 8 días en facturar — esto es lo que tienes que mejorar.”
+  </div>
+
+  <div class="section-head" style="margin-top:34px;">
+    <div class="num">6</div>
+    <div>
+      <h2>Registrar un problema</h2>
+      <div class="where">Menú <span class="menu">Incidencias</span></div>
+    </div>
+  </div>
+
+  <p class="lead">Devoluciones, productos equivocados, facturas tardías… deja registro de cada problema y su seguimiento.</p>
+
+  <ol class="steps">
+    <li>Presiona <span class="kbd">+ Nueva incidencia</span>.</li>
+    <li>Elige la <strong>venta</strong>, el <strong>tipo</strong> de problema y escribe una <strong>descripción</strong>.</li>
+    <li>Cuando se solucione, márcala como <strong>Resuelta</strong>.</li>
+  </ol>
+
+  <p class="mini">Tipos disponibles: devolución · producto equivocado · no entregado · factura tardía · factura incorrecta · otro.</p>
+
+  <!-- RESUMEN VISUAL -->
+  <div class="section-head" style="margin-top:36px; border-bottom-color:#1a1a1a;">
+    <div class="num" style="background:#FFED00;color:#1a1a1a;">✓</div>
+    <div><h2>Resumen rápido</h2><div class="where">Tu día a día en el portal</div></div>
+  </div>
+
+  <table>
+    <tr><th>Quiero…</th><th>Voy a…</th></tr>
+    <tr><td>Cargar mis ventas y envíos</td><td><span class="menu">Cargar reportes</span> (ventas y luego colecta)</td></tr>
+    <tr><td>Ver qué se facturó y qué no</td><td><span class="menu">Ventas y cruces</span> → filtro Facturación</td></tr>
+    <tr><td>Ver quién entregó tarde</td><td><span class="menu">Ventas y cruces</span> → filtro SLA · o <span class="menu">Métricas</span></td></tr>
+    <tr><td>Asignar el proveedor a una venta</td><td><span class="menu">Ventas y cruces</span> → menú “Asignar bodega”</td></tr>
+    <tr><td>Bajar un reporte a Excel</td><td><span class="menu">Ventas y cruces</span> → botón Exportar CSV</td></tr>
+    <tr><td>Evaluar a un proveedor</td><td><span class="menu">Métricas proveedores</span></td></tr>
+    <tr><td>Registrar un problema</td><td><span class="menu">Incidencias</span> → Nueva incidencia</td></tr>
+  </table>
+
+  <p style="margin-top:24px; text-align:center; color:#787774; font-size:11.5px;">
+    Cualquier cosa que no cuadre o se vea raro, avísanos y lo revisamos. ¡Pruébalo a fondo! 🚀
+  </p>
+</section>
+
+</body>
+</html>
