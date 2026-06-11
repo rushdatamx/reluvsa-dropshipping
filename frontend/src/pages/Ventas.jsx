@@ -6,13 +6,16 @@ import { useAuth } from '../context/AuthContext';
 
 const FILTROS_VACIOS = {
   q: '',
-  facturada: '',     // '' = todas | 'true' | 'false'
-  sla: '',           // '' = todas | 'a_tiempo' | 'tarde'
-  cruce: '',         // '' = todas | 'con_envio' | 'sin_envio' | 'sin_proveedor'
-  proveedor_id: '',  // solo admin
+  facturada: '',        // '' = todas | 'true' | 'false'
+  sla: '',              // '' = todas | 'a_tiempo' | 'tarde'
+  cruce: '',            // '' = todas | 'con_envio' | 'sin_envio' | 'sin_proveedor'
+  proveedor_id: '',     // solo admin
+  deposito: 'proveedores', // 'proveedores' (default, oculta MATRIZ) | 'matriz' | 'todos'
   fecha_desde: '',
   fecha_hasta: '',
 };
+
+const LIMIT = 50; // ventas por página
 
 export default function Ventas() {
   const { isAdmin } = useAuth();
@@ -30,10 +33,10 @@ export default function Ventas() {
     return p;
   };
 
-  const cargar = async () => {
+  const cargar = async (p = 1) => {
     setLoading(true);
     try {
-      const { data } = await listarVentas({ ...paramsDeFiltros(), page: 1, limit: 100 });
+      const { data } = await listarVentas({ ...paramsDeFiltros(), page: p, limit: LIMIT });
       setData(data);
     } finally {
       setLoading(false);
@@ -61,7 +64,8 @@ export default function Ventas() {
     setFiltros(FILTROS_VACIOS);
     setLoading(true);
     try {
-      const { data } = await listarVentas({ page: 1, limit: 100 });
+      // FILTROS_VACIOS trae deposito='proveedores'; mandamos ese default explícito.
+      const { data } = await listarVentas({ deposito: 'proveedores', page: 1, limit: LIMIT });
       setData(data);
     } finally {
       setLoading(false);
@@ -74,14 +78,14 @@ export default function Ventas() {
     listarProveedores().then(({ data }) => setProveedores(data)).catch(() => {});
   }, []);
 
-  // Reasigna la bodega de un envío (caso col K = "Agencia de Mercado Libre" o
-  // "Sin información del lugar"). El backend resuelve el proveedor desde el código.
+  // Reasigna la bodega de un envío (caso col J = MATRIZ / vacío, sin proveedor
+  // dropshipping). El backend resuelve el proveedor desde el código de bodega.
   const onReasignar = async (numEnvio, codigoBodega) => {
     if (!numEnvio || !codigoBodega) return;
     setReasignando(numEnvio);
     try {
       await reasignarEnvio(numEnvio, { lugar_override: codigoBodega });
-      await cargar();
+      await cargar(data.page); // recargar en la misma página, no saltar a la 1
     } catch (e) {
       alert('No se pudo reasignar la bodega: ' + (e.response?.data?.detail || e.message));
     } finally {
@@ -115,7 +119,7 @@ export default function Ventas() {
                 type="text"
                 value={filtros.q}
                 onChange={(e) => set('q', e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && cargar()}
+                onKeyDown={(e) => e.key === 'Enter' && cargar(1)}
                 placeholder="# venta, SKU o título"
                 className="w-full pl-9 pr-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black"
               />
@@ -149,6 +153,15 @@ export default function Ventas() {
               <option value="sin_proveedor">Envío sin proveedor</option>
             </select>
           </div>
+          <div className="min-w-[160px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Depósito (bodega)</label>
+            <select value={filtros.deposito} onChange={(e) => set('deposito', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="proveedores">Solo proveedores</option>
+              <option value="matriz">Solo MATRIZ</option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
         </div>
         <div className="flex gap-3 flex-wrap items-end">
           {isAdmin() && (
@@ -174,7 +187,7 @@ export default function Ventas() {
               className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black" />
           </div>
           <button
-            onClick={cargar}
+            onClick={() => cargar(1)}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800"
           >
             Aplicar
@@ -208,7 +221,21 @@ export default function Ventas() {
                 <tr><td colSpan="6" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
-                  <td className="px-4 py-3 font-mono text-xs">{v.num_venta}</td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    {v.num_venta}
+                    {v.deposito && (
+                      <span
+                        className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          v.deposito === 'MATRIZ'
+                            ? 'bg-notion-bg-subtle text-notion-text-secondary'
+                            : 'bg-reluvsa-yellow/30 text-reluvsa-black'
+                        }`}
+                        title={`Depósito (bodega de origen): ${v.deposito}`}
+                      >
+                        {v.deposito}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-reluvsa-red">{v.sku || '—'}</td>
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
                   <td className="px-4 py-3">
@@ -222,14 +249,14 @@ export default function Ventas() {
                         )}
                       </div>
                     ) : v.num_envio ? (
-                      // Hay envío de colecta pero sin proveedor (col K = Agencia ML /
-                      // Sin información). Gaby reasigna la bodega aquí.
+                      // Hay envío de colecta pero la col J (Lugar indicado) no mapea a
+                      // un proveedor dropshipping (MATRIZ / vacío). Gaby reasigna aquí.
                       <select
                         value=""
                         disabled={reasignando === v.num_envio}
                         onChange={(e) => onReasignar(v.num_envio, e.target.value)}
                         className="text-xs border border-warning/50 bg-warning/5 rounded px-2 py-1 focus:outline-none focus:border-reluvsa-black"
-                        title={v.lugar_real ? `Lugar real: ${v.lugar_real}` : 'Sin información del lugar'}
+                        title={v.lugar_indicado ? `Lugar indicado: ${v.lugar_indicado}` : 'Sin lugar indicado'}
                       >
                         <option value="">
                           {reasignando === v.num_envio ? 'Asignando…' : '⚠ Asignar bodega…'}
@@ -265,8 +292,26 @@ export default function Ventas() {
             </tbody>
           </table>
         </div>
-        <div className="border-t border-notion-border px-4 py-2 text-xs text-notion-text-secondary">
-          {data.total} ventas · Página {data.page}
+        <div className="border-t border-notion-border px-4 py-2 flex items-center justify-between">
+          <span className="text-xs text-notion-text-secondary">
+            {data.total} ventas · Página {data.page} de {Math.max(1, Math.ceil(data.total / LIMIT))}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => cargar(data.page - 1)}
+              disabled={data.page <= 1 || loading}
+              className="px-3 py-1.5 border border-notion-border rounded-lg text-sm font-medium hover:bg-notion-bg-subtle disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ‹ Anterior
+            </button>
+            <button
+              onClick={() => cargar(data.page + 1)}
+              disabled={data.page >= Math.ceil(data.total / LIMIT) || loading}
+              className="px-3 py-1.5 border border-notion-border rounded-lg text-sm font-medium hover:bg-notion-bg-subtle disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Siguiente ›
+            </button>
+          </div>
         </div>
       </div>
     </div>

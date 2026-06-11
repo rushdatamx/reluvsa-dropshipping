@@ -43,12 +43,13 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 ## 3. Reglas de Gaby (críticas — no asumir nada distinto)
 
 ### Detalle de colecta
-- La columna importante para asignar al proveedor es **K (Lugar real)**, no la J (Lugar indicado).
-- Cuando K trae "Sin información del lugar" (caso frecuente), **Gaby reasigna manualmente** la bodega.
-- Ese override **persiste** y manda sobre el lugar real cuando se vuelve a cargar el Excel. Implementado en `envios_colecta.lugar_override`.
+- ⚠️ **REGLA CORREGIDA POR GABY (2026-06-11): la columna que asigna proveedor es J (Lugar indicado), NO la K (Lugar real).** Gaby reportó que ML falla y casi nunca llena bien la K. Verificado con datos reales (colecta `prueba-junio`, 944 envíos): **J resuelve 305 proveedores (32%) vs K solo 39 (4%)**; K sale "Sin información del lugar" el 47% de las veces. La regla anterior ("usar K") era incorrecta. Implementado en `parser_colecta.py::parse_colecta` (proveedor desde `row[9]`=J) + migración idempotente `database.py::_migrar_proveedor_desde_lugar_indicado`. Ambas columnas se siguen guardando; solo cambia de cuál se deriva `proveedor_id`. Ver [[project_columna_j_no_k]].
+- Cuando J trae MATRIZ (bodega propia, no dropshipping) o vacío, el envío queda sin proveedor → **Gaby reasigna manualmente** la bodega (selector en `Ventas.jsx`).
+- Ese override **persiste** y manda sobre J cuando se vuelve a cargar el Excel. Implementado en `envios_colecta.lugar_override`.
 
 ### Ventas ML
 - La columna relevante para identificar el producto es **T = SKU**.
+- ⚠️ **Columna C = "Depósito"** etiqueta la bodega de origen de cada venta (MATRIZ/KIM/CAUPLAS/VAZLO/...). **MATRIZ es bodega propia de RELUVSA, NO dropshipping = ruido.** El portal la captura en `ventas_ml.deposito` (parser `parser_ventas_ml.py`) y **OCULTA MATRIZ por defecto** en la pestaña Ventas; un selector "Depósito" permite ver "Solo proveedores" (default), "Solo MATRIZ" o "Todos". Gaby ya **no** tiene que quitar las MATRIZ a mano (comentario 2, 2026-06-11). En `prueba-junio`: 619 MATRIZ de 956 ventas → la vista por defecto muestra 337. Ver [[project_columna_deposito_matriz]].
 - ⚠️ **El cruce con el detalle de colecta NO es por `# de venta`** (regla corregida por Gaby el 2026-06-08). Mercado Libre asigna a veces **2 folios distintos a la misma venta** (uno en cada reporte), así que el número no cruza fiable. **El cruce es por fecha + título**:
   - Ventas ML: fecha = col **B**, título = col **X**.
   - Colecta: fecha = col **A**, título = col **E**.
@@ -60,7 +61,7 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
   1. **Código exacto**: `NoIdentificacion` del XML == SKU de la venta (o substring). Ej. KIM: `23530559-Z` == `23530559-Z`.
   2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
   3. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
-- ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col K = Agencia ML / Sin info) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
+- ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
 
 ### PENDIENTES ACDELCO y LISTA PRECIOS KG
@@ -181,7 +182,9 @@ Schema canónico en `backend/database.py`. Resumen:
 ```
 proveedores       (id, nombre, rfc, codigo_bodega, contacto_*, activo)
 usuarios          (id, email, password_hash, rol[admin|proveedor], proveedor_id)
-ventas_ml         (num_venta PK, sku, fecha_venta, estado, titulo, total,
+ventas_ml         (num_venta PK, sku, deposito, fecha_venta, estado, titulo, total,
+                   -- deposito = bodega de origen (col C 'Depósito' del reporte ML).
+                   --   MATRIZ se oculta por defecto en Ventas (ruido, no dropshipping).
                    comprador, comprador_estado, forma_entrega,
                    factura_adjunta_ml, devolucion_unidades, reclamos)
 envios_colecta    (num_envio PK, num_venta, num_venta_ml, match_cruce_confianza,

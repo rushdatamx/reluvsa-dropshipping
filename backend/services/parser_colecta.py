@@ -1,9 +1,15 @@
 """
 Parser de 'Detalle envios de colecta.xlsx'.
 
-Headers en fila 8 (index 7). 13 columnas con datos. Col J=10 'Lugar indicado',
-col K=11 'Lugar desde donde hiciste el envío' (la que importa, según Gaby).
-Col L=12 'Cumplió con lo indicado' (Sí/No).
+Headers en fila 8 (index 7). 13 columnas con datos.
+Col J=9  'Lugar indicado para enviar'        -> la que ASIGNA proveedor (regla Gaby 2026-06-11).
+Col K=10 'Lugar desde donde hiciste el envío' -> ML casi nunca la llena bien
+         ("Sin información del lugar" / "Agencia de Mercado Libre"); se conserva solo como dato.
+Col L=11 'Cumplió con lo indicado' (Sí/No).
+
+⚠️ CAMBIO DE REGLA (2026-06-11): antes el proveedor se derivaba de K. Gaby reportó que
+ML falla en K (en datos reales K resuelve 4% vs J 32%), así que el proveedor ahora se
+deriva de J. Ver CLAUDE.md sección 3.
 """
 import re
 from datetime import datetime
@@ -22,7 +28,7 @@ SHEETS_PRIORIDAD = ["Últimas 4 semanas", "Última semana"]
 CRUCE_VENTANA_SEGUNDOS = 300       # ±5 min de tolerancia en la fecha de venta
 CRUCE_TITULO_MIN = 85             # umbral fuzzy token_set_ratio sobre el título
 
-# Mapeo Lugar (columna K) → codigo_bodega de proveedor
+# Mapeo Lugar (columna J 'Lugar indicado') → codigo_bodega de proveedor
 LUGAR_A_BODEGA = {
     "AG": "AG",
     "CAUPLAS": "CAUPLAS",
@@ -202,8 +208,8 @@ def parse_colecta(path: Path) -> dict:
 
             num_envio = str(row[1]).strip()
             num_venta = str(row[2]).strip() if row[2] else None
-            lugar_indicado = str(row[9]).strip() if row[9] else None
-            lugar_real_raw = str(row[10]).strip() if row[10] else None
+            lugar_indicado = str(row[9]).strip() if row[9] else None   # col J -> ASIGNA proveedor
+            lugar_real_raw = str(row[10]).strip() if row[10] else None  # col K -> solo dato
             lugar_real = (
                 None if (lugar_real_raw and "sin información" in lugar_real_raw.lower())
                 else lugar_real_raw
@@ -213,8 +219,9 @@ def parse_colecta(path: Path) -> dict:
             excluido_raw = row[12] if len(row) > 12 else None
             excluido = 1 if (excluido_raw and str(excluido_raw).strip().lower() in ("sí", "si")) else 0
 
-            proveedor_id = _resolver_proveedor(conn, lugar_real)
-            if proveedor_id is None and lugar_real:
+            # El proveedor se deriva de la columna J (Lugar indicado), no de K (Gaby 2026-06-11).
+            proveedor_id = _resolver_proveedor(conn, lugar_indicado)
+            if proveedor_id is None and lugar_indicado:
                 sin_proveedor += 1
 
             data = (

@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 CREATE TABLE IF NOT EXISTS ventas_ml (
     num_venta TEXT PRIMARY KEY,
     sku TEXT,
+    deposito TEXT,
     fecha_venta TIMESTAMP,
     estado TEXT,
     titulo TEXT,
@@ -225,6 +226,8 @@ def init_database():
         _migrar_envios_sin_fk(cursor)
         _migrar_columnas_cruce(cursor)
         _migrar_rfc_keepongreen(cursor)
+        _migrar_proveedor_desde_lugar_indicado(cursor)
+        _migrar_columna_deposito(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -330,6 +333,64 @@ def _migrar_rfc_keepongreen(cursor):
     )
     if cursor.rowcount:
         print("[migracion] RFC de KeepOnGreen actualizado a STR910211DT2.")
+
+
+def _migrar_columna_deposito(cursor):
+    """Migración idempotente: agrega ventas_ml.deposito si la BD existente aún no la
+    tiene. El reporte de Ventas ML trae una columna 'Depósito' (MATRIZ/KIM/CAUPLAS/...)
+    que marca la bodega de cada venta; la usamos para ocultar el ruido de MATRIZ
+    (bodega propia, no dropshipping) por defecto. CREATE TABLE IF NOT EXISTS no altera
+    una tabla ya creada, por eso hace falta ALTER TABLE ADD COLUMN. El índice va aquí
+    (no en el SCHEMA) porque la columna recién existe tras el ALTER.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "deposito" not in cols:
+        cursor.execute("ALTER TABLE ventas_ml ADD COLUMN deposito TEXT")
+        print("[migracion] ventas_ml.deposito agregada.")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_deposito ON ventas_ml(deposito)")
+
+
+def _migrar_proveedor_desde_lugar_indicado(cursor):
+    """Migración idempotente: re-resuelve envios_colecta.proveedor_id desde la
+    columna J (lugar_indicado) en vez de K (lugar_real). Cambio de regla de Gaby
+    (2026-06-11): ML casi nunca llena bien la K, así que el proveedor se deriva del
+    'Lugar indicado'. Las BDs ya cargadas tienen el proveedor resuelto con la lógica
+    vieja (K); aquí lo recalculamos. RESPETA lugar_override: si un envío fue
+    reasignado a mano, su proveedor sale del override, no de J.
+
+    Se ejecuta en cada arranque (idempotente: el resultado converge). En prod la BD
+    está vacía hoy, así que no toca filas hasta que se vuelva a subir colecta.
+    """
+    # ¿Hay envíos? (evita trabajo si la tabla está vacía, p.ej. prod recién entregado)
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(envios_colecta)").fetchall()}
+    if "lugar_indicado" not in cols:
+        return  # tabla aún no migrada con esa columna; nada que hacer
+
+    # codigo_bodega -> id (los valores que no matchean, como MATRIZ/Agencia ML/Sin
+    # información, dejan proveedor_id en NULL, que es justo lo correcto).
+    prov = {
+        r["codigo_bodega"]: r["id"]
+        for r in cursor.execute("SELECT id, codigo_bodega FROM proveedores").fetchall()
+    }
+
+    envios = cursor.execute(
+        "SELECT num_envio, lugar_indicado, lugar_override, proveedor_id FROM envios_colecta"
+    ).fetchall()
+
+    actualizados = 0
+    for e in envios:
+        # El override manda sobre J; si no hay override, se usa el lugar indicado (J).
+        fuente = (e["lugar_override"] or e["lugar_indicado"] or "").strip().upper()
+        nuevo_prov = prov.get(fuente)  # None si no es un código de proveedor conocido
+        if nuevo_prov != e["proveedor_id"]:
+            cursor.execute(
+                "UPDATE envios_colecta SET proveedor_id = ? WHERE num_envio = ?",
+                (nuevo_prov, e["num_envio"]),
+            )
+            actualizados += 1
+
+    if actualizados:
+        print(f"[migracion] proveedor_id re-resuelto desde 'Lugar indicado' (J): {actualizados} envíos.")
 
 
 def _bootstrap_admin(cursor):

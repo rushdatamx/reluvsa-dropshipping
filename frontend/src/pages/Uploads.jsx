@@ -74,7 +74,7 @@ export default function Uploads() {
         />
         <UploadCard
           title="Detalle de envíos de colecta"
-          description="Excel oficial de colecta. Asigna proveedor automáticamente por columna K (Lugar real) y respeta overrides manuales."
+          description="Excel oficial de colecta. Asigna proveedor automáticamente por columna J (Lugar indicado) y respeta overrides manuales."
           onSubmit={subirColecta}
         />
       </div>

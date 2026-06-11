@@ -4,9 +4,12 @@ Parser del reporte de Ventas Mercado Libre.
 El archivo tiene 66 columnas con 2 niveles de header (fila índice 4 = categorías
 mergeadas tipo 'Ventas'/'Publicaciones', fila índice 5 = nombres reales). Datos
 arrancan en fila índice 6. El header se detecta dinámicamente. Solo nos importan:
-- # de venta, Fecha de venta, Estado, Unidades, Total
+- # de venta, Depósito (bodega de origen), Fecha de venta, Estado, Unidades, Total
 - SKU, Título, Comprador, Estado del comprador, Forma de entrega
 - Factura adjunta, Unidades devueltas, Reclamos
+
+La columna 'Depósito' marca la bodega (MATRIZ/KIM/CAUPLAS/VAZLO/...). MATRIZ es bodega
+propia de RELUVSA (no dropshipping); el portal la oculta por defecto en Ventas.
 
 Las fechas vienen en español largo: "13 de mayo de 2026 23:43".
 """
@@ -132,6 +135,7 @@ def parse_ventas_ml(path: Path) -> dict:
         return None
 
     idx_num_venta = col("Ventas|# de venta", "# de venta")
+    idx_deposito = col("Depósito", "Deposito")  # bodega de origen (MATRIZ/KIM/CAUPLAS/...)
     idx_fecha = col("Ventas|Fecha de venta", "Fecha de venta")
     idx_estado = col("Ventas|Estado")
     idx_unidades = col("Ventas|Unidades", "Unidades")
@@ -166,6 +170,7 @@ def parse_ventas_ml(path: Path) -> dict:
             data = {
                 "num_venta": num_venta,
                 "sku": str(row[idx_sku]).strip() if idx_sku is not None and row[idx_sku] else None,
+                "deposito": str(row[idx_deposito]).strip() if idx_deposito is not None and row[idx_deposito] else None,
                 "fecha_venta": _parse_fecha(row[idx_fecha]) if idx_fecha is not None else None,
                 "estado": str(row[idx_estado]).strip() if idx_estado is not None and row[idx_estado] else None,
                 "titulo": str(row[idx_titulo]).strip() if idx_titulo is not None and row[idx_titulo] else None,
@@ -186,12 +191,12 @@ def parse_ventas_ml(path: Path) -> dict:
 
             if existing:
                 conn.execute(
-                    """UPDATE ventas_ml SET sku=?, fecha_venta=?, estado=?, titulo=?, unidades=?, total=?,
+                    """UPDATE ventas_ml SET sku=?, deposito=?, fecha_venta=?, estado=?, titulo=?, unidades=?, total=?,
                                             comprador=?, comprador_estado=?, forma_entrega=?, factura_adjunta_ml=?,
                                             devolucion_unidades=?, reclamo_abierto=?, reclamo_cerrado=?
                        WHERE num_venta=?""",
                     (
-                        data["sku"], data["fecha_venta"], data["estado"], data["titulo"], data["unidades"],
+                        data["sku"], data["deposito"], data["fecha_venta"], data["estado"], data["titulo"], data["unidades"],
                         data["total"], data["comprador"], data["comprador_estado"], data["forma_entrega"],
                         data["factura_adjunta_ml"], data["devolucion_unidades"], data["reclamo_abierto"],
                         data["reclamo_cerrado"], num_venta,
@@ -200,12 +205,12 @@ def parse_ventas_ml(path: Path) -> dict:
                 updated += 1
             else:
                 conn.execute(
-                    """INSERT INTO ventas_ml (num_venta, sku, fecha_venta, estado, titulo, unidades, total,
+                    """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, estado, titulo, unidades, total,
                                               comprador, comprador_estado, forma_entrega, factura_adjunta_ml,
                                               devolucion_unidades, reclamo_abierto, reclamo_cerrado)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        num_venta, data["sku"], data["fecha_venta"], data["estado"], data["titulo"],
+                        num_venta, data["sku"], data["deposito"], data["fecha_venta"], data["estado"], data["titulo"],
                         data["unidades"], data["total"], data["comprador"], data["comprador_estado"],
                         data["forma_entrega"], data["factura_adjunta_ml"], data["devolucion_unidades"],
                         data["reclamo_abierto"], data["reclamo_cerrado"],
