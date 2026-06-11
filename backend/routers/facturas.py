@@ -82,11 +82,17 @@ async def upload(
 
     try:
         parsed = parse_cfdi_xml(xml_path)
+    except ValueError as exc:
+        # Error de validación con mensaje ya legible (ej. no es un CFDI).
+        xml_path.unlink(missing_ok=True)
+        if pdf_path:
+            pdf_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         xml_path.unlink(missing_ok=True)
         if pdf_path:
             pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"XML inválido: {exc}")
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el XML: {exc}")
 
     with get_db() as conn:
         # El RFC emisor del XML debe ser el del proveedor logueado: un proveedor no

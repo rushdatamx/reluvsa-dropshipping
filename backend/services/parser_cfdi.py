@@ -39,6 +39,15 @@ def parse_cfdi_xml(path: Path) -> dict:
     tree = etree.parse(str(path))
     root = tree.getroot()
 
+    # Candado: la raíz debe ser cfdi:Comprobante (CFDI 4.0 / 3.3). Si suben otro XML
+    # (cualquier cosa con .xml), damos un error claro en vez de parsear basura.
+    tag_local = root.tag.split("}", 1)[-1]
+    if tag_local != "Comprobante":
+        raise ValueError(
+            "El XML no es un CFDI (comprobante fiscal). Sube el XML de la factura "
+            "timbrada que te entrega tu sistema de facturación."
+        )
+
     # Soporta CFDI 4.0 y 3.3
     ns_uri = root.tag.split("}", 1)[0].lstrip("{") if "}" in root.tag else ""
     ns = {"cfdi": ns_uri} if ns_uri else NS

@@ -64,6 +64,13 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
 
+### Candado de tipo de archivo en uploads (2026-06-11)
+- Gaby subió por error el archivo equivocado en una sección. Los endpoints validaban solo la extensión, no el contenido. Se agregó `services/detector_archivo.py::detectar_tipo_xlsx` que identifica el tipo por su **huella de contenido** (robusto al renombrado):
+  - **Ventas ML**: hoja "Ventas MX" o header con "# de venta" + "Depósito".
+  - **Colecta**: hojas "Última semana"/"Últimas 4 semanas", o "Envíos con colecta", o header "Fecha de la venta" + "# de envío".
+- `routers/uploads.py::_validar_tipo` rechaza con **400 y mensaje cruzado claro** si el archivo no corresponde a la sección ("Este archivo parece ser de «Colecta», no de «Ventas»…"). Nada entra a la BD si no es el correcto.
+- Facturas (`parser_cfdi.py`): la raíz debe ser `cfdi:Comprobante`; si suben otro XML → 400 "no es un CFDI". El frontend ya muestra `error.response.data.detail`. Ver [[project_candado_tipo_archivo]].
+
 ### PENDIENTES ACDELCO y LISTA PRECIOS KG
 - **NO** son para el motor de cruces.
 - Son entradas del **Módulo 2 (publicaciones masivas)** — pendiente de implementar.
