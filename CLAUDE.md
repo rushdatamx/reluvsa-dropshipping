@@ -217,13 +217,34 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-11, ENTREGADO A GABY — esperando sus comentarios)
+## 8. Estado actual (último update: 2026-06-11 PM — 1ra tanda de comentarios de Gaby RESUELTA y desplegada)
 
-### 📍 PRÓXIMA SESIÓN: PROCESAR COMENTARIOS DE GABY — arrancar aquí
-**El portal ya se ENTREGÓ a Gaby y ella ya lo usó y pasó comentarios.** La próxima sesión arranca
-directamente en esos comentarios (Mario los traerá). Para cada uno: clasificar (bug / mejora /
-duda-capacitación) y resolver. Ver memoria [[project_comentarios_gaby]] (punto de entrada con todo
-el contexto fresco para procesarlos).
+### 📍 PRÓXIMA SESIÓN: arrancar aquí
+**1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
+06-10/06-11). Luego: esperar la siguiente tanda de comentarios de Gaby, o arrancar el Módulo 2
+(publicaciones masivas, único bloque grande sin iniciar). Ver [[project_comentarios_gaby]].
+
+### 📍 CIERRE SESIÓN 2026-06-11 PM (PROCESADOS LOS PRIMEROS COMENTARIOS DE GABY)
+**Contexto:** tras entregar el portal (06-10/11), Gaby lo usó y mandó comentarios por WhatsApp.
+Se procesaron en 2 tandas, todas resueltas + desplegadas + verificadas E2E. BD de prod se vació
+2 veces (a pedido; lo que Gaby cargaba era prueba). **Commits `f117302` + `0b43925` en `main`,
+Railway+Vercel OK.**
+
+**Los 4 temas resueltos (cada uno con su memoria):**
+1. ✅ **Proveedor de colecta por columna J, no K** (cambio de regla). ML falla en K; J resuelve
+   305 envíos vs 39 con K. `parser_colecta.py` lee J + migración idempotente que respeta override.
+   Ver [[project_columna_j_no_k]].
+2. ✅ **Ocultar ruido de ventas MATRIZ.** El reporte de Ventas ML trae col C 'Depósito'; se captura
+   en `ventas_ml.deposito` y Ventas oculta MATRIZ por defecto (filtro Solo proveedores/MATRIZ/Todos).
+   Ver [[project_columna_deposito_matriz]].
+3. ✅ **Paginación en Ventas** (bug "solo veo 1 página"). El backend ya paginaba; se agregó la UI:
+   botones ‹Anterior/Siguiente›, 50/página, "Página X de Y". Ver sección 3 Ventas ML.
+4. ✅ **Candado de tipo de archivo en uploads.** Gaby subió un archivo equivocado; ahora el portal
+   valida el tipo por CONTENIDO (no por nombre) y rechaza 400 con mensaje cruzado. `detector_archivo.py`.
+   Ver [[project_candado_tipo_archivo]] y la sección "Candado de tipo de archivo" arriba.
+
+**BD de prod:** VACÍA (último wipe `bak-20260611_164949`), proveedores+usuarios intactos.
+**Único pendiente:** rotar password de admin (arriba).
 
 ### 📍 CIERRE SESIÓN 2026-06-10/11 (ENTREGA A GABY) — qué se hizo antes de entregar
 **Contexto:** Mario quiso entregar el portal para que Gaby lo probara con datos 100% reales. Se
