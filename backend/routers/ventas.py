@@ -9,8 +9,44 @@ from fastapi.responses import StreamingResponse
 from database import get_db
 from models import UserInfo
 from routers.auth import get_current_user
+from services.folio_factura import formatear_folio
 
 router = APIRouter(prefix="/api/ventas", tags=["ventas"])
+
+_MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun",
+                 "jul", "ago", "sep", "oct", "nov", "dic"]
+
+
+def _folios_facturas(raw):
+    """Convierte el group_concat 'serie|folio|codigo_bodega,serie|folio|codigo_bodega'
+    en los # de factura que ve el proveedor, separados por ', '. Vacío si no hay."""
+    if not raw:
+        return ""
+    nums = []
+    for item in raw.split(","):
+        partes = item.split("|")
+        if len(partes) != 3:
+            continue
+        serie, folio, cod = partes
+        num = formatear_folio(cod, serie, folio)
+        if num and num not in nums:
+            nums.append(num)
+    return ", ".join(nums)
+
+
+def _fecha_corta(iso):
+    """Formato corto legible para el CSV ('2026-05-13 23:43' -> '13 may 2026'),
+    igual que la tabla de Ventas en el frontend."""
+    if not iso:
+        return ""
+    s = str(iso)
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        try:
+            anio, mes, dia = int(s[0:4]), int(s[5:7]), int(s[8:10])
+            return f"{dia} {_MESES_CORTOS[mes - 1]} {anio}"
+        except (ValueError, IndexError):
+            pass
+    return s
 
 
 def _construir_filtros(
@@ -103,7 +139,17 @@ _SELECT_VENTAS = """
            v.total, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.proveedor_id, p.nombre as proveedor_nombre,
-           (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count
+           (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
+           -- Facturas cruzadas a esta venta: cada una como 'serie|folio|codigo_bodega',
+           -- separadas por coma (group_concat DISTINCT usa coma fija). DISTINCT porque una
+           -- factura puede tener varios conceptos cruzando a la misma venta. Se formatea por
+           -- proveedor en Python (formatear_folio). serie/folio no contienen comas (CFDI).
+           (SELECT group_concat(DISTINCT
+                       IFNULL(f3.serie,'') || '|' || IFNULL(f3.folio,'') || '|' || IFNULL(p3.codigo_bodega,''))
+            FROM factura_conceptos fc3
+            JOIN facturas f3 ON f3.id = fc3.factura_id
+            JOIN proveedores p3 ON p3.id = f3.proveedor_id
+            WHERE fc3.num_venta_match = v.num_venta) as facturas_raw
     FROM ventas_ml v
     LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
@@ -153,11 +199,17 @@ def listar(
         """
         total = conn.execute(count_sql, count_params).fetchone()["c"]
 
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["facturas_num"] = _folios_facturas(d.pop("facturas_raw", None))
+        items.append(d)
+
     return {
         "page": page,
         "limit": limit,
         "total": total,
-        "items": [dict(r) for r in rows],
+        "items": items,
     }
 
 
@@ -192,16 +244,17 @@ def export_csv(
     w = csv.writer(buf)
     w.writerow([
         "Num venta", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
-        "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada",
+        "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada", "Num factura",
     ])
     for r in rows:
         w.writerow([
-            r["num_venta"], r["sku"] or "", r["deposito"] or "", r["fecha_venta"] or "", r["estado"] or "",
+            r["num_venta"], r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]), r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",
             r["num_envio"] or "", r["lugar_indicado"] or "", r["lugar_override"] or "",
             r["proveedor_nombre"] or "", _sla_txt(r["cumplio_sla"]),
             "Si" if r["facturas_count"] > 0 else "No",
+            _folios_facturas(r["facturas_raw"]),
         ])
     buf.seek(0)
     return StreamingResponse(

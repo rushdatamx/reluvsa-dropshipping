@@ -54,6 +54,19 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
   - Ventas ML: fecha = col **B**, título = col **X**.
   - Colecta: fecha = col **A**, título = col **E**.
   - Implementado: `envios_colecta.num_venta_ml` (el num_venta canónico de ML) se resuelve **una vez** en `services/parser_colecta.py::resolver_cruce_ventas` (directo por num_venta → fallback fecha ±5 min + título fuzzy ≥85). Todos los JOIN venta↔colecta usan `e.num_venta_ml = v.num_venta`. Ver memoria [[project_cruce_fecha_titulo]].
+- **Columnas que ve Gaby en la tabla Ventas (2026-06-16, 2da tanda de comentarios):** además de Venta/SKU/Título/Proveedor/SLA/Factura, la tabla muestra **Fecha** (de venta, formato corto `13 may 2026`), **Unidades** (col **H** del reporte ML, ya mapeada a `ventas_ml.unidades`) y **Factura #** (el folio del proveedor una vez hecho el cruce). Las 3 también salen en el **CSV de export**. Todo el dato ya existía punta a punta; fue render + un helper de formato. Ver [[project_columnas_ventas_factura]].
+
+### Número de factura por proveedor (columna "Factura #" en Ventas)
+- ⚠️ El "# de factura" que cada proveedor ve en su **PDF** NO es un campo aparte: es la **combinación de `Serie` + `Folio` del XML** (que el parser ya extrae), recombinada con orden/separador propio de cada proveedor. **No se lee el PDF.** Reglas en `services/folio_factura.py::formatear_folio` (llave = `codigo_bodega`):
+  | Proveedor | Lo ve como | Regla | Verificado |
+  |---|---|---|---|
+  | KIM | `K26804` | `Serie+Folio` | ✅ XML real |
+  | CAUPLAS | `970091508 CD` | `Folio + ' ' + Serie` (invertido) | ✅ XML real |
+  | KG | `S 464516` | `Serie + ' ' + Folio` | ✅ XML real |
+  | AG | `1000030…` | `Folio` | ⚠️ deducido (sin XML aún) |
+  | VAZLO | `FVC02755…` | `Serie+Folio` | ⚠️ deducido (sin XML aún) |
+- El listado de ventas y el CSV traen las facturas cruzadas con `group_concat(DISTINCT serie|folio|codigo_bodega)` (subquery sobre `factura_conceptos.num_venta_match`) y las formatean en Python (`routers/ventas.py::_folios_facturas`). Multi-factura por venta → se listan separadas por coma (no se esconde el caso anómalo: 2 facturas a la misma venta es señal para Gaby).
+- **Pendiente:** validar AG y VAZLO contra su primer XML real (ajuste de 1 línea si el patrón no calza).
 
 ### Facturas
 - Cada proveedor sube **XML + PDF** desde su cuenta.
@@ -217,12 +230,36 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-11 PM — 1ra tanda de comentarios de Gaby RESUELTA y desplegada)
+## 8. Estado actual (último update: 2026-06-16 — 2da tanda de comentarios de Gaby RESUELTA y desplegada)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 **1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
-06-10/06-11). Luego: esperar la siguiente tanda de comentarios de Gaby, o arrancar el Módulo 2
-(publicaciones masivas, único bloque grande sin iniciar). Ver [[project_comentarios_gaby]].
+06-10/06-11 — sigue sin rotarse). Luego: esperar la siguiente tanda de comentarios de Gaby, o
+arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar). Ver
+[[project_comentarios_gaby]].
+**Pendiente puntual de esta tanda:** validar el formato de "Factura #" de **AG** y **VAZLO** contra
+su primer XML real (las reglas de KIM/CAUPLAS/KG sí se verificaron; AG/VAZLO van deducidas).
+
+### 📍 CIERRE SESIÓN 2026-06-16 (2da tanda de comentarios de Gaby — 4 mejoras a la pestaña Ventas)
+**Contexto:** Gaby siguió usando el portal y pidió por WhatsApp 4 mejoras, todas sobre la pestaña
+**Ventas** y su CSV. Se procesaron una por una (analizar → confirmar → ejecutar). Commit en `main`,
+deploys Railway+Vercel disparados por el push.
+
+**Las 4 mejoras (todas en la tabla Ventas + su export):**
+1. ✅ **Columna Fecha de venta** (formato corto `13 may 2026`), después de "Venta". Solo frontend;
+   el dato `fecha_venta` ya venía del backend. `Ventas.jsx` (helper `fechaCorta`).
+2. ✅ **Columna Unidades** (col **H** del reporte ML, ya en `ventas_ml.unidades`), después de "Título".
+   Solo frontend; dato ya disponible punta a punta.
+3. ✅ **Fecha + Unidades en el CSV.** El CSV ya las incluía desde la entrega; se ajustó la fecha a
+   formato corto igual que la tabla (`ventas.py::_fecha_corta`).
+4. ✅ **Columna "Factura #"** (el folio del proveedor una vez hecho el cruce) en tabla + CSV. El
+   número que ve cada proveedor en su PDF = **Serie+Folio del XML** recombinados con su propio
+   formato; NO se lee el PDF. Reglas por proveedor en `services/folio_factura.py`. Verificado E2E
+   con BD real (KIM→`K26804`, CAUPLAS→`970091508 CD`). Ver [[project_columnas_ventas_factura]].
+
+**Archivos tocados:** `frontend/src/pages/Ventas.jsx`, `backend/routers/ventas.py`,
+`backend/services/folio_factura.py` (nuevo). **Cero cambios de schema/BD** (todo el dato ya existía).
+**BD de prod:** intacta (no se tocó; sigue vacía salvo lo que Gaby haya cargado de prueba).
 
 ### 📍 CIERRE SESIÓN 2026-06-11 PM (PROCESADOS LOS PRIMEROS COMENTARIOS DE GABY)
 **Contexto:** tras entregar el portal (06-10/11), Gaby lo usó y mandó comentarios por WhatsApp.

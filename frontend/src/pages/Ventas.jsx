@@ -17,6 +17,18 @@ const FILTROS_VACIOS = {
 
 const LIMIT = 50; // ventas por página
 
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+// Formato corto legible para la fecha de venta (ISO -> "13 may 2026"). La fecha
+// llega como ISO con o sin hora (p.ej. "2026-05-13 23:43" o "2026-05-13").
+function fechaCorta(iso) {
+  if (!iso) return '—';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const [, anio, mes, dia] = m;
+  return `${parseInt(dia, 10)} ${MESES_CORTOS[parseInt(mes, 10) - 1]} ${anio}`;
+}
+
 export default function Ventas() {
   const { isAdmin } = useAuth();
   const [data, setData] = useState({ items: [], total: 0, page: 1 });
@@ -207,18 +219,21 @@ export default function Ventas() {
             <thead className="bg-notion-bg-subtle border-b border-notion-border">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Venta</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Fecha</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Unidades</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Proveedor / Bodega</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SLA</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Factura</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Factura #</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
+                <tr><td colSpan="9" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
               ) : data.items.length === 0 ? (
-                <tr><td colSpan="6" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
+                <tr><td colSpan="9" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
@@ -236,8 +251,10 @@ export default function Ventas() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-xs text-notion-text-secondary whitespace-nowrap">{fechaCorta(v.fecha_venta)}</td>
                   <td className="px-4 py-3 font-mono text-xs text-reluvsa-red">{v.sku || '—'}</td>
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
+                  <td className="px-4 py-3 text-xs">{v.unidades != null ? v.unidades : '—'}</td>
                   <td className="px-4 py-3">
                     {v.proveedor_nombre ? (
                       <div className="flex items-center gap-2">
@@ -286,6 +303,9 @@ export default function Ventas() {
                         <AlertCircle size={14} /> Pendiente
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
+                    {v.facturas_num ? v.facturas_num : <span className="text-notion-text-secondary">—</span>}
                   </td>
                 </tr>
               ))}
