@@ -55,6 +55,7 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
   - Colecta: fecha = col **A**, título = col **E**.
   - Implementado: `envios_colecta.num_venta_ml` (el num_venta canónico de ML) se resuelve **una vez** en `services/parser_colecta.py::resolver_cruce_ventas` (directo por num_venta → fallback fecha ±5 min + título fuzzy ≥85). Todos los JOIN venta↔colecta usan `e.num_venta_ml = v.num_venta`. Ver memoria [[project_cruce_fecha_titulo]].
 - **Columnas que ve Gaby en la tabla Ventas (2026-06-16, 2da tanda de comentarios):** además de Venta/SKU/Título/Proveedor/SLA/Factura, la tabla muestra **Fecha** (de venta, formato corto `13 may 2026`), **Unidades** (col **H** del reporte ML, ya mapeada a `ventas_ml.unidades`) y **Factura #** (el folio del proveedor una vez hecho el cruce). Las 3 también salen en el **CSV de export**. Todo el dato ya existía punta a punta; fue render + un helper de formato. Ver [[project_columnas_ventas_factura]].
+- **Columna # de albarán (2026-06-17):** Gaby aporta el **# de albarán** de cada venta en **su propio Excel** (2 columnas: `# de venta` + `# de albarán`) — NO viene en el reporte de Ventas ML ni de colecta. Se sube por un **uploader propio** (`POST /api/uploads/albaran`, 3a tarjeta en Uploads.jsx) que cruza **por num_venta directo** (1:1, NO fecha+título) y hace **solo UPDATE** sobre `ventas_ml.albaran` (parser `services/parser_albaran.py`): si la venta no existe la cuenta como `no_encontrados` (no crea huérfana); fila con albarán vacío no borra el existente. Se muestra como **columna "Albarán"** en la tabla Ventas (junto a Venta) y en el **CSV**. El candado de tipo de archivo reconoce el tipo `"albaran"`. Cero infra nueva (solo columna en tabla existente). Ver [[project_albaran]].
 
 ### Número de factura por proveedor (columna "Factura #" en Ventas)
 - ⚠️ El "# de factura" que cada proveedor ve en su **PDF** NO es un campo aparte: es la **combinación de `Serie` + `Folio` del XML** (que el parser ya extrae), recombinada con orden/separador propio de cada proveedor. **No se lee el PDF.** Reglas en `services/folio_factura.py::formatear_folio` (llave = `codigo_bodega`):
@@ -230,15 +231,41 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-16 — 2da tanda de comentarios de Gaby RESUELTA y desplegada)
+## 8. Estado actual (último update: 2026-06-17 — columna # de albarán + uploader, desplegada)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 **1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
 06-10/06-11 — sigue sin rotarse). Luego: esperar la siguiente tanda de comentarios de Gaby, o
 arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar). Ver
 [[project_comentarios_gaby]].
-**Pendiente puntual de esta tanda:** validar el formato de "Factura #" de **AG** y **VAZLO** contra
-su primer XML real (las reglas de KIM/CAUPLAS/KG sí se verificaron; AG/VAZLO van deducidas).
+**Pendientes puntuales:**
+- Validar el formato de "Factura #" de **AG** y **VAZLO** contra su primer XML real (las reglas
+  de KIM/CAUPLAS/KG sí se verificaron; AG/VAZLO van deducidas).
+- **Pedir a Gaby una muestra del Excel REAL de albaranes** para confirmar los nombres de
+  encabezado. El parser tolera variaciones comunes (`# de venta`/`venta`, `albarán`/`albaran`),
+  pero si su archivo usa otro nombre de columna es ajuste de 1 línea en `parser_albaran.py`.
+
+### 📍 CIERRE SESIÓN 2026-06-17 (COLUMNA # DE ALBARÁN — comentario suelto de Gaby)
+**Contexto:** Gaby pidió por WhatsApp poder subir un archivo con el **# de albarán** de cada
+venta y verlo en Ventas para identificar rápido cuáles ya lo tienen. Tras platicarlo con ella,
+el alcance fue: nueva página en el sidebar para cargar un **Excel** (2 cols: `# de venta` +
+`# de albarán`), cruce por num_venta, columna "Albarán" en Ventas + CSV. Commit `7408bfd` en
+`main`, deploys Railway+Vercel disparados por el push.
+
+**Lo que se hizo (8 archivos, verificado E2E local con BD desechable):**
+- ✅ **`ventas_ml.albaran`** (schema + migración idempotente `_migrar_columna_albaran`). Vive en
+  ventas_ml porque el cruce es 1:1 por num_venta → la query de Ventas no necesita otro JOIN.
+- ✅ **`services/parser_albaran.py`** (nuevo): detecta las 2 columnas por contenido (anclas
+  tolerantes), **solo UPDATE** (no crea ventas huérfanas; `no_encontrados` si el num_venta no
+  existe), fila con albarán vacío no borra el existente. Devuelve `{actualizados, no_encontrados, sin_albaran}`.
+- ✅ **`detector_archivo.py`**: nuevo tipo `"albaran"` (candado de tipo de archivo) — venta +
+  albarán sin las anclas de ventas/colecta, evaluado después para no pisarlas.
+- ✅ **`POST /api/uploads/albaran`** (admin) + 3a tarjeta en `Uploads.jsx` + columna "Albarán" en
+  `Ventas.jsx` (junto a Venta) + columna "Albaran" en el CSV de `ventas.py`.
+
+**Infra:** CERO cambios en Railway (Mario preguntó). Es solo una columna nueva en una tabla
+existente; la migración corre sola al arrancar (volumen `/data` intacto), mismo patrón que
+deposito/unidades. **BD de prod:** intacta (sigue vacía salvo lo que Gaby cargue). Ver [[project_albaran]].
 
 ### 📍 CIERRE SESIÓN 2026-06-16 (2da tanda de comentarios de Gaby — 4 mejoras a la pestaña Ventas)
 **Contexto:** Gaby siguió usando el portal y pidió por WhatsApp 4 mejoras, todas sobre la pestaña
