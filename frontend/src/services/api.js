@@ -76,5 +76,13 @@ export const subirColecta = (file) => {
     timeout: 120000,
   });
 };
+export const subirAlbaranes = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.post('/uploads/albaran', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
 
 export default api;

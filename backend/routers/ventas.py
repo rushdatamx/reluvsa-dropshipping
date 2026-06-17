@@ -136,7 +136,7 @@ def _construir_filtros(
 
 _SELECT_VENTAS = """
     SELECT v.num_venta, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
-           v.total, v.comprador_estado, v.forma_entrega,
+           v.total, v.albaran, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.proveedor_id, p.nombre as proveedor_nombre,
            (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
@@ -243,12 +243,13 @@ def export_csv(
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "Num venta", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
+        "Num venta", "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
         "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada", "Num factura",
     ])
     for r in rows:
         w.writerow([
-            r["num_venta"], r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]), r["estado"] or "",
+            r["num_venta"], r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
+            r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",
             r["num_envio"] or "", r["lugar_indicado"] or "", r["lugar_override"] or "",

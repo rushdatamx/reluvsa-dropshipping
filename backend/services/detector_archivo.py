@@ -7,8 +7,11 @@ Huellas únicas verificadas con los archivos reales:
 - Ventas ML : hoja "Ventas MX" o header con "# de venta" + "Depósito".
 - Colecta   : hojas "Última semana"/"Últimas 4 semanas", A1 "Envíos con colecta",
               o header con "Fecha de la venta" + "# de envío".
+- Albarán   : header con "# de venta" + "albarán", SIN las anclas de ventas/colecta.
+              (Excel simple de 2 columnas que arma Gaby: venta -> # de albarán.)
 Son mutuamente excluyentes: un reporte de ventas nunca trae "Envíos con colecta"
-ni la hoja de colecta, y viceversa.
+ni la hoja de colecta, y el de albaranes es el único que trae "albarán" sin las
+otras anclas.
 """
 from pathlib import Path
 from typing import Optional
@@ -65,6 +68,14 @@ def detectar_tipo_xlsx(path: Path) -> Optional[str]:
         # Ventas ML: el header trae "# de venta" + "depósito" juntos.
         if "# de venta" in texto and "depósito" in texto:
             return "ventas_ml"
+
+        # Albarán: Excel simple de Gaby con "# de venta" (o "venta") + "albarán/albaran".
+        # Va después de ventas/colecta para que esas anclas más específicas ganen primero
+        # (un reporte de ventas/colecta nunca trae la palabra "albarán").
+        tiene_venta = "# de venta" in texto or "venta" in texto
+        tiene_albaran = "albarán" in texto or "albaran" in texto
+        if tiene_venta and tiene_albaran:
+            return "albaran"
 
         return None
     finally:

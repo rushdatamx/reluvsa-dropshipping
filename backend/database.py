@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
     comprador TEXT,
     comprador_estado TEXT,
     forma_entrega TEXT,
+    -- albaran: # de albarán que aporta Gaby en un Excel aparte (uploader propio),
+    -- cruzado por num_venta. NO viene en el reporte de Ventas ML ni de colecta.
+    albaran TEXT,
     fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     factura_adjunta_ml TEXT,
     devolucion_unidades INTEGER DEFAULT 0,
@@ -228,6 +231,7 @@ def init_database():
         _migrar_rfc_keepongreen(cursor)
         _migrar_proveedor_desde_lugar_indicado(cursor)
         _migrar_columna_deposito(cursor)
+        _migrar_columna_albaran(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -348,6 +352,19 @@ def _migrar_columna_deposito(cursor):
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN deposito TEXT")
         print("[migracion] ventas_ml.deposito agregada.")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_deposito ON ventas_ml(deposito)")
+
+
+def _migrar_columna_albaran(cursor):
+    """Migración idempotente: agrega ventas_ml.albaran si la BD existente aún no la
+    tiene. El albarán lo aporta Gaby en un Excel aparte (su propio uploader) y se cruza
+    por num_venta; se muestra en la pestaña Ventas para identificar rápido qué ventas ya
+    lo tienen. CREATE TABLE IF NOT EXISTS no altera una tabla ya creada, por eso hace
+    falta ALTER TABLE ADD COLUMN explícito.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "albaran" not in cols:
+        cursor.execute("ALTER TABLE ventas_ml ADD COLUMN albaran TEXT")
+        print("[migracion] ventas_ml.albaran agregada.")
 
 
 def _migrar_proveedor_desde_lugar_indicado(cursor):

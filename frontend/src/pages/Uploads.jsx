@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, FileSpreadsheet } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { subirVentasML, subirColecta } from '../services/api';
+import { subirVentasML, subirColecta, subirAlbaranes } from '../services/api';
 
 function UploadCard({ title, description, onSubmit, accept = '.xlsx' }) {
   const [file, setFile] = useState(null);
@@ -76,6 +76,11 @@ export default function Uploads() {
           title="Detalle de envíos de colecta"
           description="Excel oficial de colecta. Asigna proveedor automáticamente por columna J (Lugar indicado) y respeta overrides manuales."
           onSubmit={subirColecta}
+        />
+        <UploadCard
+          title="Números de albarán"
+          description="Excel con 2 columnas: # de venta y # de albarán. Cruza por número de venta y agrega el albarán a las ventas ya cargadas (solo actualiza, no crea ventas nuevas)."
+          onSubmit={subirAlbaranes}
         />
       </div>
     </div>

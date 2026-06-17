@@ -219,6 +219,7 @@ export default function Ventas() {
             <thead className="bg-notion-bg-subtle border-b border-notion-border">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Venta</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Albarán</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Fecha</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
@@ -231,9 +232,9 @@ export default function Ventas() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="9" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
+                <tr><td colSpan="10" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
               ) : data.items.length === 0 ? (
-                <tr><td colSpan="9" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
+                <tr><td colSpan="10" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
@@ -250,6 +251,9 @@ export default function Ventas() {
                         {v.deposito}
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
+                    {v.albaran ? v.albaran : <span className="text-notion-text-secondary">—</span>}
                   </td>
                   <td className="px-4 py-3 text-xs text-notion-text-secondary whitespace-nowrap">{fechaCorta(v.fecha_venta)}</td>
                   <td className="px-4 py-3 font-mono text-xs text-reluvsa-red">{v.sku || '—'}</td>
