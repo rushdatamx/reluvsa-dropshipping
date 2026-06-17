@@ -11,6 +11,15 @@ DATABASE_PATH = os.getenv(
     str(Path(__file__).parent.parent / "data" / "dropshipping.db"),
 )
 
+# Directorio raíz de archivos subidos (PDF/XML de facturas, etc.). DEBE vivir en
+# almacenamiento persistente: en Railway solo el volumen (donde está la BD) sobrevive
+# a un redeploy; si los uploads se guardan en el filesystem de la app se pierden en
+# cada deploy. Por eso, por defecto, lo colgamos JUNTO a la BD (misma carpeta padre →
+# mismo volumen). Se puede forzar otra ruta con la env var UPLOADS_DIR.
+UPLOADS_DIR = Path(
+    os.getenv("UPLOADS_DIR", str(Path(DATABASE_PATH).parent / "uploads"))
+)
+
 
 def get_connection():
     Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)

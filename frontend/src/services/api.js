@@ -47,11 +47,28 @@ export const reasignarEnvio = (numEnvio, payload) =>
 
 // Facturas
 export const listarFacturas = (params = {}) => api.get('/facturas', { params });
+export const getFactura = (id) => api.get(`/facturas/${id}`);
+export const exportarFacturasCsv = (params = {}) =>
+  api.get('/facturas/export.csv', { params, responseType: 'blob' });
+// Los archivos van protegidos por JWT (header Authorization), así que se bajan como
+// blob por axios y luego se abren en otra pestaña / se descargan, en vez de <a href>.
+export const descargarArchivoFactura = (id, tipo) =>
+  api.get(`/facturas/${id}/${tipo}`, { responseType: 'blob' });
 export const subirFactura = (xmlFile, pdfFile) => {
   const fd = new FormData();
   fd.append('xml', xmlFile);
   if (pdfFile) fd.append('pdf', pdfFile);
   return api.post('/facturas/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
+// Sube varias facturas: N XML + N PDF (el backend los empareja por UUID/nombre).
+export const subirFacturasMultiple = (xmlFiles, pdfFiles) => {
+  const fd = new FormData();
+  (xmlFiles || []).forEach((f) => fd.append('xmls', f));
+  (pdfFiles || []).forEach((f) => fd.append('pdfs', f));
+  return api.post('/facturas/upload-multiple', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
 };
 
 // Incidencias
