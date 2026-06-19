@@ -126,7 +126,13 @@ def parse_ventas_ml(path: Path) -> dict:
         name_str = str(name).strip()
         key = f"{cat_str}|{name_str}".strip("|")
         col_map[key] = j
-        col_map[name_str] = j  # fallback
+        # Fallback por nombre suelto: NO sobrescribir si ya existe. El reporte ML repite
+        # el nombre "Unidades" en 3 columnas (Ventas col 7, Devoluciones col 49, Reclamos
+        # col 62) y la de Ventas —la que queremos— aparece primero. Sin este guard el
+        # fallback terminaba apuntando a la última (Reclamos, vacía) y "Unidades" salía
+        # siempre en 0/—. "Primera ocurrencia gana" da la columna correcta.
+        if name_str not in col_map:
+            col_map[name_str] = j
 
     def col(*candidates) -> Optional[int]:
         for c in candidates:
@@ -223,10 +229,16 @@ def parse_ventas_ml(path: Path) -> dict:
         from services.parser_colecta import resolver_cruce_ventas
         cruce = resolver_cruce_ventas(conn)
 
+        # Re-cruzar facturas huérfanas: si una factura entró antes que su venta,
+        # ahora que la venta existe el concepto puede cruzar (cruce retroactivo).
+        from services.matcher import recruzar_conceptos_sin_match
+        recruce = recruzar_conceptos_sin_match(conn)
+
     return {
         "ok": True,
         "inserted": inserted,
         "updated": updated,
         "skipped": skipped,
         **cruce,
+        **recruce,
     }

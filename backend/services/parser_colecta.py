@@ -269,6 +269,12 @@ def parse_colecta(path: Path) -> dict:
         # Resolver el cruce envío -> venta (fecha + título) ya con todo cargado.
         cruce = resolver_cruce_ventas(conn)
 
+        # Re-cruzar facturas huérfanas: la colecta es la que asigna proveedor al envío
+        # (col J), y el matcher solo cruza ventas cuyo envío tiene proveedor. Al cargar
+        # colecta nueva pueden volverse cruzables facturas que antes no lo eran.
+        from services.matcher import recruzar_conceptos_sin_match
+        recruce = recruzar_conceptos_sin_match(conn)
+
     return {
         "ok": True,
         "sheet_used": sheet_name,
@@ -276,4 +282,5 @@ def parse_colecta(path: Path) -> dict:
         "updated": updated,
         "envios_sin_proveedor_inferido": sin_proveedor,
         **cruce,
+        **recruce,
     }

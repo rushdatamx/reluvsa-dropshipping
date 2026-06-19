@@ -34,6 +34,32 @@ def _folios_facturas(raw):
     return ", ".join(nums)
 
 
+def _componentes_kit(raw):
+    """Convierte el group_concat 'codigo|cantidad,codigo|cantidad' en una lista de
+    dicts [{codigo, cantidad}]. Lista vacía si la venta no es un kit."""
+    if not raw:
+        return []
+    out = []
+    for item in raw.split(","):
+        partes = item.split("|")
+        if len(partes) != 2:
+            continue
+        codigo, cant = partes[0].strip(), partes[1].strip()
+        if not codigo:
+            continue
+        try:
+            cant_n = int(float(cant))
+        except (ValueError, TypeError):
+            cant_n = 1
+        out.append({"codigo": codigo, "cantidad": cant_n})
+    return out
+
+
+def _componentes_kit_texto(raw):
+    """Formato compacto para el CSV: 'KDTL-057 x1, KDTL-058 x1'. Vacío si no es kit."""
+    return ", ".join(f"{c['codigo']} x{c['cantidad']}" for c in _componentes_kit(raw))
+
+
 def _fecha_corta(iso):
     """Formato corto legible para el CSV ('2026-05-13 23:43' -> '13 may 2026'),
     igual que la tabla de Ventas en el frontend."""
@@ -149,7 +175,12 @@ _SELECT_VENTAS = """
             FROM factura_conceptos fc3
             JOIN facturas f3 ON f3.id = fc3.factura_id
             JOIN proveedores p3 ON p3.id = f3.proveedor_id
-            WHERE fc3.num_venta_match = v.num_venta) as facturas_raw
+            WHERE fc3.num_venta_match = v.num_venta) as facturas_raw,
+           -- Componentes del kit, si esta venta es un kit (su SKU está en kit_componentes).
+           -- Cada componente como 'codigo|cantidad', separados por coma. Vacío si no es kit.
+           (SELECT group_concat(kc.componente_codigo || '|' || kc.cantidad)
+            FROM kit_componentes kc
+            WHERE kc.kit_sku = UPPER(TRIM(v.sku))) as kit_componentes_raw
     FROM ventas_ml v
     LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
@@ -203,6 +234,7 @@ def listar(
     for r in rows:
         d = dict(r)
         d["facturas_num"] = _folios_facturas(d.pop("facturas_raw", None))
+        d["kit_componentes"] = _componentes_kit(d.pop("kit_componentes_raw", None))
         items.append(d)
 
     return {
@@ -245,6 +277,7 @@ def export_csv(
     w.writerow([
         "Num venta", "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
         "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada", "Num factura",
+        "Componentes kit",
     ])
     for r in rows:
         w.writerow([
@@ -256,6 +289,7 @@ def export_csv(
             r["proveedor_nombre"] or "", _sla_txt(r["cumplio_sla"]),
             "Si" if r["facturas_count"] > 0 else "No",
             _folios_facturas(r["facturas_raw"]),
+            _componentes_kit_texto(r["kit_componentes_raw"]),
         ])
     buf.seek(0)
     return StreamingResponse(

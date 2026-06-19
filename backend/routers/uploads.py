@@ -9,6 +9,7 @@ from routers.auth import require_admin
 from services.parser_ventas_ml import parse_ventas_ml
 from services.parser_colecta import parse_colecta
 from services.parser_albaran import parse_albaran
+from services.parser_kits import parse_kits
 from services.detector_archivo import detectar_tipo_xlsx
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
@@ -18,6 +19,7 @@ _NOMBRE_TIPO = {
     "ventas_ml": "Ventas de Mercado Libre",
     "colecta": "Detalle de envíos de colecta",
     "albaran": "Números de albarán",
+    "kits": "Relación kits → componentes",
 }
 
 
@@ -90,6 +92,19 @@ async def subir_albaran(file: UploadFile = File(...)):
     try:
         _validar_tipo(tmp, "albaran")
         result = parse_albaran(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return result
+
+
+@router.post("/kits", dependencies=[Depends(require_admin)])
+async def subir_kits(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Se espera archivo .xlsx")
+    tmp = _save_tmp(file)
+    try:
+        _validar_tipo(tmp, "kits")
+        result = parse_kits(tmp)
     finally:
         tmp.unlink(missing_ok=True)
     return result

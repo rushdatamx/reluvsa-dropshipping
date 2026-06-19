@@ -54,8 +54,17 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
   - Ventas ML: fecha = col **B**, título = col **X**.
   - Colecta: fecha = col **A**, título = col **E**.
   - Implementado: `envios_colecta.num_venta_ml` (el num_venta canónico de ML) se resuelve **una vez** en `services/parser_colecta.py::resolver_cruce_ventas` (directo por num_venta → fallback fecha ±5 min + título fuzzy ≥85). Todos los JOIN venta↔colecta usan `e.num_venta_ml = v.num_venta`. Ver memoria [[project_cruce_fecha_titulo]].
-- **Columnas que ve Gaby en la tabla Ventas (2026-06-16, 2da tanda de comentarios):** además de Venta/SKU/Título/Proveedor/SLA/Factura, la tabla muestra **Fecha** (de venta, formato corto `13 may 2026`), **Unidades** (col **H** del reporte ML, ya mapeada a `ventas_ml.unidades`) y **Factura #** (el folio del proveedor una vez hecho el cruce). Las 3 también salen en el **CSV de export**. Todo el dato ya existía punta a punta; fue render + un helper de formato. Ver [[project_columnas_ventas_factura]].
+- **Columnas que ve Gaby en la tabla Ventas (2026-06-16, 2da tanda de comentarios):** además de Venta/SKU/Título/Proveedor/SLA/Factura, la tabla muestra **Fecha** (de venta, formato corto `13 may 2026`), **Unidades** (col **H** = índice 7 del reporte ML → `ventas_ml.unidades`) y **Factura #** (el folio del proveedor una vez hecho el cruce). Las 3 también salen en el **CSV de export**. Ver [[project_columnas_ventas_factura]].
+- ⚠️ **Bug de Unidades corregido (2026-06-19):** la columna salía siempre **0/—** porque el reporte ML repite el nombre `"Unidades"` en **3 columnas** (Ventas col 7, Devoluciones col 49, Reclamos col 62) y el `col_map` por nombre suelto se sobrescribía quedándose con la última (Reclamos, vacía). Fix en `parser_ventas_ml.py`: el fallback por nombre **conserva la primera ocurrencia** (col 7 = unidades vendidas). Verificado: 940/956 ventas con unidades>0. ⚠️ **Requiere re-subir el reporte de Ventas ML** para poblar las ventas ya cargadas (upsert). Ver [[project_bug_unidades_columnas_duplicadas]].
+- ⚠️ **Bug conocido NO arreglado — `ventas_ml.estado`:** mismo patrón que Unidades. La columna "Estado" de la venta (col 3 del reporte) tiene **categoría vacía**, pero el parser la busca como `col("Ventas|Estado")` (con categoría) sin fallback por nombre → `idx_estado` siempre es `None` y `estado` nunca se pobla. No se usa en la UI hoy, por eso se dejó pendiente (decisión 2026-06-19). Fix trivial si se necesita: agregar `"Estado"` como fallback en `col(...)` (con el guard de "primera ocurrencia" tomaría la col 3 correcta). Ver [[project_bug_unidades_columnas_duplicadas]].
 - **Columna # de albarán (2026-06-17):** Gaby aporta el **# de albarán** de cada venta en **su propio Excel** (2 columnas: `# de venta` + `# de albarán`) — NO viene en el reporte de Ventas ML ni de colecta. Se sube por un **uploader propio** (`POST /api/uploads/albaran`, 3a tarjeta en Uploads.jsx) que cruza **por num_venta directo** (1:1, NO fecha+título) y hace **solo UPDATE** sobre `ventas_ml.albaran` (parser `services/parser_albaran.py`): si la venta no existe la cuenta como `no_encontrados` (no crea huérfana); fila con albarán vacío no borra el existente. Se muestra como **columna "Albarán"** en la tabla Ventas (junto a Venta) y en el **CSV**. El candado de tipo de archivo reconoce el tipo `"albaran"`. Cero infra nueva (solo columna en tabla existente). Ver [[project_albaran]].
+
+### Kits → componentes (2026-06-19)
+- ⚠️ Algunas ventas de ML son **kits**: el SKU (ej. `KIT0337`) es un **código sintético de RELUVSA** que **NO existe en ninguna factura**. El proveedor factura los **componentes reales** del kit (ej. `KDTL-057`, `KDTL-058`). Por eso una venta-kit salía siempre **"Pendiente"** aunque su factura estuviera cargada: el matcher buscaba `KIT0337` en los conceptos y nunca cruzaba.
+- **Solución:** Gaby sube **su propio Excel** de relación kit→componentes (3 columnas: `Paquete -> Tag` = KIT, `Componente -> Tag`, `Cantidad`) por un **uploader propio** (`POST /api/uploads/kits`, 4a tarjeta en Uploads.jsx). Parser `services/parser_kits.py` → tabla puente `kit_componentes (kit_sku, componente_codigo, cantidad)`. **Carga incremental** (upsert por PK; re-subir actualiza+agrega, no borra). `kit_sku` normalizado UPPER+TRIM (el Excel trae formatos inconsistentes y espacios finales). El Excel real: 656 kits, **1847 relaciones únicas** (1853 filas con 6 pares duplicados internos que el upsert colapsa).
+- **El matcher gana un 4º paso `kit_componente`** (`services/matcher.py`, conf 0.95, tras id-interno y antes del fuzzy): cruza el código del concepto contra los componentes del kit de una venta del proveedor (exacto o substring en ambos sentidos → **tolera el sufijo `-K`** que traen los componentes del Excel y que la factura probablemente no trae). El 1er componente que cruce marca la venta-kit como facturada (criterio `facturas_count>0`; sin estados "parciales"). **Un solo proveedor por kit** (decisión de Gaby): todos los componentes de un kit se facturan al mismo proveedor.
+- **Gaby ve los componentes** debajo del SKU en la tabla Ventas (gris, `KDTL-057 ×1`) y en una columna del CSV ("Componentes kit"). El campo `kit_componentes` lo arma `routers/ventas.py` con un subquery a `kit_componentes WHERE kit_sku = UPPER(TRIM(v.sku))`.
+- ⚠️ **El candado de tipo NO usa el nombre de hoja "KITS"**: el workbook de control interno de Gaby tiene 47 hojas (una llamada `KITS`) → daría falso positivo. Se detecta por el **header de la 1a hoja** (componente+cantidad+paquete/kit). Cero infra nueva en Railway (tabla creada por el SCHEMA al arrancar). **Pendiente:** validar con un XML real de factura de kit (el sufijo `-K` se asumió, no se probó con factura real). Ver [[project_kits_componentes]].
 
 ### Número de factura por proveedor (columna "Factura #" en Ventas)
 - ⚠️ El "# de factura" que cada proveedor ve en su **PDF** NO es un campo aparte: es la **combinación de `Serie` + `Folio` del XML** (que el parser ya extrae), recombinada con orden/separador propio de cada proveedor. **No se lee el PDF.** Reglas en `services/folio_factura.py::formatear_folio` (llave = `codigo_bodega`):
@@ -70,13 +79,30 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 - **Pendiente:** validar AG y VAZLO contra su primer XML real (ajuste de 1 línea si el patrón no calza).
 
 ### Facturas
-- Cada proveedor sube **XML + PDF** desde su cuenta.
-- El match concepto-venta (`services/matcher.py`) tiene **3 pasos en orden**:
+- Cada proveedor sube **XML + PDF** desde su cuenta. **Subida múltiple** (2026-06-17 PM): puede
+  arrastrar **varios XML y varios PDF a la vez** (`POST /api/facturas/upload-multiple`). Cada XML es
+  una factura (por su UUID). Cada PDF se empareja **por el UUID impreso dentro del PDF**
+  (`services/uuid_pdf.py`, pdfplumber; **fallback por nombre de archivo** si el PDF es ilegible).
+  PDF sin XML correspondiente → se ignora y se reporta (no rompe). Cada factura se procesa
+  independiente: RFC ajeno / duplicado (409) / XML corrupto solo falla esa fila. El legacy `/upload`
+  (1 archivo) se conserva. Ver [[project_apartado_facturas_multi]].
+- ⚠️ **Los PDF/XML viven en el volumen persistente** (`database.py::UPLOADS_DIR` deriva de
+  `DATABASE_PATH` → `/data/uploads` en Railway). NO guardar en `<repo>/uploads` (filesystem efímero:
+  se borra en cada redeploy). El endpoint de descarga (`GET /api/facturas/{id}/pdf` y `/xml`, control
+  de acceso admin/proveedor) resuelve por nombre dentro de FACTURAS_DIR si el path en BD es de un
+  contenedor viejo.
+- **Apartado admin (vista rica en la pestaña Facturas):** Gaby ve/descarga el PDF y XML de cada
+  factura, expande la fila para ver los conceptos y a qué venta cruza cada uno, filtra (proveedor,
+  fecha, búsqueda, "solo con conceptos sin cruzar"), ve el folio del proveedor y exporta a CSV. Badge
+  rojo si falta el PDF o el XML.
+- El match concepto-venta (`services/matcher.py`) tiene **4 pasos en orden**:
   1. **Código exacto**: `NoIdentificacion` del XML == SKU de la venta (o substring). Ej. KIM: `23530559-Z` == `23530559-Z`.
   2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
-  3. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
+  3. **Componente de kit** (agregado 2026-06-19): si la venta es un kit (su SKU está en `kit_componentes`), el proveedor factura los componentes, no el SKU-kit. Cruza el código del concepto contra los componentes del kit (exacto/substring, tolera sufijo `-K`). Ver [[project_kits_componentes]].
+  4. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
+- **Cruce retroactivo (2026-06-19):** el match se calculaba **una sola vez**, al subir la factura. Si el proveedor facturaba ANTES de que existiera la venta (o antes de que la colecta asignara proveedor al envío), el concepto quedaba huérfano para siempre. Ahora `services/matcher.py::recruzar_conceptos_sin_match(conn)` reintenta TODOS los conceptos con `num_venta_match IS NULL` y se invoca tras cada evento que puede habilitar un cruce: subir **ventas** (`parser_ventas_ml`), subir **colecta** (`parser_colecta`, asigna proveedor) y **reasignar bodega** (`routers/envios.py::reasignar`). Idempotente (solo enriquece, nunca rompe un match existente). Verificado E2E (`backend/scripts/test_recruce_retroactivo.py`): factura subida antes que la venta → cruza al subir la venta. Ver [[project_cruce_retroactivo]].
 
 ### Candado de tipo de archivo en uploads (2026-06-11)
 - Gaby subió por error el archivo equivocado en una sección. Los endpoints validaban solo la extensión, no el contenido. Se agregó `services/detector_archivo.py::detectar_tipo_xlsx` que identifica el tipo por su **huella de contenido** (robusto al renombrado):
@@ -159,10 +185,16 @@ dropshipping-reluvsa/
 │   │   ├── parser_ventas_ml.py  # parsea 66 cols del Excel de ventas ML
 │   │   ├── parser_colecta.py    # parsea colecta + resuelve proveedor desde col K
 │   │   ├── parser_cfdi.py       # CFDI 4.0 y 3.3 con lxml
+│   │   ├── parser_albaran.py    # Excel de albaranes de Gaby (UPDATE por num_venta)
+│   │   ├── parser_kits.py       # Excel kit->componentes de Gaby (upsert en kit_componentes)
+│   │   ├── detector_archivo.py  # candado: detecta tipo de xlsx por contenido
+│   │   ├── folio_factura.py     # # de factura como lo ve cada proveedor (Serie+Folio)
+│   │   ├── uuid_pdf.py          # extrae UUID impreso del PDF (empareja PDF↔XML en subida múltiple)
 │   │   └── matcher.py           # match concepto→venta (código exacto + fuzzy fallback)
 │   ├── scripts/
 │   │   └── crear_usuario.py     # CLI para crear admin o proveedor
-│   └── uploads/                 # facturas subidas (ignorado en git, .gitkeep)
+│   └── uploads/                 # SOLO temporales de parseo; los PDF/XML de factura viven
+│                                #   en UPLOADS_DIR=/data/uploads (volumen, persistente)
 ├── frontend/
 │   ├── package.json
 │   ├── tailwind.config.js       # paleta reluvsa/notion + Plus Jakarta Sans
@@ -219,6 +251,10 @@ facturas          (id, proveedor_id, uuid_cfdi, serie, folio,
 factura_conceptos (id, factura_id, codigo_prov, descripcion, cantidad, importe,
                    num_venta_match, match_method, match_confidence)
 incidencias       (id, num_venta FK, proveedor_id FK, tipo, descripcion, estado)
+kit_componentes   (kit_sku, componente_codigo, cantidad)  -- tabla puente kit->componentes
+                  -- PK(kit_sku, componente_codigo). kit_sku normalizado UPPER+TRIM. SIN FK
+                  -- a ventas_ml. El matcher cruza la factura por estos componentes (no por el
+                  -- SKU-kit sintético, que no existe en factura). Carga incremental (upsert).
 catalogos_proveedor + catalogo_items  (módulo 2 — publicaciones masivas, NO usado aún)
 publicaciones_ml + plantillas_ml      (módulo 2 — publicaciones masivas, NO usado aún)
 ```
@@ -231,7 +267,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-17 — columna # de albarán + uploader, desplegada)
+## 8. Estado actual (último update: 2026-06-19 — kits→comp + fix Unidades + cruce retroactivo, en local)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 **1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
@@ -239,11 +275,117 @@ Convenciones:
 arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar). Ver
 [[project_comentarios_gaby]].
 **Pendientes puntuales:**
+- **Commit + deploy de la sesión 2026-06-19** (kits→componentes **+ fix bug Unidades + cruce
+  retroactivo de facturas**): implementado y verificado E2E + build CRA en LOCAL, **NO commiteado
+  ni desplegado aún**. Confirmar con Mario antes de pushear. Ver [[project_kits_componentes]],
+  [[project_bug_unidades_columnas_duplicadas]], [[project_cruce_retroactivo]].
+- **Tras el deploy: Gaby debe re-subir el reporte de Ventas ML** para que las ventas ya cargadas
+  muestren las Unidades (el fix corrige el parseo de aquí en adelante; el upsert repuebla al re-subir).
+- **Validar el cruce de kits con un XML real** de factura que traiga componentes (el sufijo `-K`
+  del Excel vs el código sin `-K` en factura): se asumió que el matcher lo tolera por substring
+  (verificado en test con concepto sintético), falta XML real. Pedir a Gaby una factura de kit.
+- Confirmar con Gaby el ejemplo del mensaje (dijo `92401-05510` del KIT0337, pero en su Excel ese
+  componente está en KIT0358; KIT0337 = `KDTL-057-K`+`KDTL-058-K`). No bloqueante.
 - Validar el formato de "Factura #" de **AG** y **VAZLO** contra su primer XML real (las reglas
   de KIM/CAUPLAS/KG sí se verificaron; AG/VAZLO van deducidas).
-- **Pedir a Gaby una muestra del Excel REAL de albaranes** para confirmar los nombres de
-  encabezado. El parser tolera variaciones comunes (`# de venta`/`venta`, `albarán`/`albaran`),
-  pero si su archivo usa otro nombre de columna es ajuste de 1 línea en `parser_albaran.py`.
+- **Verificar en navegador (Vercel) el nuevo apartado de facturas** del commit `c2c1725`: ver/
+  descargar PDF+XML, fila expandible con ventas, subida múltiple. Se validó E2E (TestClient +
+  build CRA) pero NO se abrió en navegador real. Ver [[project_apartado_facturas_multi]].
+
+### 📍 CIERRE SESIÓN 2026-06-19 (RELACIÓN KITS → COMPONENTES — comentario de Gaby)
+**Contexto:** Gaby reportó por WhatsApp que las ventas que son **kits** salen siempre "Pendiente"
+aunque el proveedor ya subió la factura. Razón: el SKU del kit (ej. `KIT0337`) es un **código
+sintético de RELUVSA** que NO existe en ninguna factura — el proveedor factura los **componentes
+reales** (`KDTL-057`, `KDTL-058`...). El matcher buscaba `KIT0337` en los conceptos del XML y nunca
+lo encontraba. Gaby propuso (correctamente) subir un Excel de relación kit→componentes; ya lo
+entregó (`kits/relacion-kits-componentes.xlsx`, ignorado por git). **Implementado y verificado E2E
++ build CRA en LOCAL; NO commiteado/desplegado aún.** Ver [[project_kits_componentes]].
+
+**Lo que se hizo (9 archivos):**
+1. ✅ **Tabla `kit_componentes`** (`database.py`, `(kit_sku, componente_codigo, cantidad)`, PK
+   compuesta + índice por componente). Tabla nueva → `CREATE TABLE IF NOT EXISTS` en el SCHEMA
+   basta, NO requiere migración. `kit_sku` se guarda normalizado (UPPER+TRIM).
+2. ✅ **`services/parser_kits.py`** (nuevo): detecta 3 columnas por contenido (Paquete/Componente/
+   Cantidad), **carga incremental** (upsert por PK; re-subir actualiza y agrega, no borra). El
+   Excel real trae **6 pares duplicados internos** (incl. `KIT0358`/`92401-05510-K`) → el upsert
+   los colapsa: 1853 filas → **1847 relaciones únicas, 656 kits**.
+3. ✅ **`detector_archivo.py`**: tipo `"kits"` por header (componente+cantidad+paquete/kit). ⚠️
+   **NO se usa el nombre de hoja "KITS"**: el workbook de control interno de Gaby tiene 47 hojas
+   (una llamada KITS) y daba falso positivo. Detección por header de la 1a hoja (el Excel real de
+   kits tiene esa hoja primero). Regresión OK: ventas/colecta/albarán siguen clasificando bien.
+4. ✅ **`POST /api/uploads/kits`** (admin, clon de `/albaran`) + 4a tarjeta en `Uploads.jsx`.
+5. ✅ **Matcher — 4º paso `kit_componente`** (`matcher.py`, conf 0.95): tras id-interno, antes del
+   fuzzy. Busca una venta del proveedor cuyo SKU sea un kit que tenga el código del concepto como
+   componente (exacto o substring en ambos sentidos → tolera el sufijo `-K`). Reutiliza el patrón
+   JOIN + `fc.id IS NULL` de los otros pasos. El 1er componente que cruce marca la venta-kit como
+   facturada (criterio `facturas_count>0` actual; acordado con Mario: sin estados parciales).
+6. ✅ **Ventas muestra los componentes** (`ventas.py` subquery `kit_componentes` + `Ventas.jsx`
+   debajo del SKU en gris `KDTL-057 ×1`; CSV columna "Componentes kit"). Sin columnas/filas nuevas.
+
+**Verificado E2E** (`backend/scripts/test_kits_e2e.py`, BD desechable): detector clasifica kits +
+sin falsos positivos; parser carga 656/1847 e idempotente; **concepto `KDTL-057` (sin `-K`) cruza a
+la venta `KIT0337` por `method=kit_componente`** (resuelve el "Pendiente"); no cruza si el proveedor
+es otro; el listado expone los componentes. Build CRA: OK.
+
+**+ FIX BUG UNIDADES (mismo día, comentario aparte de Gaby):** la columna **Unidades** en Ventas
+salía siempre **0/—**. Causa: el reporte ML repite el encabezado `"Unidades"` en 3 columnas (Ventas
+col 7, Devoluciones col 49, Reclamos col 62) y el `col_map` por nombre suelto en `parser_ventas_ml.py`
+se sobrescribía quedándose con la **última** (Reclamos, vacía). Fix de 1 bloque: el fallback por
+nombre **conserva la primera ocurrencia** (`if name_str not in col_map`). Verificado con el reporte
+real: 940/956 ventas con unidades>0 (antes 0). Es solo parseo → **Gaby debe re-subir el reporte de
+Ventas ML** para repoblar las ventas ya cargadas. Se decidió NO arreglar el bug gemelo de `estado`
+(mismo patrón, no se usa en UI). Ver [[project_bug_unidades_columnas_duplicadas]].
+
+**+ CRUCE RETROACTIVO de facturas (mismo día, 2 dudas de Gaby):**
+- Duda 1 — *"¿hay límite para que el proveedor suba facturas?"*: **No.** Sin tope de número ni de
+  subidas. Únicas restricciones (correctas): dedup por UUID (no subir 2 veces la misma) y RFC propio.
+  Sin límite de tamaño en código; los CFDI son chicos (KB), no es problema real.
+- Duda 2 — *"¿si el proveedor sube la factura antes que yo suba la venta, se cruza después?"*: ANTES
+  **no** (el match se calculaba solo al subir la factura → quedaba huérfana). **Arreglado:**
+  `recruzar_conceptos_sin_match` reintenta los conceptos sin cruzar tras subir ventas/colecta o
+  reasignar bodega. Verificado E2E. Ver [[project_cruce_retroactivo]].
+
+**Infra:** CERO cambios en Railway (tabla nueva creada por el SCHEMA al arrancar, mismo patrón que
+albaranes; volumen `/data` intacto). BD de prod sin tocar. `kits/` agregado al `.gitignore`.
+
+### 📍 CIERRE SESIÓN 2026-06-17 PM (APARTADO FACTURAS ADMIN + SUBIDA MÚLTIPLE — comentarios sueltos de Gaby)
+**Contexto:** Gaby pidió por WhatsApp 2 cosas sobre la pestaña **Facturas** (+ una duda menor sobre
+el CSV de Ventas, resuelta sin código). Se procesaron una por una. Commit `c2c1725` en `main`,
+deploys Railway+Vercel disparados por el push. Verificado E2E (backend vía TestClient + build CRA);
+**NO verificado en navegador real**.
+
+**Lo que se hizo (5 archivos):**
+1. ✅ **Apartado de facturas para el admin (Gaby).** Antes la pestaña Facturas era solo el form de
+   subida del proveedor y los PDF/XML subidos eran invisibles (no había endpoint para servirlos).
+   Ahora, reutilizando la misma pestaña (vista rica para admin, form para proveedor):
+   **descargar/abrir PDF y XML** (`GET /api/facturas/{id}/pdf` y `/xml`, FileResponse + control de
+   acceso; el front los baja como blob por JWT, no `<a href>`), **filtros** (proveedor, fecha,
+   búsqueda folio/UUID, toggle "solo con conceptos sin cruzar"), **folio del proveedor** (folio_factura.py),
+   **fila expandible** con los conceptos y a qué venta cruza cada uno, **badge rojo** si falta PDF/XML,
+   y **export CSV**.
+2. ✅ **Subida múltiple de facturas.** `POST /api/facturas/upload-multiple` (N XML + N PDF). Cada XML
+   es una factura (por su UUID). Cada PDF se empareja **por el UUID impreso dentro del PDF** (nuevo
+   `services/uuid_pdf.py` con pdfplumber, ya en requirements; **fallback por nombre de archivo**).
+   PDF huérfano se ignora y se reporta; cada factura se procesa independiente (RFC ajeno/duplicado/
+   XML corrupto solo falla esa fila). El legacy `/upload` (1 archivo) se conserva. Verificado con
+   datos reales: el emparejado por UUID casó CAUPLAS/KIM/**KG** (KG es el caso clave: archivos con
+   nombre genérico y distinto `Documento PDF.pdf`/`Texto XML.xml`, y aun así casó por UUID).
+3. ✅ **Duda del CSV de Ventas:** Gaby creía que el nombre del proveedor no salía en el export. Sí sale
+   (columna "Proveedor" = `p.nombre`, vía LEFT JOIN al envío). Sale vacío solo cuando la venta no tiene
+   envío cruzado o el envío no tiene proveedor (col J = MATRIZ/vacío) — correcto. Sin cambios.
+
+**⚠️ FIX de infra (importante): uploads movidos al volumen persistente.** Los PDF/XML se guardaban en
+`<repo>/uploads/facturas` = filesystem efímero → **se perdían en cada redeploy de Railway** (solo
+`/data` persiste). El visor habría dado 404 tras el primer deploy. Fix: `database.py::UPLOADS_DIR`
+deriva por defecto de `Path(DATABASE_PATH).parent / "uploads"` → en prod cae en `/data/uploads`
+(mismo volumen que la BD). **NO requiere env var nueva en Railway** (deriva sola de DATABASE_PATH).
+El endpoint de descarga resuelve por nombre de archivo dentro de FACTURAS_DIR si el path absoluto
+guardado en BD ya no existe (tolera cambio de contenedor). **Cero cambios de schema/BD.** Ver
+[[project_apartado_facturas_multi]].
+
+**Pendiente #3 del CLAUDE.md (Excel real de albaranes) → CERRADO.** Gaby confirmó que su Excel real
+tiene exactamente 2 columnas `# venta` y `# albaran` (sin el "de"). Verificado E2E que el parser las
+reconoce tal cual (las anclas son substring) → **cero cambios de código**. Ver [[project_albaran]].
 
 ### 📍 CIERRE SESIÓN 2026-06-17 (COLUMNA # DE ALBARÁN — comentario suelto de Gaby)
 **Contexto:** Gaby pidió por WhatsApp poder subir un archivo con el **# de albarán** de cada

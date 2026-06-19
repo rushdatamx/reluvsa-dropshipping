@@ -34,4 +34,5 @@ data/*.db-wal
 # compradores, direcciones, facturas timbradas. NUNCA al repo.
 archivos/
 prueba-junio/
+kits/
 

@@ -8,7 +8,10 @@ Estrategia (en orden, el primero que acierta gana):
    factura '2692  M2626339' — el ID interno '2692' es la llave común. Extraemos los
    tokens (numéricos y código M) de ambos lados y cruzamos por intersección. Sin esto
    CAUPLAS daba 0 matches (sube a ~14/28 en datos reales).
-3. Fuzzy por descripción contra el título de la venta (>= 0.6 = aceptamos con confidence).
+3. Match por componente de kit: si la venta es un kit (su SKU está en kit_componentes),
+   el proveedor NO factura el SKU-kit sino sus componentes reales. Cruzamos el código del
+   concepto contra los componentes del kit (exacto o substring, para tolerar sufijos -K).
+4. Fuzzy por descripción contra el título de la venta (>= 0.6 = aceptamos con confidence).
 """
 import re
 from typing import Optional
@@ -65,6 +68,36 @@ def _match_por_id_interno(conn, proveedor_id: int, codigo: str) -> Optional[dict
     return None
 
 
+def _match_por_kit(conn, proveedor_id: int, codigo: str) -> Optional[dict]:
+    """Cruza el código del concepto contra los COMPONENTES de un kit.
+
+    Una venta-kit tiene un SKU sintético ('KIT0337') que el proveedor nunca factura:
+    factura los componentes ('KDTL-057'...). Buscamos una venta del proveedor cuyo SKU
+    sea un kit que tenga este código como componente. Cruce exacto o por substring en
+    ambos sentidos (tolera que la factura traiga 'KDTL-057' y el kit 'KDTL-057-K').
+    """
+    if not codigo:
+        return None
+    row = conn.execute(
+        """SELECT v.num_venta
+           FROM ventas_ml v
+           JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+           JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
+           LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
+           WHERE e.proveedor_id = ?
+             AND fc.id IS NULL
+             AND ( kc.componente_codigo = ?
+                   OR ? LIKE '%' || kc.componente_codigo || '%'
+                   OR kc.componente_codigo LIKE '%' || ? || '%' )
+           ORDER BY v.fecha_venta DESC
+           LIMIT 1""",
+        (proveedor_id, codigo, codigo, codigo),
+    ).fetchone()
+    if row:
+        return {"num_venta": row["num_venta"], "method": "kit_componente", "confidence": 0.95}
+    return None
+
+
 def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optional[dict]:
     codigo = (concepto.get("codigo") or "").strip()
     descripcion = (concepto.get("descripcion") or "").strip()
@@ -91,10 +124,15 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optiona
         if por_id:
             return por_id
 
+        # 3) Match por componente de kit (la venta-kit factura sus componentes, no el SKU-kit)
+        por_kit = _match_por_kit(conn, proveedor_id, codigo)
+        if por_kit:
+            return por_kit
+
     if not descripcion:
         return None
 
-    # 3) Fuzzy match contra títulos de ventas del proveedor aún sin facturar
+    # 4) Fuzzy match contra títulos de ventas del proveedor aún sin facturar
     candidates = conn.execute(
         """SELECT v.num_venta, v.titulo
            FROM ventas_ml v
@@ -126,3 +164,44 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optiona
         "method": "fuzzy_titulo",
         "confidence": round(conf, 3),
     }
+
+
+def recruzar_conceptos_sin_match(conn) -> dict:
+    """Re-intenta el match de los conceptos de factura que quedaron SIN cruzar.
+
+    El match concepto->venta se calcula una sola vez, al subir la factura. Si la
+    factura entró ANTES que su venta (el proveedor factura rápido; Gaby sube el
+    reporte de ventas por lotes), o antes de que la colecta le asignara proveedor al
+    envío, el concepto quedó con num_venta_match = NULL aunque su venta ya exista.
+
+    Esta función corre tras subir ventas/colecta: toma cada concepto sin cruzar,
+    reconstruye su dict y reintenta match_conceptos_a_ventas con el proveedor de su
+    factura. Si ahora cruza, actualiza el concepto. Idempotente: lo que sigue sin
+    cruzar se queda en NULL para el siguiente intento. Solo enriquece, nunca rompe
+    un match existente.
+    """
+    pendientes = conn.execute(
+        """SELECT fc.id, fc.codigo_prov, fc.descripcion, f.proveedor_id
+           FROM factura_conceptos fc
+           JOIN facturas f ON f.id = fc.factura_id
+           WHERE fc.num_venta_match IS NULL"""
+    ).fetchall()
+
+    recruzados = 0
+    for c in pendientes:
+        if c["proveedor_id"] is None:
+            continue
+        match = match_conceptos_a_ventas(
+            conn, c["proveedor_id"],
+            {"codigo": c["codigo_prov"], "descripcion": c["descripcion"]},
+        )
+        if match:
+            conn.execute(
+                """UPDATE factura_conceptos
+                   SET num_venta_match = ?, match_method = ?, match_confidence = ?
+                   WHERE id = ?""",
+                (match["num_venta"], match["method"], match["confidence"], c["id"]),
+            )
+            recruzados += 1
+
+    return {"conceptos_sin_match": len(pendientes), "conceptos_recruzados": recruzados}

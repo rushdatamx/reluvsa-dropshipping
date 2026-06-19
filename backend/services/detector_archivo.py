@@ -9,9 +9,12 @@ Huellas únicas verificadas con los archivos reales:
               o header con "Fecha de la venta" + "# de envío".
 - Albarán   : header con "# de venta" + "albarán", SIN las anclas de ventas/colecta.
               (Excel simple de 2 columnas que arma Gaby: venta -> # de albarán.)
+- Kits      : header con "componente" + "cantidad" + "paquete"/"kit" en la 1a hoja.
+              (Excel de relación kit -> componentes: Paquete / Componente / Cantidad.
+              NO por nombre de hoja: el control interno de Gaby tiene una hoja "KITS".)
 Son mutuamente excluyentes: un reporte de ventas nunca trae "Envíos con colecta"
-ni la hoja de colecta, y el de albaranes es el único que trae "albarán" sin las
-otras anclas.
+ni la hoja de colecta, el de albaranes es el único que trae "albarán" sin las
+otras anclas, y el de kits es el único que trae "componente" + "cantidad".
 """
 from pathlib import Path
 from typing import Optional
@@ -38,9 +41,9 @@ def _texto_primeras_filas(ws, max_filas: int = 12) -> str:
 
 
 def detectar_tipo_xlsx(path: Path) -> Optional[str]:
-    """Devuelve 'ventas_ml', 'colecta' o None según el contenido del .xlsx.
+    """Devuelve 'ventas_ml', 'colecta', 'albaran', 'kits' o None según el contenido.
 
-    None = no se reconoce como ninguno de los dos (archivo ajeno o corrupto).
+    None = no se reconoce como ninguno (archivo ajeno o corrupto).
     Nunca lanza: ante cualquier error de lectura, devuelve None.
     """
     try:
@@ -60,6 +63,15 @@ def detectar_tipo_xlsx(path: Path) -> Optional[str]:
         # --- Señales por contenido de las primeras filas de la 1a hoja ---
         ws = wb[wb.sheetnames[0]]
         texto = _texto_primeras_filas(ws)
+
+        # Kits: el header trae "componente" + "cantidad" + "paquete"/"kit". Va antes
+        # de albarán: es el único con "componente", y no comparte anclas con ventas/colecta.
+        # NOTA: deliberadamente NO usamos señal por nombre de hoja "KITS" — el workbook
+        # de control interno de Gaby tiene 40+ hojas (una llamada "KITS") y daría falso
+        # positivo. La detección por header de la 1a hoja es específica del Excel real
+        # de relación kits (cuya 1a hoja ES la de Paquete/Componente/Cantidad).
+        if "componente" in texto and "cantidad" in texto and ("paquete" in texto or "kit" in texto):
+            return "kits"
 
         # Colecta: ancla muy específica del encabezado del reporte ML de colecta.
         if "envíos con colecta" in texto or ("fecha de la venta" in texto and "# de envío" in texto):

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from models import ReasignarBodegaRequest
 from routers.auth import require_admin
+from services.matcher import recruzar_conceptos_sin_match
 
 router = APIRouter(prefix="/api/envios", tags=["envios"])
 
@@ -30,4 +31,14 @@ def reasignar(num_envio: str, data: ReasignarBodegaRequest):
             (data.lugar_override, proveedor_id, num_envio),
         )
 
-    return {"ok": True, "num_envio": num_envio, "lugar_override": data.lugar_override, "proveedor_id": proveedor_id}
+        # Al reasignar bodega el envío gana proveedor: una factura ya cargada que no
+        # podía cruzar (envío sin proveedor) ahora sí puede. Cruce retroactivo.
+        recruce = recruzar_conceptos_sin_match(conn)
+
+    return {
+        "ok": True,
+        "num_envio": num_envio,
+        "lugar_override": data.lugar_override,
+        "proveedor_id": proveedor_id,
+        **recruce,
+    }

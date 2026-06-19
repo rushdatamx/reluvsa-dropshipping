@@ -202,6 +202,20 @@ CREATE TABLE IF NOT EXISTS plantillas_ml (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS kit_componentes (
+    -- Tabla puente kit -> componentes. El SKU del kit (ej. 'KIT0337') es un código
+    -- sintético de RELUVSA que NO existe en ninguna factura: el proveedor factura los
+    -- componentes reales del kit. Gaby sube un Excel (Paquete/Componente/Cantidad) y
+    -- el matcher cruza los conceptos de la factura contra estos componentes.
+    -- kit_sku se guarda normalizado (UPPER+TRIM). Sin FK a ventas_ml: el kit puede no
+    -- haberse vendido aún. Carga incremental (upsert por la PK).
+    kit_sku            TEXT NOT NULL,
+    componente_codigo  TEXT NOT NULL,
+    cantidad           INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (kit_sku, componente_codigo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kitcomp_componente ON kit_componentes(componente_codigo);
 CREATE INDEX IF NOT EXISTS idx_ventas_sku ON ventas_ml(sku);
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_ml(fecha_venta);
 CREATE INDEX IF NOT EXISTS idx_envios_venta ON envios_colecta(num_venta);

@@ -256,7 +256,18 @@ export default function Ventas() {
                     {v.albaran ? v.albaran : <span className="text-notion-text-secondary">—</span>}
                   </td>
                   <td className="px-4 py-3 text-xs text-notion-text-secondary whitespace-nowrap">{fechaCorta(v.fecha_venta)}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-reluvsa-red">{v.sku || '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
+                    <span className="text-reluvsa-red">{v.sku || '—'}</span>
+                    {v.kit_componentes && v.kit_componentes.length > 0 && (
+                      <div className="mt-1 space-y-0.5" title="Componentes del kit (lo que el proveedor factura)">
+                        {v.kit_componentes.map((c, i) => (
+                          <div key={i} className="text-[11px] text-notion-text-secondary">
+                            {c.codigo} ×{c.cantidad}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
                   <td className="px-4 py-3 text-xs">{v.unidades != null ? v.unidades : '—'}</td>
                   <td className="px-4 py-3">

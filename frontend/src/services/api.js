@@ -101,5 +101,13 @@ export const subirAlbaranes = (file) => {
     timeout: 120000,
   });
 };
+export const subirKits = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.post('/uploads/kits', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
 
 export default api;
