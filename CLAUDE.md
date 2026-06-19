@@ -267,7 +267,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-19 — kits→comp + fix Unidades + cruce retroactivo, en local)
+## 8. Estado actual (último update: 2026-06-19 — kits→comp + fix Unidades + cruce retroactivo, commit ae86f2b en main, deploy disparado)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 **1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
@@ -275,12 +275,15 @@ Convenciones:
 arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar). Ver
 [[project_comentarios_gaby]].
 **Pendientes puntuales:**
-- **Commit + deploy de la sesión 2026-06-19** (kits→componentes **+ fix bug Unidades + cruce
-  retroactivo de facturas**): implementado y verificado E2E + build CRA en LOCAL, **NO commiteado
-  ni desplegado aún**. Confirmar con Mario antes de pushear. Ver [[project_kits_componentes]],
+- **✅ COMMITEADO Y DESPLEGADO** (sesión 2026-06-19, kits→componentes **+ fix bug Unidades + cruce
+  retroactivo**): commit `ae86f2b` en `main`, push hecho → auto-deploy Railway+Vercel disparado.
+  Verificado E2E + build CRA en local; **NO abierto en navegador real (Vercel) todavía** — verificar
+  las 3 cosas en la pestaña Uploads (4a tarjeta de kits), Ventas (Unidades pobladas + componentes
+  bajo el SKU) y el cruce retroactivo. Ver [[project_kits_componentes]],
   [[project_bug_unidades_columnas_duplicadas]], [[project_cruce_retroactivo]].
 - **Tras el deploy: Gaby debe re-subir el reporte de Ventas ML** para que las ventas ya cargadas
   muestren las Unidades (el fix corrige el parseo de aquí en adelante; el upsert repuebla al re-subir).
+  Si re-sube ventas/colecta, el cruce retroactivo de facturas corre solo.
 - **Validar el cruce de kits con un XML real** de factura que traiga componentes (el sufijo `-K`
   del Excel vs el código sin `-K` en factura): se asumió que el matcher lo tolera por substring
   (verificado en test con concepto sintético), falta XML real. Pedir a Gaby una factura de kit.
