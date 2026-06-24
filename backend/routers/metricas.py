@@ -62,6 +62,11 @@ def metricas_proveedores(
                 (pid,),
             ).fetchone()["c"]
 
+            incidencias_abiertas = conn.execute(
+                "SELECT COUNT(*) c FROM incidencias WHERE proveedor_id = ? AND estado = 'abierta'",
+                (pid,),
+            ).fetchone()["c"]
+
             ultima = conn.execute(
                 "SELECT MAX(fecha_subida) f FROM catalogos_proveedor WHERE proveedor_id = ?",
                 (pid,),
@@ -82,6 +87,7 @@ def metricas_proveedores(
                 "porcentaje_entregas_a_tiempo": pct_a_tiempo,
                 "tiempo_promedio_facturacion_dias": round(tiempo_fact["avg_dias"], 1) if tiempo_fact["avg_dias"] is not None else None,
                 "errores_facturacion": errores,
+                "incidencias_abiertas": incidencias_abiertas,
                 "dias_desde_ultima_actualizacion_stock": dias_stock,
             })
 

@@ -154,7 +154,7 @@ export default function Incidencias() {
                   </span>
                 </td>
                 <td className="px-4 py-3">{i.proveedor_nombre || '—'}</td>
-                <td className="px-4 py-3 max-w-md truncate">{i.descripcion}</td>
+                <td className="px-4 py-3 max-w-md whitespace-pre-wrap break-words">{i.descripcion}</td>
                 <td className="px-4 py-3">
                   {i.estado === 'resuelta' ? (
                     <span className="flex items-center gap-1 text-success text-xs font-medium">

@@ -37,12 +37,13 @@ export default function Metricas() {
               <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">% a tiempo</th>
               <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">Tiempo facturación</th>
               <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">Errores fact.</th>
+              <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">Incidencias abiertas</th>
               <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">Días sin actualizar stock</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan="6" className="p-8 text-center text-notion-text-secondary">Sin datos aún. Sube ventas y colecta.</td></tr>
+              <tr><td colSpan="7" className="p-8 text-center text-notion-text-secondary">Sin datos aún. Sube ventas y colecta.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.proveedor_id} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                 <td className="px-4 py-3">
@@ -58,6 +59,9 @@ export default function Metricas() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <MetricCell value={r.errores_facturacion} threshold={3} higherIsBetter={false} />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <MetricCell value={r.incidencias_abiertas} threshold={0} higherIsBetter={false} />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <MetricCell value={r.dias_desde_ultima_actualizacion_stock} suffix=" días" threshold={7} higherIsBetter={false} />
