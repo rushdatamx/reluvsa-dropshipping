@@ -66,9 +66,19 @@ def listar(
         where.append("date(f.fecha_factura) <= date(?)")
         params.append(fecha_hasta)
     if q:
-        where.append("(f.uuid_cfdi LIKE ? OR f.serie LIKE ? OR f.folio LIKE ?)")
-        like = f"%{q.strip()}%"
-        params.extend([like, like, like])
+        # Busca por UUID, serie y folio sueltos, y también por serie+folio JUNTOS:
+        # el proveedor escribe el "Factura #" como lo ve en su PDF (KIM 'K28027',
+        # CAUPLAS '970091508'), que es la combinación de serie y folio. Comparamos
+        # contra serie||folio quitando espacios de ambos lados para tolerar separadores.
+        where.append(
+            "(f.uuid_cfdi LIKE ? OR f.serie LIKE ? OR f.folio LIKE ? "
+            " OR REPLACE(COALESCE(f.serie,'')||COALESCE(f.folio,''),' ','') LIKE ? "
+            " OR REPLACE(COALESCE(f.folio,'')||COALESCE(f.serie,''),' ','') LIKE ?)"
+        )
+        term = q.strip()
+        like = f"%{term}%"
+        like_combinado = f"%{term.replace(' ', '')}%"
+        params.extend([like, like, like, like_combinado, like_combinado])
     # Facturas con al menos un concepto sin cruzar a venta (señal de error de facturación).
     if sin_cruzar:
         where.append(
