@@ -176,6 +176,10 @@ dropshipping-reluvsa/
 ├── .claude/skills/
 │   └── mercadolibre-api/SKILL.md  # ⭐ referencia experta de la API de ML (OAuth, mapeo
 │                                  #   Excel↔API, sync) — invocar antes de tocar la migración
+├── docs/
+│   └── configuracion-app-ml.md    # ⭐ registro canónico de CÓMO quedó configurada la app en el
+│                                  #   DevCenter (SOLO LECTURA, sin PKCE, scopes, tópicos, reglas
+│                                  #   duras para el código) — respetar al implementar OAuth/sync
 ├── .gitignore             # excluye archivos/, data/*.db, uploads/, node_modules
 ├── backend/
 │   ├── main.py            # FastAPI app + CORS + wire-up de routers
@@ -192,7 +196,8 @@ dropshipping-reluvsa/
 │   │   ├── facturas.py    # GET listar + POST /upload (XML + PDF) con matching automático
 │   │   ├── incidencias.py # CRUD + PATCH resolver
 │   │   ├── metricas.py    # /api/metricas/proveedores + /resumen
-│   │   └── uploads.py     # POST /api/uploads/ventas-ml y /colecta (admin)
+│   │   ├── uploads.py     # POST /api/uploads/ventas-ml y /colecta (admin)
+│   │   └── webhooks.py    # POST /api/webhooks/mercadolibre (receptor notificaciones ML)
 │   ├── services/
 │   │   ├── parser_ventas_ml.py  # parsea 66 cols del Excel de ventas ML
 │   │   ├── parser_colecta.py    # parsea colecta + resuelve proveedor desde col K
@@ -279,19 +284,50 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-16 — PIVOTE A API DE MERCADO LIBRE, investigación cerrada, implementación pendiente de claves del cliente)
+## 8. Estado actual (último update: 2026-07-21 — app ML configurada (solo lectura) + endpoint de webhooks VIVO; faltan App ID + Secret)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
-**El frente principal es la MIGRACIÓN A LA API DE ML** (ver cierre 2026-07-16 abajo). Al retomar:
-1. **Preguntar a Mario si el cliente ya creó la app en el DevCenter** y tiene App ID + Secret
-   (se le mandó el paso a paso por WhatsApp el 07-16; la captura de campos técnicos se hará en
-   llamada guiada). También preguntar el resultado de las 6 preguntas al KAM (corte histórico,
-   multi-origen activo, límites).
+**El frente principal es la MIGRACIÓN A LA API DE ML** (ver cierres 2026-07-21 y 2026-07-16 abajo). Al retomar:
+1. **Preguntar a Mario si ya tiene App ID (Client ID) + Client Secret** de la app
+   DROPSHIPPING-RELUVSA (la configuración de la app ya quedó — ver
+   `docs/configuracion-app-ml.md`, es el registro canónico y trae los pendientes del panel:
+   registrar callback URL, confirmar redirect URI, verificar "Ventas y envíos" en solo lectura).
+   También preguntar el resultado de las 6 preguntas al KAM (corte histórico, multi-origen, límites).
 2. Con las claves: **entrar en plan mode** para diseñar la implementación (Fase 1 del roadmap:
    OAuth + primer token + verificación multi-origen). Invocar la skill `mercadolibre-api` ANTES
-   de escribir código.
+   de escribir código, y respetar las **reglas duras de `docs/configuracion-app-ml.md` §6**
+   (app SOLO LECTURA: únicamente GET a la API + POST /oauth/token; SIN PKCE).
 3. ⚠️ Urgencia de fondo: la API solo da **12 meses de órdenes hacia atrás** — cada semana que pasa
    se pierde historia. Priorizar llegar rápido a la primera sincronización.
+
+### 📍 CIERRE SESIÓN 2026-07-21 (ENDPOINT DE WEBHOOKS + CONFIGURACIÓN DE LA APP ML)
+**Contexto:** el DevCenter pide una URL de notificaciones al crear la app. Se implementó el
+receptor de webhooks y Mario llenó/documentó la configuración completa de la app.
+
+1. ✅ **Endpoint de webhooks VIVO en prod** (commits `75b1ae1` docs + `0a023ed` código, deploy
+   Railway verificado con POST real → 200):
+   - **URL para el DevCenter: `https://reluvsa-dropshipping-production.up.railway.app/api/webhooks/mercadolibre`**
+     (el backend en Railway, NO Vercel — Vercel solo sirve el frontend React).
+   - `backend/routers/webhooks.py`: `POST /api/webhooks/mercadolibre` **solo inserta** en la
+     tabla nueva `ml_notificaciones` y responde 200 (requisito ML: 200 en ≤500 ms o desactiva
+     tópicos). Sin auth (ML no manda token). Tolera payload inválido (guarda raw, responde 200).
+     El procesamiento real lo hará el job de sync leyendo `procesada=0` (GET al `resource`).
+   - `GET /api/webhooks/mercadolibre/recientes` (admin) para verificar que ML sí llega.
+   - Tabla `ml_notificaciones` en el SCHEMA (`database.py`) — tabla nueva, sin migración.
+2. ✅ **App configurada en el DevCenter por Mario** — registro canónico en
+   **`docs/configuracion-app-ml.md`** (leerlo antes de implementar OAuth/sync). Resumen:
+   nombre DROPSHIPPING-RELUVSA, sitio MLM, **SOLO LECTURA** (principio rector: cualquier
+   POST/PUT/DELETE a recursos ML excepto `/oauth/token` es un bug), Authorization Code +
+   Refresh Token habilitados, **PKCE DESHABILITADO** (no mandar `code_challenge`), scopes de
+   lectura (Usuarios, Facturación, Métricas, **Ventas y envíos** ← el permiso funcional clave),
+   tópicos `orders_v2`+`payments`+`invoices`+`shipments`. Validada contra la skill: consistente.
+3. **Pendientes del panel** (los tiene Mario, checklist en el doc §7): registrar la callback URL
+   de arriba, confirmar/registrar el **redirect URI** (propuesta:
+   `https://reluvsa-dropshipping-production.up.railway.app/api/ml/oauth/callback` — el endpoint
+   se implementará en Fase 1 y debe coincidir EXACTO), obtener **App ID + Secret** → env vars
+   Railway (`ML_CLIENT_ID`/`ML_CLIENT_SECRET`), verificar "Ventas y envíos" en solo lectura.
+4. También se commiteó la doc del pivote que quedó pendiente de la sesión 07-16 (CLAUDE.md +
+   skill `mercadolibre-api`) y `.claude/settings.local.json` se agregó al `.gitignore`.
 
 **Pendientes que NO son del pivote (siguen vivos):**
 - **Rotar la password del admin `gaby@reluvsa.com`** (higiene, expuesta en chat 06-10/06-11 — sigue sin rotarse).
