@@ -215,6 +215,27 @@ CREATE TABLE IF NOT EXISTS kit_componentes (
     PRIMARY KEY (kit_sku, componente_codigo)
 );
 
+CREATE TABLE IF NOT EXISTS ml_notificaciones (
+    -- Buzón de webhooks de Mercado Libre (topics orders_v2 / shipments / ...).
+    -- ML exige responder 200 en <=500 ms o desactiva los tópicos, así que el endpoint
+    -- solo INSERTA aquí y contesta; el procesamiento (GET al resource + upsert en
+    -- ventas_ml/envios_colecta) lo hará el job de sync leyendo procesada=0.
+    -- ML reintenta hasta 8 veces la misma notificación → _id puede repetirse; se
+    -- guardan todas (el procesamiento es idempotente por upsert).
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    notif_id     TEXT,              -- _id de la notificación de ML
+    topic        TEXT,              -- orders_v2, shipments, stock-location...
+    resource     TEXT,              -- ej. /orders/123456789
+    user_id      TEXT,              -- seller al que pertenece el evento
+    attempts     INTEGER,
+    sent         TEXT,              -- timestamp de envío según ML
+    raw_body     TEXT,              -- payload completo tal cual llegó
+    recibido_en  TEXT NOT NULL,     -- ISO 8601 local de recepción
+    procesada    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_mlnotif_procesada ON ml_notificaciones(procesada);
+CREATE INDEX IF NOT EXISTS idx_mlnotif_topic ON ml_notificaciones(topic);
 CREATE INDEX IF NOT EXISTS idx_kitcomp_componente ON kit_componentes(componente_codigo);
 CREATE INDEX IF NOT EXISTS idx_ventas_sku ON ventas_ml(sku);
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_ml(fecha_venta);

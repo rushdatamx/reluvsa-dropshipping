@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_database
-from routers import admin, auth, envios, facturas, incidencias, metricas, proveedores, uploads, ventas
+from routers import admin, auth, envios, facturas, incidencias, metricas, proveedores, uploads, ventas, webhooks
 
 app = FastAPI(
     title="Portal Dropshipping RELUVSA",
@@ -41,6 +41,7 @@ app.include_router(facturas.router)
 app.include_router(incidencias.router)
 app.include_router(metricas.router)
 app.include_router(uploads.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/")
