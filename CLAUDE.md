@@ -2,6 +2,15 @@
 
 > Este archivo es el contexto canónico para cualquier sesión de Claude que retome el proyecto. Léelo antes de tocar código.
 
+> 🚨 **PIVOTE EN CURSO (2026-07-16): MIGRACIÓN A LA API DE MERCADO LIBRE.** ML retiró los 2
+> reportes Excel (Ventas ML + Detalle de colecta) que alimentaban el portal. El Módulo 1 migrará a
+> consumir la **API oficial de ML** (OAuth de la cuenta del cliente). La investigación completa está
+> hecha; la implementación NO ha iniciado (esperando las claves API del cliente). **Antes de tocar
+> cualquier cosa del Módulo 1, leer la sección 8 (cierre 2026-07-16) y la skill
+> `.claude/skills/mercadolibre-api/SKILL.md`.** Las reglas de la sección 3 sobre columnas de Excel
+> siguen vigentes como REFERENCIA para el mapeo Excel↔API (y para datos ya cargados), pero los
+> uploads de ventas/colecta van a desaparecer.
+
 ---
 
 ## 1. Contexto del negocio
@@ -164,6 +173,9 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 dropshipping-reluvsa/
 ├── README.md              # setup rápido
 ├── CLAUDE.md              # este archivo
+├── .claude/skills/
+│   └── mercadolibre-api/SKILL.md  # ⭐ referencia experta de la API de ML (OAuth, mapeo
+│                                  #   Excel↔API, sync) — invocar antes de tocar la migración
 ├── .gitignore             # excluye archivos/, data/*.db, uploads/, node_modules
 ├── backend/
 │   ├── main.py            # FastAPI app + CORS + wire-up de routers
@@ -267,14 +279,25 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-06-19 — kits→comp + fix Unidades + cruce retroactivo, commit ae86f2b en main, deploy disparado)
+## 8. Estado actual (último update: 2026-07-16 — PIVOTE A API DE MERCADO LIBRE, investigación cerrada, implementación pendiente de claves del cliente)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
-**1ro: rotar la password del admin `gaby@reluvsa.com`** (pendiente de higiene, expuesta en chat
-06-10/06-11 — sigue sin rotarse). Luego: esperar la siguiente tanda de comentarios de Gaby, o
-arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar). Ver
-[[project_comentarios_gaby]].
-**Pendientes puntuales:**
+**El frente principal es la MIGRACIÓN A LA API DE ML** (ver cierre 2026-07-16 abajo). Al retomar:
+1. **Preguntar a Mario si el cliente ya creó la app en el DevCenter** y tiene App ID + Secret
+   (se le mandó el paso a paso por WhatsApp el 07-16; la captura de campos técnicos se hará en
+   llamada guiada). También preguntar el resultado de las 6 preguntas al KAM (corte histórico,
+   multi-origen activo, límites).
+2. Con las claves: **entrar en plan mode** para diseñar la implementación (Fase 1 del roadmap:
+   OAuth + primer token + verificación multi-origen). Invocar la skill `mercadolibre-api` ANTES
+   de escribir código.
+3. ⚠️ Urgencia de fondo: la API solo da **12 meses de órdenes hacia atrás** — cada semana que pasa
+   se pierde historia. Priorizar llegar rápido a la primera sincronización.
+
+**Pendientes que NO son del pivote (siguen vivos):**
+- **Rotar la password del admin `gaby@reluvsa.com`** (higiene, expuesta en chat 06-10/06-11 — sigue sin rotarse).
+- Módulo 2 (publicaciones masivas) sigue sin iniciar; queda DETRÁS de la migración API.
+
+**Pendientes puntuales (pre-pivote):**
 - **✅ COMMITEADO Y DESPLEGADO** (sesión 2026-06-19, kits→componentes **+ fix bug Unidades + cruce
   retroactivo**): commit `ae86f2b` en `main`, push hecho → auto-deploy Railway+Vercel disparado.
   Verificado E2E + build CRA en local; **NO abierto en navegador real (Vercel) todavía** — verificar
@@ -294,6 +317,53 @@ arrancar el Módulo 2 (publicaciones masivas, único bloque grande sin iniciar).
 - **Verificar en navegador (Vercel) el nuevo apartado de facturas** del commit `c2c1725`: ver/
   descargar PDF+XML, fila expandible con ventas, subida múltiple. Se validó E2E (TestClient +
   build CRA) pero NO se abrió en navegador real. Ver [[project_apartado_facturas_multi]].
+
+### 📍 CIERRE SESIÓN 2026-07-16 (PIVOTE: MIGRACIÓN A LA API DE MERCADO LIBRE)
+**Contexto:** Mario reportó que **ML dejó de entregar los reportes Excel** (Ventas ML y Detalle de
+colecta) que Gaby subía al portal. Decisión: migrar el Módulo 1 a la **API oficial de ML**. Mario
+tuvo junta con el cliente el mismo día y le presentó el roadmap; el cliente quedó de crear la app
+en el DevCenter (se le mandó paso a paso por WhatsApp). **Cero código tocado en esta sesión** —
+fue investigación + entregables. Ver [[project_migracion_api_ml]].
+
+**Lo que se hizo (3 frentes en paralelo):**
+1. ✅ **Investigación completa de la API de ML** (doc oficial verificada, jul-2026) → destilada en
+   la **skill `.claude/skills/mercadolibre-api/SKILL.md`** (en el repo): OAuth paso a paso, mapeo
+   campo-por-campo Excel↔API, buenas prácticas, pseudocódigo del job de sync, gaps y fuentes.
+   **Invocar la skill antes de implementar cualquier cosa de la API.**
+2. ✅ **Inventario del sistema actual** (qué consume de los Excels y dónde): el impacto se acota a
+   reemplazar la LECTURA en `parser_ventas_ml.py` y `parser_colecta.py` (conservando upserts,
+   `_resolver_proveedor`, `resolver_cruce_ventas` y `recruzar_conceptos_sin_match`) + las 2
+   tarjetas de `Uploads.jsx` → botón/job "Sincronizar con ML". Matcher, métricas, routers y
+   pantallas NO se tocan (consumen BD). Facturas CFDI, albarán, kits e incidencias: independientes.
+3. ✅ **Roadmap no-técnico para el cliente** (Artifact, misma URL para futuras actualizaciones):
+   https://claude.ai/code/artifact/3850aaa0-e2f8-4823-a4f5-e04f5f23238a — 4 fases (~5-6 semanas),
+   6 preguntas al KAM, qué necesitamos de RELUVSA, riesgos.
+
+**Hallazgos clave (todos verificados en doc oficial — detalle y URLs en la skill):**
+- **NO se requiere aprobación de ML/KAM**: permiso funcional "Ventas y envíos" (autoservicio en la
+  app) + autorización OAuth del **TITULAR** de la cuenta (cuenta principal; un operador da
+  `invalid_operator_user_id`).
+- 🔴 **Órdenes: solo 12 meses hacia atrás** por `/orders/search`; sin backfill documentado →
+  urgencia de sincronizar pronto + pedir al KAM un último corte histórico de los reportes.
+- ⭐ **`cumplio_sla` (col L) tiene sustituto directo**: `GET /shipments/{id}/sla` →
+  `on_time|delayed|early` (ML lo sigue calculando; no hay que inventar lógica de SLA).
+- ⭐ **`lugar_indicado` (col J, la regla de Gaby) = `shipment.origin`** (con `node_id` estructurado
+  si multi-origen). La col K "Lugar real" NO existe en la API (irrelevante: la regla usa J).
+- ⭐ **`deposito` (col C) = multi-origen**: `order_items[].stock.store_id` cruzado contra
+  `GET /users/{uid}/stores/search?tags=stock_location`. **1a verificación con token real:** tags
+  `warehouse_management`/`multiwarehouse` en `GET /users/{uid}` — si está activo, la asignación de
+  proveedor se vuelve estructurada (menos reasignaciones manuales de Gaby).
+- ⭐ **El cruce venta↔envío se vuelve DIRECTO por ID** (`order.shipping.id`) — el fuzzy fecha+título
+  queda como legacy para datos viejos.
+- `buyer` viene restringido (solo `{id}`); nombre del comprador → `shipment.destination.receiver_name`.
+  **Persistir datos al sincronizar** (no confiar en re-consultas tardías).
+- Refresh token **single-use** (6 meses); access ~6 h (usar `expires_in` real). Sin sandbox (test
+  users, máx. 10). Rate limits sin cifras públicas → backoff exponencial + jitter.
+
+**Estado al cierre:** esperando (a) claves App ID + Secret del cliente (paso a paso enviado por
+WhatsApp; los campos técnicos — redirect URI HTTPS, PKCE, scopes `read`+`offline_access`, permiso
+"Ventas y envíos" — se capturan en llamada guiada con el titular, seguida de la autorización OAuth
+en la misma llamada), y (b) respuestas del KAM. **La implementación arranca en plan mode.**
 
 ### 📍 CIERRE SESIÓN 2026-06-19 (RELACIÓN KITS → COMPONENTES — comentario de Gaby)
 **Contexto:** Gaby reportó por WhatsApp que las ventas que son **kits** salen siempre "Pendiente"
@@ -751,3 +821,4 @@ En `~/.claude/projects/-Users-jmariopgarcia-Desktop-2026-RushData-RELUVSA-dropsh
 - `project_datos_reales_parsers.md` — bugs de parsers con datos reales y cifras de referencia
 - `reference_catalogo_reluvsa.md` — repo base copiado
 - `user_mario_rushdata.md` — perfil del usuario
+- `project_migracion_api_ml.md` — ⭐ el pivote a la API de ML (2026-07-16): hallazgos, artefactos, estado
