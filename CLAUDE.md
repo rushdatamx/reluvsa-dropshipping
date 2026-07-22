@@ -287,16 +287,22 @@ Convenciones:
 ## 8. Estado actual (último update: 2026-07-21 — app ML configurada (solo lectura) + endpoint de webhooks VIVO; faltan App ID + Secret)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
-**El frente principal es la MIGRACIÓN A LA API DE ML** (ver cierres 2026-07-21 y 2026-07-16 abajo). Al retomar:
-1. **Preguntar a Mario si ya tiene App ID (Client ID) + Client Secret** de la app
-   DROPSHIPPING-RELUVSA (la configuración de la app ya quedó — ver
-   `docs/configuracion-app-ml.md`, es el registro canónico y trae los pendientes del panel:
-   registrar callback URL, confirmar redirect URI, verificar "Ventas y envíos" en solo lectura).
-   También preguntar el resultado de las 6 preguntas al KAM (corte histórico, multi-origen, límites).
-2. Con las claves: **entrar en plan mode** para diseñar la implementación (Fase 1 del roadmap:
-   OAuth + primer token + verificación multi-origen). Invocar la skill `mercadolibre-api` ANTES
-   de escribir código, y respetar las **reglas duras de `docs/configuracion-app-ml.md` §6**
-   (app SOLO LECTURA: únicamente GET a la API + POST /oauth/token; SIN PKCE).
+**Instrucción explícita de Mario (2026-07-21): al abrir la sesión, preguntarle ÚNICAMENTE si ya
+tiene los accesos para seguir.** En concreto:
+1. **¿Ya están `ML_CLIENT_ID` y `ML_CLIENT_SECRET` como variables en Railway?** (El Client ID ya
+   es visible en la tarjeta de "Mis aplicaciones"; el Secret se copia entrando a **"Editar"** la
+   app — se le indicó que el secret va DIRECTO del panel de ML a Railway → Variables del servicio
+   backend, sin pasar por chats. Al guardar, Railway redespliega solo.)
+   - Si SÍ → **entrar en plan mode** para la Fase 1: endpoint OAuth callback
+     (`/api/ml/oauth/callback`, debe coincidir EXACTO con el redirect URI registrado — **pedir a
+     Mario el valor exacto registrado antes de codificar**), canje/refresh de tokens y verificación
+     multi-origen. Invocar la skill `mercadolibre-api` ANTES de escribir código y respetar las
+     **reglas duras de `docs/configuracion-app-ml.md` §6** (app SOLO LECTURA: únicamente GET a la
+     API + POST /oauth/token; SIN PKCE).
+   - Si NO → guiarlo: DevCenter → Mis aplicaciones → "Editar" la app → bloque App ID + Clave
+     secreta (botón mostrar/copiar); revisar también el aviso "Configuración de seguridad".
+2. Cuando aplique, preguntar también el resultado de las 6 preguntas al KAM (corte histórico,
+   multi-origen activo, límites) — no bloquea la Fase 1.
 3. ⚠️ Urgencia de fondo: la API solo da **12 meses de órdenes hacia atrás** — cada semana que pasa
    se pierde historia. Priorizar llegar rápido a la primera sincronización.
 
@@ -321,11 +327,14 @@ receptor de webhooks y Mario llenó/documentó la configuración completa de la 
    Refresh Token habilitados, **PKCE DESHABILITADO** (no mandar `code_challenge`), scopes de
    lectura (Usuarios, Facturación, Métricas, **Ventas y envíos** ← el permiso funcional clave),
    tópicos `orders_v2`+`payments`+`invoices`+`shipments`. Validada contra la skill: consistente.
-3. **Pendientes del panel** (los tiene Mario, checklist en el doc §7): registrar la callback URL
-   de arriba, confirmar/registrar el **redirect URI** (propuesta:
-   `https://reluvsa-dropshipping-production.up.railway.app/api/ml/oauth/callback` — el endpoint
-   se implementará en Fase 1 y debe coincidir EXACTO), obtener **App ID + Secret** → env vars
-   Railway (`ML_CLIENT_ID`/`ML_CLIENT_SECRET`), verificar "Ventas y envíos" en solo lectura.
+3. ✅ **Pendientes del panel CERRADOS** (Mario confirmó el mismo día que "todos los huecos
+   quedaron arreglados"): callback URL registrada, redirect URI registrado (⚠️ **el valor exacto
+   NO quedó anotado — pedírselo a Mario antes de implementar el endpoint OAuth**, debe coincidir
+   EXACTO; la propuesta era `.../api/ml/oauth/callback`), permisos verificados. La **app ya
+   existe** en "Mis aplicaciones" (nombre DROPSHIPPING-RELUVSA, Client ID visible en la tarjeta,
+   logo RELUVSA). Último paso de accesos: copiar el **Client Secret** (botón "Editar" de la app)
+   → env vars en Railway (`ML_CLIENT_ID`/`ML_CLIENT_SECRET`). Mario quedó de hacerlo; la sesión
+   siguiente arranca preguntándole SOLO eso (ver PRÓXIMA SESIÓN arriba).
 4. También se commiteó la doc del pivote que quedó pendiente de la sesión 07-16 (CLAUDE.md +
    skill `mercadolibre-api`) y `.claude/settings.local.json` se agregó al `.gitignore`.
 

@@ -141,12 +141,18 @@ de escritura.
 
 ## 7. Pendientes de esta configuración
 
-- [ ] **Registrar la callback URL** de notificaciones en el panel (arriba, §4) —
-      en el formulario quedó pendiente.
-- [ ] **Confirmar el redirect URI registrado** en el panel. El endpoint de
-      callback OAuth del backend aún NO existe (se implementa en Fase 1);
-      propuesta: `https://reluvsa-dropshipping-production.up.railway.app/api/ml/oauth/callback`.
-      Lo que se registre y lo que se implemente deben coincidir EXACTO.
-- [ ] Obtener **App ID (Client ID) + Client Secret** y guardarlos como env vars
-      en Railway (`ML_CLIENT_ID`, `ML_CLIENT_SECRET`) — nunca en el repo.
-- [ ] Verificar en el panel que "Ventas y envíos" quedó en **solo lectura**.
+> Actualización 2026-07-21 (mismo día, más tarde): la **app ya fue creada** y aparece en
+> "Mis aplicaciones" (Client ID visible en la tarjeta). Mario confirmó que los huecos del
+> panel quedaron cerrados.
+
+- [x] **Registrar la callback URL** de notificaciones en el panel (§4) — cerrado según Mario.
+- [x] **Redirect URI registrado** — cerrado según Mario, PERO ⚠️ **el valor exacto no quedó
+      anotado: pedírselo antes de implementar el endpoint OAuth en Fase 1** (deben coincidir
+      EXACTO; la propuesta fue
+      `https://reluvsa-dropshipping-production.up.railway.app/api/ml/oauth/callback`).
+- [x] Verificar en el panel que "Ventas y envíos" quedó en **solo lectura** — cerrado según Mario.
+- [ ] **Client Secret → Railway.** El Client ID ya es visible; el Secret se copia entrando a
+      **"Editar"** la app (bloque App ID + Clave secreta, botón mostrar/copiar; atender también
+      el aviso "Configuración de seguridad" del panel). Guardar ambos como env vars del servicio
+      backend en Railway: `ML_CLIENT_ID`, `ML_CLIENT_SECRET` — **nunca en el repo ni en chats**.
+      Al guardar variables, Railway redespliega solo.
