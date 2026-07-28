@@ -10,6 +10,7 @@ import Facturas from './pages/Facturas';
 import Incidencias from './pages/Incidencias';
 import Metricas from './pages/Metricas';
 import Uploads from './pages/Uploads';
+import MercadoLibre from './pages/MercadoLibre';
 import Proveedores from './pages/Proveedores';
 
 function AdminOnly({ children }) {
@@ -37,6 +38,7 @@ function Shell() {
             <Route path="/incidencias" element={<Incidencias />} />
             <Route path="/metricas" element={<Metricas />} />
             <Route path="/uploads" element={<AdminOnly><Uploads /></AdminOnly>} />
+            <Route path="/mercadolibre" element={<AdminOnly><MercadoLibre /></AdminOnly>} />
             <Route path="/proveedores" element={<AdminOnly><Proveedores /></AdminOnly>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

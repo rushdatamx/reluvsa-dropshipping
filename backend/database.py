@@ -234,6 +234,95 @@ CREATE TABLE IF NOT EXISTS ml_notificaciones (
     procesada    INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS ml_tokens (
+    -- Conexión OAuth de la cuenta ML de RELUVSA: UNA sola fila (id=1).
+    -- El refresh token de ML es de UN SOLO USO (rotado en cada refresh): access y
+    -- refresh nuevos se escriben JUNTOS en una sola sentencia (upsert ON CONFLICT)
+    -- dentro de una transacción, ANTES de usar el access nuevo. Si se pierde el
+    -- refresh hay que re-autorizar con el titular de la cuenta.
+    -- Estos valores NUNCA se loguean ni se devuelven por ningún endpoint.
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    access_token   TEXT NOT NULL,
+    refresh_token  TEXT NOT NULL,
+    token_type     TEXT DEFAULT 'Bearer',
+    scope          TEXT,
+    ml_user_id     TEXT,
+    expira_en      TEXT NOT NULL,     -- ISO UTC = ahora + expires_in REAL de la respuesta
+    obtenido_en    TEXT NOT NULL,     -- primera autorización
+    actualizado_en TEXT NOT NULL      -- último refresh
+);
+
+CREATE TABLE IF NOT EXISTS ml_config (
+    -- Clave-valor de la integración ML: seller_id, nickname, tags_json
+    -- (warehouse_management/multiwarehouse), ultima_sync (ISO del inicio de la
+    -- última sync incremental COMPLETADA — no se avanza si la run falla).
+    clave          TEXT PRIMARY KEY,
+    valor          TEXT,
+    actualizado_en TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ml_stores (
+    -- Catálogo de depósitos del seller (GET /users/{uid}/stores/search?tags=stock_location).
+    -- description = lo que el Excel mostraba en la columna "Depósito" (MATRIZ/KIM/...).
+    -- codigo_bodega = description pasada por LUGAR_A_BODEGA (NULL = MATRIZ/desconocido,
+    -- correcto: no es proveedor dropshipping).
+    store_id        TEXT PRIMARY KEY,
+    description     TEXT,
+    network_node_id TEXT,
+    codigo_bodega   TEXT,
+    raw_json        TEXT,
+    actualizado_en  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ml_oauth_state (
+    -- Anti-CSRF del flujo OAuth: un state por "iniciar", TTL corto, un solo uso.
+    -- Vive en BD (no en memoria) porque Railway puede redeployar entre que el admin
+    -- genera la URL y el titular completa la autorización.
+    state     TEXT PRIMARY KEY,
+    creado_en TEXT NOT NULL,
+    expira_en TEXT NOT NULL,
+    usado_en  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ml_sync_runs (
+    -- Una fila por corrida de sincronización. estado='en_curso' con heartbeat viejo
+    -- (actualizado_en > 10 min atrás) = corrida muerta (deploy/crash a la mitad):
+    -- se marca 'abortado' y se permite una nueva. cursor_fecha = checkpoint del
+    -- backfill (avanza al cerrar cada ventana de fechas; re-procesar es inocuo
+    -- porque todo es upsert).
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo            TEXT NOT NULL CHECK(tipo IN ('backfill','incremental')),
+    estado          TEXT NOT NULL DEFAULT 'en_curso'
+                    CHECK(estado IN ('en_curso','completado','error','abortado')),
+    ventana_desde   TEXT,
+    ventana_hasta   TEXT,
+    cursor_fecha    TEXT,
+    ordenes_vistas  INTEGER DEFAULT 0,
+    ventas_upsert   INTEGER DEFAULT 0,
+    envios_upsert   INTEGER DEFAULT 0,
+    errores         INTEGER DEFAULT 0,
+    detalle         TEXT,
+    iniciado_en     TEXT NOT NULL,
+    actualizado_en  TEXT NOT NULL,
+    terminado_en    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ml_api_log (
+    -- Auditoría liviana de CADA llamada que sale hacia la API de ML.
+    -- path SIN secretos (query filtrada); JAMÁS headers ni tokens. Evidencia de que
+    -- de esta app solo salen GET (+ POST /oauth/token) y diagnóstico de 429.
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    metodo TEXT NOT NULL,
+    path   TEXT NOT NULL,
+    status INTEGER,
+    ms     INTEGER,
+    error  TEXT,
+    ts     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mlstores_node ON ml_stores(network_node_id);
+CREATE INDEX IF NOT EXISTS idx_mlruns_estado ON ml_sync_runs(estado);
+CREATE INDEX IF NOT EXISTS idx_mlapilog_ts ON ml_api_log(ts);
 CREATE INDEX IF NOT EXISTS idx_mlnotif_procesada ON ml_notificaciones(procesada);
 CREATE INDEX IF NOT EXISTS idx_mlnotif_topic ON ml_notificaciones(topic);
 CREATE INDEX IF NOT EXISTS idx_kitcomp_componente ON kit_componentes(componente_codigo);

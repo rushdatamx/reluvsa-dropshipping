@@ -130,3 +130,7 @@ class MetricasProveedor(BaseModel):
     tiempo_promedio_facturacion_dias: Optional[float]
     errores_facturacion: int
     dias_desde_ultima_actualizacion_stock: Optional[int]
+
+
+class MLSyncRequest(BaseModel):
+    tipo: str = "incremental"  # 'incremental' | 'backfill'

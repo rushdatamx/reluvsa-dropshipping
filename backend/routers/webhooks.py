@@ -21,6 +21,10 @@ from routers.auth import require_admin
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
+# Tópicos suscritos en el DevCenter (docs/configuracion-app-ml.md §4). Cualquier
+# otro se guarda pero se marca procesada=1 (descartado) para que el sync no lo lea.
+TOPICS_SUSCRITOS = {"orders_v2", "payments", "invoices", "shipments"}
+
 
 @router.post("/mercadolibre")
 async def recibir_notificacion_ml(request: Request):
@@ -32,20 +36,37 @@ async def recibir_notificacion_ml(request: Request):
     except ValueError:
         data = {}
 
+    topic = data.get("topic")
+    user_id = str(data.get("user_id")) if data.get("user_id") is not None else None
+
     with get_db() as conn:
+        # Regla de seguridad (configuracion-app-ml §6.5): validar el user_id esperado
+        # y descartar tópicos no suscritos. Igual respondemos 200 (requisito de ML) y
+        # guardamos todo para diagnóstico; "descartar" = marcar procesada=1 para que
+        # el sync nunca lo procese.
+        seller_row = conn.execute(
+            "SELECT valor FROM ml_config WHERE clave = 'seller_id'"
+        ).fetchone()
+        seller_esperado = seller_row["valor"] if seller_row else None
+        descartada = (
+            (topic not in TOPICS_SUSCRITOS)
+            or (seller_esperado is not None and user_id is not None and user_id != seller_esperado)
+        )
+
         conn.execute(
             """INSERT INTO ml_notificaciones
-               (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en, procesada)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(data.get("_id")) if data.get("_id") is not None else None,
-                data.get("topic"),
+                topic,
                 data.get("resource"),
-                str(data.get("user_id")) if data.get("user_id") is not None else None,
+                user_id,
                 data.get("attempts"),
                 data.get("sent"),
                 raw,
                 datetime.now().isoformat(timespec="seconds"),
+                1 if descartada else 0,
             ),
         )
 
