@@ -284,35 +284,77 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-23 — FASE 1 IMPLEMENTADA: OAuth + sync + guardián de API-seguridad; falta desplegar/conectar)
+## 8. Estado actual (último update: 2026-07-28 — FASE 1 DESPLEGADA EN PROD; falta autorizar OAuth con el TITULAR y correr el backfill)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
-**Estado al 2026-07-24: la Fase 1 está IMPLEMENTADA, verificada en local y auditada
-(APROBADO), pero NO commiteada/desplegada. Estamos EN ESPERA DEL CLIENTE: Mario le envió el
-paso a paso para corregir el Redirect URI en el DevCenter (la app vive en la cuenta del
-cliente) y el cliente aún no confirma.** Si Mario abre el chat, lo más probable es que sea
-porque **el cliente YA corrigió el Redirect URI** → confirmarlo y seguir en orden:
-1. ✅ HECHO (2026-07-23): Mario ya tiene App ID + Client Secret (copia local en su compu).
-   Se le aclaró: editar el redirect URI NO rota el secret; el que tiene sigue siendo válido.
-2. ⏳ **ESPERANDO AL CLIENTE**: corregir en DevCenter → Editar DROPSHIPPING-RELUVSA → campo
-   **"URI de redirect"** (⚠️ NO "URL del sitio" ni la URL de notificaciones, que ya están bien):
-   `https://reluvsa-dropshipping-production.up.railway.app/api/ml/oauth/callback`
-   (EXACTO, sin slash final; el código usa ese default vía env var `ML_REDIRECT_URI`).
-3. ⬜ Mario: pegar `ML_CLIENT_ID` y `ML_CLIENT_SECRET` en Railway → Variables del servicio
-   backend (Railway redespliega solo) y **borrar la copia local del secret** (higiene acordada).
-4. ⬜ **Commit + push de la Fase 1** (17 archivos: 9 modificados + 8 nuevos, listos en el
-   working tree desde el 2026-07-23) → auto-deploy Railway+Vercel. Las tablas ml_* se crean
-   solas al arrancar (CREATE TABLE IF NOT EXISTS, sin migración). Verificar arranque +
-   `GET /api/ml/estado` → `conectado: false`.
-5. ⬜ **Conectar la cuenta:** pestaña admin "Mercado Libre" (`/mercadolibre`) → "Conectar cuenta
-   de Mercado Libre" → la URL la debe abrir el **TITULAR** de la cuenta ML (un operador da
-   `invalid_operator_user_id`). Verificar: nickname, tags multi-origen, depósitos mapeados.
-6. ⬜ **1a sync:** "Sincronizar ahora" (validar ~5 órdenes vs panel ML) y luego **"Backfill 12
-   meses"** (URGENTE: la API solo da 12 meses hacia atrás — cada semana se pierde historia).
-7. ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api` y
-   **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear. Respetar
-   las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
+**Estado al 2026-07-28: la Fase 1 está COMMITEADA (`d3d88bc`) y VIVA EN PROD (Railway +
+Vercel verificados). Las credenciales están en Railway. El flujo OAuth llega hasta la
+pantalla de autorización de ML — Mario la vio y NO le dio "Autorizar" a propósito: quiso
+hacerlo PRESENCIAL EN JUNTA CON EL CLIENTE, porque la URL la debe abrir el TITULAR de la
+cuenta de ML de RELUVSA (si la abre Mario con su sesión, conectaría SU cuenta, no la del
+cliente).** Si Mario abre el chat, lo más probable es que sea **después de esa junta** →
+preguntarle si ya autorizaron y seguir en orden:
+
+1. ✅ HECHO: App ID + Client Secret obtenidos (2026-07-23).
+2. ✅ HECHO: el cliente corrigió el **"URI de redirect"** en el DevCenter (confirmado
+   2026-07-28 — la pantalla de autorización de ML carga sin error, que es la prueba de que
+   el redirect coincide EXACTO).
+3. ✅ HECHO (2026-07-28): `ML_CLIENT_ID` + `ML_CLIENT_SECRET` pegados en Railway → Variables
+   del servicio backend, deploy en verde. ⬜ **PENDIENTE DE HIGIENE: Mario debe borrar la
+   copia local del secret de su compu** (acordado; preguntarle si ya lo hizo).
+4. ✅ HECHO (2026-07-28): commit `d3d88bc` + push a `main` → auto-deploy Railway+Vercel.
+   Verificado en prod por curl: `GET /` 200; `GET /api/ml/estado` y `POST /api/ml/sync` →
+   **401 sin token** (existen y están protegidos); `GET /api/ml/oauth/callback` con state
+   falso → **HTML 400** amigable (anti-CSRF funcionando, no 500); webhook → 200; Vercel 200.
+   Las 6 tablas `ml_*` se crearon solas al arrancar (sin migración).
+5. ⏳ **AQUÍ VAMOS — autorizar OAuth CON EL CLIENTE (junta presencial):** pestaña admin
+   "Mercado Libre" (`/mercadolibre`) → "Conectar cuenta de Mercado Libre" → la URL la debe
+   abrir el **TITULAR** de la cuenta ML de RELUVSA con SU sesión iniciada (un operador da
+   `invalid_operator_user_id`; Mario con su propia sesión conectaría la cuenta equivocada).
+   Tras autorizar, verificar en la pantalla: nickname de la cuenta, tags multi-origen,
+   depósitos mapeados a bodegas.
+6. ⬜ **1a sync:** "Sincronizar ahora" (incremental; validar ~5 órdenes contra el panel de ML)
+   y luego **"Backfill 12 meses"** (URGENTE: la API solo da 12 meses hacia atrás — cada
+   semana que pasa se pierde historia irrecuperable).
+7. ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
+   y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
+   Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
    POST /oauth/token.
+
+**⚠️ HALLAZGO 2026-07-28 — los scopes que ML pide en la pantalla de autorización son más
+amplios de lo que se le había dicho a Mario.** La pantalla de consentimiento lista 3
+permisos: **Facturación de una venta** ("enviar facturas y gestionar detalles…"),
+**Métricas del negocio** y **Venta y envíos de un producto** ("gestionar ventas y envíos como
+despachos, devoluciones, contracargos y reclamos"). Ese texto suena a escritura porque **los
+scopes de ML son por ÁREA DE NEGOCIO, no por verbo** — ML no ofrece un "ventas y envíos solo
+lectura", así que muestra la descripción genérica del área completa. Implicaciones reales:
+- ✅ **NO aparece "Publicación y sincronización"** → confirma que la app NO puede tocar
+  publicaciones, precios ni stock (era la preocupación #1 de Mario por su mala experiencia
+  previa en otro proyecto). Ese permiso debe **QUEDARSE en "Sin acceso"** en el DevCenter.
+- ⚠️ **Corrección a lo que se le explicó a Mario en sesiones previas:** se le había dicho que
+  el "candado de ML" (permisos en Sin acceso) bloqueaba toda escritura. Eso es cierto para
+  publicaciones, pero **NO para ventas/envíos/facturación**: ahí el token SÍ tendrá alcance
+  teórico de escritura. **La protección efectiva en esas áreas es el CÓDIGO**
+  (`ml_client.py::_assert_permitido` rechaza todo verbo != GET antes de tocar la red,
+  independientemente del scope del token). El blindaje sigue siendo válido; lo que cambia es
+  cuál capa lo sostiene. No revertir ni relajar la allowlist por ningún motivo.
+
+**Verificación de seguridad ejecutada el 2026-07-28 (a petición de Mario, antes de commitear):**
+`test_ml_client_solo_lectura.py` **15/15 ✅** (incluye: los 4 verbos de escritura lanzan
+`MLEscrituraProhibida` y **ninguno llega a la red**; host disfrazado tipo
+`api.mercadolibre.com.atacante.net` bloqueado; refresh concurrente = exactamente 1 refresh;
+cero tokens en `ml_api_log`; check ESTÁTICO de que ningún archivo del backend fuera de
+`ml_client.py` toca httpx ni el host de ML). `test_sync_ml_e2e.py` **21/21 ✅** (incluye
+`lugar_override` de Gaby respetado al re-sincronizar). Auditoría **`api-guardian`: APROBADO
+7/7** con evidencia archivo:línea. Además, pre-commit: cero secretos hardcodeados (todo sale
+de `os.getenv`) y build CRA OK.
+
+**Decisión de Mario (2026-07-28) sobre más capas de seguridad:** se le propuso un hook
+pre-commit que corriera el test de solo-lectura automáticamente (porque las 4 capas actuales
+dependen de que alguien se acuerde de invocarlas). **Mario dijo que NO**, con el criterio de
+que no quiere automatismos que se ejecuten sin que él los dispare. Respetar esa decisión: las
+4 capas se invocan manualmente. ⬜ Pendiente no-técnico: **avisarle al cliente por escrito que
+la app debe quedarse en "Sin acceso"** en Publicación y sincronización.
 
 ### 📍 CIERRE SESIÓN 2026-07-23 (FASE 1 IMPLEMENTADA: OAuth + SYNC + GUARDIÁN DE API-SEGURIDAD)
 **Contexto:** Mario confirmó que ya tiene Client ID + Secret y pidió: plan mode para la Fase 1,
