@@ -284,9 +284,21 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-31 — ✅ CUENTA ML CONECTADA; falta correr la 1a sync y el backfill)
+## 8. Estado actual (último update: 2026-07-31 — ✅ CUENTA ML CONECTADA + poda de webhooks desplegada; falta correr la 1a sync y el backfill)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
+
+> ✅ **PASO 1 YA VERIFICADO (2026-07-31, con screenshot del portal):** la conexión está
+> sana y **multi-origen ACTIVO**. Los 5 depósitos mapean 1:1 a bodega
+> (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`) y `MATRIZ` sale en gris
+> (sin bodega = bodega propia, correcto). **La asignación de proveedor vendrá estructurada
+> desde ML** → Gaby casi no tendrá que reasignar bodegas a mano. Seller 389112733,
+> nickname RELUVSA AUTOPARTES, token vigente con auto-renovación.
+> **Sólo faltan los pasos 2 (sync incremental) y 3 (backfill 12 meses).**
+
+> ✅ **PODA DE `ml_notificaciones` DESPLEGADA (commit `2f965a7`, push hecho, Railway
+> verificado 200/401).** Ver el bloque "webhooks de alto volumen" abajo. **Ya no hay
+> cambios sin commitear**: el árbol quedó limpio.
 
 > **🎉 LA CUENTA DE ML YA ESTÁ CONECTADA (2026-07-31).** El OAuth quedó resuelto: el fallo
 > era **PKCE activado en el panel** (ver abajo). El portal confirmó *"Cuenta RELUVSA
@@ -298,10 +310,9 @@ Convenciones:
 
 **Los 3 pasos pendientes, en orden:**
 
-1. ⬜ **Verificar la conexión** en `/mercadolibre` (solo mirar): nickname ✅ (ya confirmado),
-   **tags de multi-origen** (`warehouse_management`/`multiwarehouse`) y **depósitos mapeados
-   a bodegas** (CAUPLAS/KIM/VAZLO/AG/KG). Si los depósitos mapean bien, la asignación de
-   proveedor sale estructurada y Gaby casi no tendrá que reasignar bodegas a mano.
+1. ✅ **HECHO — Verificar la conexión** en `/mercadolibre`: multi-origen ACTIVO y los 5
+   depósitos mapeados 1:1 (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`),
+   `MATRIZ` en gris sin bodega (correcto, es propia). Seller 389112733.
 2. ⬜ **"Sincronizar ahora"** (incremental, rápida) → luego validar **~5 órdenes** en la
    pestaña Ventas contra el panel de ML (num_venta, fecha, título, depósito).
 3. ⬜ **"Backfill 12 meses"** 🔴 **URGENTE** — la API solo entrega 12 meses hacia atrás; cada
@@ -356,10 +367,67 @@ ficha del perfil, NO el catálogo. Documentado en §3 del doc de configuración.
 ⚠️ Los logs vienen **inundados de webhooks de ML** — filtrar con `grep -v` o buscar
 `oauth/(iniciar|callback)`.
 
-### Cambios pendientes de commit (2026-07-31)
+### ⚠️ Webhooks de ALTO VOLUMEN + poda de `ml_notificaciones` (2026-07-31, commit `2f965a7`)
 
-Implementados y verificados en local, **NO commiteados ni desplegados** (Mario no lo ha
-autorizado). Son 26 líneas de código, puramente observabilidad:
+**Hallazgo:** la cuenta real recibe **~15,000 webhooks/día** (Mario lo midió en el portal:
+5-10 por minuto). Muy por encima de lo que se asumía. Incluye los **hasta 8 reintentos** que
+ML hace por notificación.
+
+**El problema:** `ml_notificaciones` **nunca se podaba** — `sync_ml.py` sólo marcaba
+`procesada=1`, lo que NO libera espacio. Proyección: **~3 GB/año** sobre un volumen de
+Railway de **5 GB compartido** con la BD y los PDF/XML de facturas. Riesgo real de llenar el
+volumen (~1.5 años) → la BD dejaría de escribir y el portal se caería.
+
+**Fix desplegado:** poda por antigüedad en `sync_ml.py::_finalizar`, mismo patrón que la de
+`ml_api_log`. Retención **30 días**, sólo filas con `procesada=1`. Estabiliza la tabla en
+**~235 MB**. Usa el índice `idx_mlnotif_procesada` ya existente.
+
+**2 detalles NO OBVIOS (ambos con test de regresión — no romperlos en un refactor):**
+1. ⚠️ **El DELETE va ANTES del `UPDATE ... SET procesada=1 WHERE procesada=0`** de la misma
+   función. Invertirlo haría que una notificación **PENDIENTE antigua** se marque procesada
+   y **se borre en la misma corrida sin haberse consumido nunca**. (Bug real detectado por
+   el test en la 1a versión del cambio.)
+2. ⚠️ **El corte usa `datetime.now()`, NO `utcnow()`**: `recibido_en` lo escribe
+   `routers/webhooks.py` en hora **LOCAL MX**, a diferencia de `ml_api_log.ts` que sí es
+   UTC. Copiar `utcnow()` de la línea vecina borraría **~6 h de más** en cada poda.
+
+**Test nuevo:** `backend/scripts/test_poda_notificaciones.py` (8/8) fija ambas garantías.
+**Checklist completo:** solo-lectura 15/15 · sync e2e 21/21 · poda 8/8 · **api-guardian
+APROBADO 7/7** (verificó: allowlist intacta byte por byte, cero red, parámetro vinculado sin
+SQL injection, datos de negocio y `lugar_override`/`albaran` intactos).
+
+**Notas operativas (del api-guardian):**
+- La poda **corre dentro de la sync** (`_finalizar`). Sin sync no se ejecuta. Como todas las
+  notificaciones actuales son del 2026-07-31, **la 1a sync no borrará nada**; empieza a
+  limpiar ~30 días después.
+- 🔴 **La 1a poda real (≈2026-08-30) borrará el backlog acumulado de golpe** (cientos de
+  miles de filas en una transacción que también envuelve `resolver_cruce_ventas` y
+  `recruzar_conceptos_sin_match`). SQLite toma lock de escritura de BD completa → un webhook
+  entrante podría toparse con `database is locked` (inofensivo: ML reintenta y el
+  procesamiento es idempotente). **Recomendado: correrla en ventana tranquila**, o acotar por
+  lotes (`DELETE ... WHERE id IN (SELECT id ... LIMIT 50000)`).
+- ⚠️ **SQLite no encoge el archivo sin `VACUUM`.** La poda **frena el crecimiento** pero no
+  libera el espacio ya ocupado. Si el objetivo es recuperar disco, hace falta un `VACUUM`
+  manual.
+- La poda sólo corre si la sync **termina completa** (no en corridas abortadas). Mismo
+  comportamiento que la poda preexistente de `ml_api_log`; no es regresión.
+
+**Aclaración conceptual (le costó explicarse a Mario, dejarlo claro):** la columna
+"Procesada" del portal NO significa "ya la usé". `pendiente`=0 → tópico suscrito en cola;
+✅=1 → **descartada** (tópico no suscrito, ej. `post_purchase`) o ya reconciliada por una
+sync. El check verde se lee como "procesada bien" y significa lo contrario → **mejora de UI
+pendiente: cambiar ✅ por "descartada"**. Además: **los webhooks llegan 24/7 al backend en
+Railway, independientemente de que alguien tenga el portal abierto**; la pestaña
+`/mercadolibre` es sólo un tablero de monitoreo (refresco `POLL_MS=4000`, sólo repinta desde
+la SQLite local, cero llamadas a ML). Los webhooks **no cuestan nada** (ML nos llama a
+nosotros) y hoy el sync **no los lee uno por uno** (pregunta por `date_last_updated`), por eso
+`sync_ml.py` los marca todos de golpe.
+
+### Cambios pendientes de commit (2026-07-31) — ✅ YA COMMITEADOS (commit `996c71f`)
+
+> Este bloque quedó **obsoleto**: el endpoint de diagnóstico ya está en `main` y desplegado
+> (se commiteó en `996c71f` junto con el fix de OAuth). Se conserva como registro de qué hace.
+> Al 2026-07-31 el árbol de trabajo está **limpio**.
 
 1. **`backend/routers/ml.py`** — nuevo `GET /api/ml/api-log` (`require_admin`, solo lectura
    sobre `ml_api_log`, `limit` clampeado 1..200, flag `solo_errores`). Permite ver desde el
