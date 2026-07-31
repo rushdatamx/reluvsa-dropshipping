@@ -26,6 +26,7 @@ van en una transacción corta por página (WAL: los lectores no se bloquean).
 """
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -48,6 +49,15 @@ API_LOG_RETENCION_DIAS = 30
 # ventas_ml/envios_colecta, aquí queda únicamente el aviso ya consumido.
 NOTIF_RETENCION_DIAS = 30
 
+# Sync automática (scheduler de fondo). Sin esto, las ventas solo entran si
+# alguien aprieta "Sincronizar ahora" en el portal.
+SYNC_AUTO_MINUTOS_DEFAULT = 30
+SYNC_AUTO_MIN_MINUTOS = 5      # piso de seguridad: no martillar la API de ML
+SYNC_AUTO_MAX_MINUTOS = 1440   # techo: 1 día
+# Cada cuánto despierta el hilo a revisar si toca sincronizar. Corto a propósito:
+# así un cambio de intervalo desde la config surte efecto sin reiniciar la app.
+SCHEDULER_TICK_SEG = 60
+
 # Zona horaria de México (sin DST desde 2022): las fechas del Excel eran hora
 # local naive; convertimos las fechas ISO de la API a lo mismo para que el cruce
 # fecha+título legacy (±5 min) siga funcionando con datos mixtos.
@@ -64,6 +74,8 @@ ESTADO_MAP = {
 }
 
 _sync_lock = threading.Lock()
+_scheduler_lock = threading.Lock()
+_scheduler_hilo = None
 
 
 class SyncEnCurso(Exception):
@@ -579,3 +591,137 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
             (stats["ordenes_vistas"], stats["ventas_upsert"], stats["envios_upsert"],
              stats["errores"], json.dumps(resumen, ensure_ascii=False), ahora, ahora, run_id),
         )
+
+
+# ---------------------------------------------------------------------------
+# Scheduler: sync automática periódica
+# ---------------------------------------------------------------------------
+#
+# Sin esto el portal solo se actualiza si alguien aprieta "Sincronizar ahora".
+# El hilo despierta cada SCHEDULER_TICK_SEG y dispara una sync incremental
+# cuando ya pasó el intervalo configurado desde la última corrida.
+#
+# Reusa TAL CUAL la protección anti-concurrencia existente (lock en memoria +
+# corrida viva en ml_sync_runs con heartbeat): si hay una sync corriendo,
+# iniciar_sync lanza SyncEnCurso y el tick simplemente no hace nada.
+#
+# ⚠️ El lock en memoria supone UN SOLO worker/réplica (hoy Railway corre 1). Con
+# varias réplicas cada una tendría su propio lock; la defensa que seguiría
+# valiendo es la corrida viva en BD.
+
+def sync_auto_activo(conn) -> bool:
+    """Interruptor de apagado. Por defecto ENCENDIDO (el propósito de la feature)."""
+    valor = get_config(conn, "sync_auto_activo")
+    if valor is None:
+        return True
+    return str(valor).strip().lower() in ("1", "true", "si", "sí", "on")
+
+
+def sync_auto_minutos(conn) -> int:
+    """Intervalo configurable sin tocar código, acotado a un rango sano."""
+    valor = get_config(conn, "sync_auto_minutos")
+    try:
+        minutos = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return SYNC_AUTO_MINUTOS_DEFAULT
+    return max(SYNC_AUTO_MIN_MINUTOS, min(minutos, SYNC_AUTO_MAX_MINUTOS))
+
+
+def _ultimo_intento_auto(conn) -> Optional[datetime]:
+    """Cuándo se disparó por última vez (o se intentó disparar) la sync automática.
+
+    Se guarda aparte de `ultima_sync` a propósito: `ultima_sync` solo avanza si la
+    corrida TERMINA completa, así que usarla como reloj haría que una corrida
+    fallida se reintentara en cada tick (cada minuto), martillando la API."""
+    for clave in ("sync_auto_ultimo_intento", "ultima_sync"):
+        valor = get_config(conn, clave)
+        if valor:
+            try:
+                return datetime.fromisoformat(valor)
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+def _toca_sincronizar(conn, ahora: datetime) -> bool:
+    if not sync_auto_activo(conn):
+        return False
+    ultimo = _ultimo_intento_auto(conn)
+    if ultimo is None:
+        # Nunca se ha sincronizado. NO disparamos solos: sin `ultima_sync` el
+        # incremental degrada a backfill de 12 meses (~1 h), y esa corrida grande
+        # debe ser una decisión explícita de un humano, no un efecto del arranque.
+        return False
+    return (ahora - ultimo) >= timedelta(minutes=sync_auto_minutos(conn))
+
+
+def _tick_scheduler() -> Optional[dict]:
+    """Un ciclo de evaluación. Devuelve la sync lanzada, o None si no tocaba."""
+    ahora = datetime.utcnow()
+    with get_db() as conn:
+        if not _toca_sincronizar(conn, ahora):
+            return None
+        # Se marca ANTES de lanzar: si la corrida falla, el próximo intento espera
+        # el intervalo completo en vez de reintentar cada minuto.
+        previo = get_config(conn, "sync_auto_ultimo_intento")
+        set_config(conn, "sync_auto_ultimo_intento", ahora.isoformat(timespec="seconds"))
+
+    try:
+        return iniciar_sync("incremental")
+    except SyncEnCurso:
+        # Ya hay una corriendo (p.ej. un backfill manual de ~1 h). No duplicamos,
+        # y además DEVOLVEMOS el reloj: si consumiéramos el intento, al terminar
+        # el backfill habría que esperar otro intervalo completo para la primera
+        # incremental. Así el próximo tick (1 min) reintenta y entra en cuanto
+        # la corrida larga libere.
+        with get_db() as conn:
+            set_config(conn, "sync_auto_ultimo_intento", previo)
+        return None
+    except ml_client.MLError:
+        return None          # sin conexión/credenciales: se reintenta al próximo intervalo
+
+
+def _loop_scheduler() -> None:
+    while True:
+        try:
+            _tick_scheduler()
+        except Exception:
+            # El scheduler NUNCA muere: un error puntual no puede dejar el portal
+            # sin sincronizar hasta el próximo redeploy.
+            pass
+        time.sleep(SCHEDULER_TICK_SEG)
+
+
+def iniciar_scheduler() -> bool:
+    """Arranca el hilo de sync automática. Idempotente: llamarlo dos veces no
+    crea dos hilos (Railway puede reiniciar el contenedor y re-ejecutar main)."""
+    global _scheduler_hilo
+    with _scheduler_lock:
+        if _scheduler_hilo is not None and _scheduler_hilo.is_alive():
+            return False
+        _scheduler_hilo = threading.Thread(
+            target=_loop_scheduler, name="ml-sync-scheduler", daemon=True
+        )
+        _scheduler_hilo.start()
+        return True
+
+
+def scheduler_vivo() -> bool:
+    return _scheduler_hilo is not None and _scheduler_hilo.is_alive()
+
+
+def estado_sync_auto(conn) -> dict:
+    """Resumen para la UI (no toca la red)."""
+    ultimo = _ultimo_intento_auto(conn)
+    minutos = sync_auto_minutos(conn)
+    activo = sync_auto_activo(conn)
+    proxima = None
+    if activo and ultimo is not None:
+        proxima = (ultimo + timedelta(minutes=minutos)).isoformat(timespec="seconds")
+    return {
+        "activo": activo,
+        "intervalo_minutos": minutos,
+        "scheduler_vivo": scheduler_vivo(),
+        "ultimo_intento": ultimo.isoformat(timespec="seconds") if ultimo else None,
+        "proxima_aproximada": proxima,
+    }

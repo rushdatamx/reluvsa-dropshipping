@@ -134,3 +134,10 @@ class MetricasProveedor(BaseModel):
 
 class MLSyncRequest(BaseModel):
     tipo: str = "incremental"  # 'incremental' | 'backfill'
+
+
+class MLSyncAutoRequest(BaseModel):
+    """Configuración de la sync automática. Ambos campos opcionales: se aplica
+    solo lo que venga (permite cambiar el intervalo sin tocar el interruptor)."""
+    activo: Optional[bool] = None
+    intervalo_minutos: Optional[int] = None

@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Copy, Link2, RefreshCw, Store, XCircle, Zap,
+  AlertTriangle, CheckCircle2, Clock, Copy, Link2, RefreshCw, Store, XCircle, Zap,
 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync } from '../services/api';
+import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto } from '../services/api';
+
+const INTERVALOS = [15, 30, 60, 120, 240];
+
+const fechaCorta = (iso) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : null);
 
 const POLL_MS = 4000;
 
@@ -78,6 +82,18 @@ export default function MercadoLibre() {
     }
   };
 
+  const guardarSyncAuto = async (payload) => {
+    setError(null);
+    try {
+      await mlSyncAuto(payload);
+      cargar();
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setError(typeof d === 'string' ? d : 'No se pudo guardar la configuración de la sync automática');
+    }
+  };
+
+  const auto = estado?.sync_auto;
   const run = estado?.sync_en_curso;
   const ultima = estado?.ultima_run;
   const resumenUltima = (() => {
@@ -253,6 +269,62 @@ export default function MercadoLibre() {
                     ultima.detalle && <p className="truncate">{ultima.detalle}</p>
                   )}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Sync automática ─── */}
+          {auto && (
+            <div className="mt-4 pt-4 border-t border-notion-border space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock size={16} className={auto.activo ? 'text-success' : 'text-notion-text-secondary'} />
+                  <span className="font-semibold">Sincronización automática</span>
+                  <Badge ok={auto.activo}>{auto.activo ? 'activa' : 'apagada'}</Badge>
+                </div>
+                <button
+                  onClick={() => guardarSyncAuto({ activo: !auto.activo })}
+                  className="px-3 py-1 rounded-lg border border-notion-border text-xs font-semibold hover:bg-gray-50"
+                >
+                  {auto.activo ? 'Apagar' : 'Encender'}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-notion-text-secondary">Cada</span>
+                <select
+                  value={auto.intervalo_minutos}
+                  onChange={(e) => guardarSyncAuto({ intervalo_minutos: Number(e.target.value) })}
+                  className="px-2 py-1 rounded border border-notion-border text-sm bg-white"
+                >
+                  {INTERVALOS.map((m) => (
+                    <option key={m} value={m}>
+                      {m < 60 ? `${m} min` : `${m / 60} h`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {auto.activo && auto.proxima_aproximada && (
+                <p className="text-xs text-notion-text-secondary">
+                  Próxima corrida aproximada: {fechaCorta(auto.proxima_aproximada)}
+                </p>
+              )}
+
+              {!auto.scheduler_vivo && (
+                <p className="text-xs text-danger flex items-center gap-1">
+                  <AlertTriangle size={12} /> El proceso de fondo no está corriendo en el servidor.
+                </p>
+              )}
+
+              {auto.activo && !auto.ultimo_intento && (
+                <p className="text-xs text-amber-700 flex items-start gap-1">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  <span>
+                    La sync automática arranca después de la primera sincronización manual
+                    (así el backfill de 12 meses nunca se dispara solo).
+                  </span>
+                </p>
               )}
             </div>
           )}

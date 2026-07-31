@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_database
 from routers import admin, auth, envios, facturas, incidencias, metricas, ml, proveedores, uploads, ventas, webhooks
+from services import sync_ml
 
 app = FastAPI(
     title="Portal Dropshipping RELUVSA",
@@ -43,6 +44,16 @@ app.include_router(metricas.router)
 app.include_router(uploads.router)
 app.include_router(webhooks.router)
 app.include_router(ml.router)
+
+
+@app.on_event("startup")
+def arrancar_scheduler_ml():
+    """Sync automática de ML en un hilo de fondo (idempotente).
+
+    Va en startup y no a nivel de módulo para que importar `main` (tests) no
+    lance hilos. Se puede apagar sin redeploy con la config `sync_auto_activo`.
+    """
+    sync_ml.iniciar_scheduler()
 
 
 @app.get("/")

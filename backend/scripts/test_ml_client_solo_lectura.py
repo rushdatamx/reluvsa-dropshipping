@@ -179,6 +179,7 @@ def main():
         backend_dir / "services" / "ml_client.py",
         # Tests que usan httpx.MockTransport para simular la API (nunca red real):
         backend_dir / "scripts" / "test_sync_ml_e2e.py",
+        backend_dir / "scripts" / "test_sync_automatica.py",
         Path(__file__).resolve(),
     }
     infractores = []

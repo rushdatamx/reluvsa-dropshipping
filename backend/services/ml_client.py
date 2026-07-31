@@ -45,6 +45,11 @@ REDIRECT_URI_DEFAULT = (
 # Margen antes de la expiración real para refrescar proactivamente.
 MARGEN_EXPIRACION_SEG = 60
 MAX_REINTENTOS_429 = 5
+# Un parpadeo de red de 1 s tumbaba una corrida entera de sync (el backfill de
+# 12 meses murió así el 2026-07-31). Con la sync automática nadie está mirando la
+# pantalla para reintentar, así que los errores de red se reintentan igual que
+# los 429 — con backoff corto, porque aquí no hay una cuenta que castigar.
+MAX_REINTENTOS_RED = 2
 
 # Claves que jamás deben aparecer en ml_api_log (defensa en profundidad; los GET de
 # este proyecto no llevan secretos en query, pero se filtra igual).
@@ -156,12 +161,21 @@ def _request(metodo: str, url: str, params: Optional[dict] = None,
     """ÚNICO punto del backend que ejecuta requests hacia ML.
 
     1ª línea: la allowlist. Después: reintentos con backoff exponencial + jitter
-    ante 429 y registro de cada llamada en ml_api_log (sin secretos).
+    ante 429 y ante errores de red, y registro de cada llamada en ml_api_log
+    (sin secretos).
+
+    El reintento de red se limita a GET (idempotente por definición en esta app).
+    NO se reintenta POST /oauth/token: si la respuesta se perdió en la red, ML
+    pudo haber rotado ya el refresh token (es de un solo uso) y reintentar lo
+    quemaría sin poder persistir el nuevo. Ese caso se resuelve re-autorizando,
+    no reintentando a ciegas.
     """
     _assert_permitido(metodo, url)
     path_log = _path_filtrado(url, params)
+    reintentable_red = metodo.upper() == "GET"
 
     intento = 0
+    intento_red = 0
     while True:
         t0 = time.monotonic()
         try:
@@ -170,6 +184,10 @@ def _request(metodo: str, url: str, params: Optional[dict] = None,
         except httpx.HTTPError as e:
             ms = int((time.monotonic() - t0) * 1000)
             _log_llamada(metodo, path_log, None, ms, type(e).__name__)
+            if reintentable_red and intento_red < MAX_REINTENTOS_RED:
+                time.sleep(min(2 ** intento_red + random.uniform(0, 1), 10))
+                intento_red += 1
+                continue
             raise MLError(f"Error de red hacia ML ({type(e).__name__}) en {path_log}")
 
         ms = int((time.monotonic() - t0) * 1000)

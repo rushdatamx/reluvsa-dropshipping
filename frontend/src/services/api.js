@@ -114,6 +114,7 @@ export const subirKits = (file) => {
 export const mlEstado = () => api.get('/ml/estado');
 export const mlIniciarOauth = () => api.post('/ml/oauth/iniciar');
 export const mlSync = (tipo = 'incremental') => api.post('/ml/sync', { tipo });
+export const mlSyncAuto = (payload) => api.post('/ml/sync-auto', payload);
 export const mlNotificaciones = (limit = 20) =>
   api.get('/webhooks/mercadolibre/recientes', { params: { limit } });
 

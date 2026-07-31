@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 
 from database import get_db
-from models import MLSyncRequest
+from models import MLSyncAutoRequest, MLSyncRequest
 from routers.auth import require_admin
 from services import ml_client, sync_ml
 
@@ -143,6 +143,7 @@ def estado_ml():
         "sync_en_curso": None,
         "ultima_run": None,
         "notificaciones_pendientes": 0,
+        "sync_auto": None,
     }
 
     with get_db() as conn:
@@ -175,8 +176,27 @@ def estado_ml():
         estado["notificaciones_pendientes"] = conn.execute(
             "SELECT COUNT(*) AS c FROM ml_notificaciones WHERE procesada = 0"
         ).fetchone()["c"]
+        estado["sync_auto"] = sync_ml.estado_sync_auto(conn)
 
     return estado
+
+
+@router.post("/sync-auto", dependencies=[Depends(require_admin)])
+def configurar_sync_auto(payload: MLSyncAutoRequest):
+    """Enciende/apaga la sync automática y ajusta su intervalo (sin redeploy)."""
+    with get_db() as conn:
+        if payload.activo is not None:
+            sync_ml.set_config(conn, "sync_auto_activo", "1" if payload.activo else "0")
+        if payload.intervalo_minutos is not None:
+            minutos = int(payload.intervalo_minutos)
+            if not (sync_ml.SYNC_AUTO_MIN_MINUTOS <= minutos <= sync_ml.SYNC_AUTO_MAX_MINUTOS):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"El intervalo debe estar entre {sync_ml.SYNC_AUTO_MIN_MINUTOS} y "
+                            f"{sync_ml.SYNC_AUTO_MAX_MINUTOS} minutos."),
+                )
+            sync_ml.set_config(conn, "sync_auto_minutos", str(minutos))
+        return sync_ml.estado_sync_auto(conn)
 
 
 @router.get("/api-log", dependencies=[Depends(require_admin)])
