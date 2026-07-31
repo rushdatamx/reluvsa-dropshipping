@@ -247,6 +247,12 @@ def _post_oauth_token(form: dict) -> dict:
             codigo = resp.json().get("error")
         except Exception:
             pass
+        # El código de error de ML es el discriminador del diagnóstico
+        # (invalid_client = credenciales; invalid_grant = code/redirect_uri/PKCE) y se
+        # perdía dentro de la excepción. Se persiste en la auditoría — es una etiqueta
+        # corta y enumerada de ML, NUNCA el body ni credenciales.
+        _log_llamada("POST", OAUTH_TOKEN_PATH, resp.status_code, 0,
+                     f"oauth_error={codigo}" if codigo else "oauth_error=desconocido")
         if codigo == "invalid_grant":
             raise MLTokenInvalido(
                 "ML rechazó el token (invalid_grant): hay que re-autorizar con el titular de la cuenta"

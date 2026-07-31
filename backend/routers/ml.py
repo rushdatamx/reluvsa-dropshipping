@@ -179,6 +179,26 @@ def estado_ml():
     return estado
 
 
+@router.get("/api-log", dependencies=[Depends(require_admin)])
+def api_log(limit: int = 50, solo_errores: bool = False):
+    """Auditoría de las últimas llamadas salientes a ML (tabla ml_api_log).
+
+    Diagnóstico: permite ver el status real que devolvió ML (p.ej. por qué falló
+    el canje en /oauth/token) sin depender de los logs del contenedor.
+
+    La tabla NUNCA contiene tokens ni secretos (ml_client._path_filtrado filtra la
+    query y el body jamás se registra), así que exponerla al admin es seguro.
+    """
+    limit = max(1, min(int(limit), 200))
+    sql = "SELECT id, metodo, path, status, ms, error, ts FROM ml_api_log"
+    if solo_errores:
+        sql += " WHERE status IS NULL OR status >= 400"
+    sql += " ORDER BY id DESC LIMIT ?"
+    with get_db() as conn:
+        filas = [dict(r) for r in conn.execute(sql, (limit,)).fetchall()]
+    return {"total_devuelto": len(filas), "llamadas": filas}
+
+
 @router.post("/sync", dependencies=[Depends(require_admin)])
 def disparar_sync(payload: MLSyncRequest):
     """Dispara una sincronización manual (incremental o backfill de 12 meses)."""

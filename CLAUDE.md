@@ -284,42 +284,100 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-28 — FASE 1 DESPLEGADA EN PROD; falta autorizar OAuth con el TITULAR y correr el backfill)
+## 8. Estado actual (último update: 2026-07-31 — ✅ CUENTA ML CONECTADA; falta correr la 1a sync y el backfill)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
-**Estado al 2026-07-28: la Fase 1 está COMMITEADA (`d3d88bc`) y VIVA EN PROD (Railway +
-Vercel verificados). Las credenciales están en Railway. El flujo OAuth llega hasta la
-pantalla de autorización de ML — Mario la vio y NO le dio "Autorizar" a propósito: quiso
-hacerlo PRESENCIAL EN JUNTA CON EL CLIENTE, porque la URL la debe abrir el TITULAR de la
-cuenta de ML de RELUVSA (si la abre Mario con su sesión, conectaría SU cuenta, no la del
-cliente).** Si Mario abre el chat, lo más probable es que sea **después de esa junta** →
-preguntarle si ya autorizaron y seguir en orden:
 
-1. ✅ HECHO: App ID + Client Secret obtenidos (2026-07-23).
-2. ✅ HECHO: el cliente corrigió el **"URI de redirect"** en el DevCenter (confirmado
-   2026-07-28 — la pantalla de autorización de ML carga sin error, que es la prueba de que
-   el redirect coincide EXACTO).
-3. ✅ HECHO (2026-07-28): `ML_CLIENT_ID` + `ML_CLIENT_SECRET` pegados en Railway → Variables
-   del servicio backend, deploy en verde. ⬜ **PENDIENTE DE HIGIENE: Mario debe borrar la
-   copia local del secret de su compu** (acordado; preguntarle si ya lo hizo).
-4. ✅ HECHO (2026-07-28): commit `d3d88bc` + push a `main` → auto-deploy Railway+Vercel.
-   Verificado en prod por curl: `GET /` 200; `GET /api/ml/estado` y `POST /api/ml/sync` →
-   **401 sin token** (existen y están protegidos); `GET /api/ml/oauth/callback` con state
-   falso → **HTML 400** amigable (anti-CSRF funcionando, no 500); webhook → 200; Vercel 200.
-   Las 6 tablas `ml_*` se crearon solas al arrancar (sin migración).
-5. ⏳ **AQUÍ VAMOS — autorizar OAuth CON EL CLIENTE (junta presencial):** pestaña admin
-   "Mercado Libre" (`/mercadolibre`) → "Conectar cuenta de Mercado Libre" → la URL la debe
-   abrir el **TITULAR** de la cuenta ML de RELUVSA con SU sesión iniciada (un operador da
-   `invalid_operator_user_id`; Mario con su propia sesión conectaría la cuenta equivocada).
-   Tras autorizar, verificar en la pantalla: nickname de la cuenta, tags multi-origen,
-   depósitos mapeados a bodegas.
-6. ⬜ **1a sync:** "Sincronizar ahora" (incremental; validar ~5 órdenes contra el panel de ML)
-   y luego **"Backfill 12 meses"** (URGENTE: la API solo da 12 meses hacia atrás — cada
-   semana que pasa se pierde historia irrecuperable).
-7. ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
-   y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
-   Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
-   POST /oauth/token.
+> **🎉 LA CUENTA DE ML YA ESTÁ CONECTADA (2026-07-31).** El OAuth quedó resuelto: el fallo
+> era **PKCE activado en el panel** (ver abajo). El portal confirmó *"Cuenta RELUVSA
+> AUTOPARTES conectada"*. **Lo que sigue es la 1a sincronización — todavía NO se ha corrido
+> ninguna.**
+
+**Mario pidió explícitamente NO ejecutar nada** y resolver sus dudas ANTES de tocar
+"Sincronizar ahora" y "Backfill 12 meses". **Arrancar preguntándole si quiere proceder.**
+
+**Los 3 pasos pendientes, en orden:**
+
+1. ⬜ **Verificar la conexión** en `/mercadolibre` (solo mirar): nickname ✅ (ya confirmado),
+   **tags de multi-origen** (`warehouse_management`/`multiwarehouse`) y **depósitos mapeados
+   a bodegas** (CAUPLAS/KIM/VAZLO/AG/KG). Si los depósitos mapean bien, la asignación de
+   proveedor sale estructurada y Gaby casi no tendrá que reasignar bodegas a mano.
+2. ⬜ **"Sincronizar ahora"** (incremental, rápida) → luego validar **~5 órdenes** en la
+   pestaña Ventas contra el panel de ML (num_venta, fecha, título, depósito).
+3. ⬜ **"Backfill 12 meses"** 🔴 **URGENTE** — la API solo entrega 12 meses hacia atrás; cada
+   semana que pasa se pierde historia irrecuperable. Tarda (ventanas de 15 días), se lanza y
+   se deja correr con contadores en vivo.
+
+**⚠️ HAY CAMBIOS SIN COMMITEAR** (ver "Cambios pendientes de commit" abajo): endpoint de
+diagnóstico `GET /api/ml/api-log` + registro del error de OAuth. Ya pasaron el checklist
+completo (tests 15/15 y 21/21, `api-guardian` APROBADO 7/7). Mario aún no decidió si
+desplegar antes o después de la sync — **preguntarle**.
+
+⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
+y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
+Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
+POST /oauth/token.
+
+### 📍 CIERRE SESIÓN 2026-07-31 (OAuth RESUELTO: era PKCE — cuenta ML conectada)
+
+**Contexto:** la sesión arrancó con el OAuth fallando. El titular autorizaba bien (la
+pantalla de consentimiento cargaba y ML devolvía un `code` válido), pero el portal mostraba
+**"No se pudo completar la conexión"**. Falló 2 veces, la 2ª con code recién generado.
+
+**🎯 CAUSA RAÍZ: la casilla "Requiere PKCE" estaba PALOMEADA en el DevCenter**, pese a que
+`docs/configuracion-app-ml.md` la registraba como deshabilitada desde el 2026-07-21. Con
+PKCE activo, ML exige `code_verifier` en el canje; el portal (correcto para app con backend)
+no lo manda → ML rechaza el `POST /oauth/token`. **Difícil de ver porque la pantalla de
+autorización carga normal y ML sí emite el code**: el fallo solo aparece en el último paso.
+
+**Solución:** el cliente **desmarcó `pkce`** y guardó. El siguiente intento conectó a la
+primera. Se decidió **APAGAR PKCE, no implementarlo**: PKCE protege clientes que no pueden
+custodiar un secreto (móviles/SPAs); este portal tiene backend y el `client_secret` vive en
+Railway. Detalle completo, hipótesis descartadas y la lección en **`docs/configuracion-app-ml.md`
+§2.bis** (leerlo antes de diagnosticar cualquier fallo de OAuth futuro).
+
+> 🔑 **LECCIÓN: el panel de ML se verifica VISUALMENTE, no por lo documentado.** El doc decía
+> "PKCE deshabilitado" y estaba mal. El panel es propiedad del cliente y cambia sin aviso.
+
+**Hipótesis descartadas (NO volver a investigarlas):** (1) que la app "pertenezca" a otra
+cuenta — descartado con doc oficial: OAuth de ML es multi-vendedor, no existe validación
+creador-vs-autorizador; (2) operador en vez de titular — daría `invalid_operator_user_id`
+en la pantalla, no en el canje; (3) code expirado/reusado; (4) `ML_REDIRECT_URI` distinto —
+esa var **no existe** en Railway, se usa el default en ambas llamadas.
+
+**Verificación de permisos del panel (2026-07-30, con screenshot):** los 4 permisos
+peligrosos (Publicación y sincronización, Publicidad, Promociones, Comunicaciones) en **Sin
+acceso**; los 3 funcionales en **Lectura**. ⚠️ **"Usuarios" aparece en "Lectura y escritura"
+BLOQUEADO por ML** — no se puede cambiar, es el permiso base de OAuth, y su alcance es la
+ficha del perfil, NO el catálogo. Documentado en §3 del doc de configuración.
+
+**Herramientas de la sesión:** se dejó vinculado el **Railway CLI** (`railway link` a
+`reluvsa-dropshipping`/production). Útil: `railway logs --service reluvsa-dropshipping`.
+⚠️ Los logs vienen **inundados de webhooks de ML** — filtrar con `grep -v` o buscar
+`oauth/(iniciar|callback)`.
+
+### Cambios pendientes de commit (2026-07-31)
+
+Implementados y verificados en local, **NO commiteados ni desplegados** (Mario no lo ha
+autorizado). Son 26 líneas de código, puramente observabilidad:
+
+1. **`backend/routers/ml.py`** — nuevo `GET /api/ml/api-log` (`require_admin`, solo lectura
+   sobre `ml_api_log`, `limit` clampeado 1..200, flag `solo_errores`). Permite ver desde el
+   portal el status real de cada llamada a ML sin depender de los logs del contenedor.
+2. **`backend/services/ml_client.py::_post_oauth_token`** — el código de error de ML
+   (`invalid_grant`/`invalid_client`) se extraía pero **se perdía dentro de la excepción**;
+   ahora se persiste en `ml_api_log` como `oauth_error=<codigo>`. Es una etiqueta enumerada
+   corta, NUNCA el body ni credenciales (verificado empíricamente: ni el code, ni el secret,
+   ni el client_id aparecen).
+
+**Checklist de seguridad COMPLETO ✅:** `test_ml_client_solo_lectura.py` 15/15 ·
+`test_sync_ml_e2e.py` 21/21 · **`api-guardian` APROBADO 7/7** (verificó: allowlist intacta
+byte por byte, cero fugas probadas con canje simulado, 401 sin token / 403 proveedor / 200
+admin, limit acotado, sin SQL injection, sin red nueva) · grep de paranoia sin secretos.
+
+**Nota al leer el log:** cada fallo de `/oauth/token` genera **2 filas** (una de `_request`
+con `error=NULL` y otra de diagnóstico con `ms=0`). Redundancia benigna; se distinguen por
+el campo `error`.
 
 **⚠️ HALLAZGO 2026-07-28 — los scopes que ML pide en la pantalla de autorización son más
 amplios de lo que se le había dicho a Mario.** La pantalla de consentimiento lista 3
