@@ -41,6 +41,12 @@ LIMIT = 50
 HEARTBEAT_MUERTO_MIN = 10
 OFFSET_TOPE = 10000          # tope de seguridad por ventana (no debería alcanzarse)
 API_LOG_RETENCION_DIAS = 30
+# ml_notificaciones es un buzón de alto volumen (~15k webhooks/día en la cuenta real,
+# incluyendo los hasta 8 reintentos que ML hace por notificación). Sin poda crecería
+# ~3 GB/año y llenaría el volumen de Railway (5 GB, compartido con la BD y los
+# PDF/XML de facturas). Solo se podan las YA procesadas: el dato de negocio vive en
+# ventas_ml/envios_colecta, aquí queda únicamente el aviso ya consumido.
+NOTIF_RETENCION_DIAS = 30
 
 # Zona horaria de México (sin DST desde 2022): las fechas del Excel eran hora
 # local naive; convertimos las fechas ISO de la API a lo mismo para que el cruce
@@ -527,6 +533,20 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
         # Cruce legacy (envíos del Excel sin ID directo) + cruce retroactivo de facturas.
         cruce = resolver_cruce_ventas(conn)
         recruce = recruzar_conceptos_sin_match(conn)
+
+        # Poda del buzón de webhooks: solo las YA procesadas (procesada=1) y viejas.
+        # Va ANTES del marcado de abajo a propósito: así solo se borran las que ya
+        # estaban consumidas de corridas anteriores, nunca las que esta misma corrida
+        # acaba de reconciliar. Las pendientes NO se borran aunque sean antiguas.
+        # `recibido_en` lo escribe webhooks.py con datetime.now() (hora LOCAL), no UTC
+        # como ml_api_log → el corte se calcula con now(), no utcnow().
+        corte_notif = (
+            datetime.now() - timedelta(days=NOTIF_RETENCION_DIAS)
+        ).isoformat(timespec="seconds")
+        conn.execute(
+            "DELETE FROM ml_notificaciones WHERE procesada = 1 AND recibido_en < ?",
+            (corte_notif,),
+        )
 
         # Las notificaciones pendientes quedan reconciliadas por el polling de esta
         # corrida (date_last_updated con solape); las que lleguen DURANTE la corrida
