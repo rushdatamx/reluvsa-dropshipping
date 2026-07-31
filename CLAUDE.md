@@ -311,15 +311,63 @@ comentarios.**
 3. ✅ **Backfill 12 meses COMPLETADO** (20:33 → 21:31, **~58 min**):
    `29,394 órdenes · 27,136 ventas · 27,067 envíos · 2,258 errores`.
 
-**⬜ LO QUE QUEDA ABIERTO — los 2 hallazgos de la 1a carga (bloque dedicado abajo):**
+**⬜ LO QUE QUEDA ABIERTO (cada uno con su bloque dedicado abajo):**
+- ⭐ **PEDIDO DE MARIO: sync AUTOMÁTICA** ("me gustaría que se vean automáticamente las
+  ventas"). Hoy nada corre solo: si nadie aprieta el botón, no entran ventas. **Análisis y
+  opciones ya preparados** en el bloque de abajo — arrancar por ahí si lo retoma.
 - 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA).
 - 🟡 **2,258 órdenes (7.7%) no se guardaron** por errores de red. Recuperables re-corriendo
   el backfill (todo es upsert, no duplica).
+
+**Orden sugerido:** el hueco de reintento de red (Hallazgo 2) conviene arreglarlo **ANTES**
+de automatizar — sin eso, una sync automática fallará sola cada tanto y nadie estará mirando
+la pantalla para reintentarla.
 
 ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
 y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
 Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
 POST /oauth/token.
+
+### ⭐ PEDIDO DE MARIO PARA LA PRÓXIMA SESIÓN (2026-07-31): SYNC AUTOMÁTICA
+
+**Mario lo pidió explícitamente al cierre: "me gustaría que se vean automáticamente las
+ventas".** Hoy el sync SÓLO corre si alguien aprieta "Sincronizar ahora" (no hay cron ni job
+de fondo) → si nadie lo aprieta, no entran ventas nuevas al portal.
+
+⚠️ **Esto NO contradice [[feedback_mario_sin_automatismos_no_disparados]]:** aquella regla
+era sobre automatismos en SU flujo de trabajo (rechazó un hook pre-commit). Aquí **Mario
+está pidiendo el automatismo del producto**. Confirmarle el alcance antes de implementar,
+pero el pedido es suyo.
+
+**Lo que YA existe y no hay que construir** (verificado 2026-07-31):
+- `sync_ml.py::lanzar_sync` (línea ~174) ya valida precondiciones, registra la corrida y la
+  lanza en un **thread daemon**.
+- **Anti-concurrencia ya resuelto:** `_sync_lock` (no bloqueante) + corrida "viva" en
+  `ml_sync_runs` con **heartbeat** (`HEARTBEAT_MUERTO_MIN = 10`) → una 2a corrida da **409**
+  en vez de duplicarse. Una sync automática puede reusar esto tal cual.
+- El incremental ya usa `date_last_updated` con **solape de 5 min** (`MARGEN_SOLAPE_MIN`) y
+  `ultima_sync` **sólo avanza si la corrida completa** → seguro ante fallos.
+- La poda de `ml_notificaciones` ya corre dentro de `_finalizar`.
+
+**Las 2 opciones a plantearle (con su trade-off):**
+| Opción | Cómo | Pros | Contras |
+|---|---|---|---|
+| **A. Scheduler periódico** (recomendado por simple) | Thread/APScheduler en el backend que llama `lanzar_sync("incremental")` cada N min | Trivial de construir sobre lo que ya hay; predecible; el 409 protege solapes | Latencia de hasta N min; corre aunque no haya ventas |
+| **B. Disparado por webhooks** | Un worker consume `ml_notificaciones WHERE procesada=0` y sincroniza al detectar `orders_v2`/`shipments` | Casi tiempo real; le da uso real al buzón (hoy sólo se acumula) | Más piezas; a ~15k webhooks/día hay que **agrupar/debounce** o se dispararían syncs sin parar |
+
+**Recomendación:** **A** con intervalo de 15-30 min, y **B** después si Gaby necesita tiempo
+real. B sin debounce sería un error con ese volumen de webhooks.
+
+**Puntos finos a resolver al implementar:**
+- 🔴 **Arreglar ANTES el hueco de reintento de red** (ver HALLAZGO 2): sin eso, una sync
+  automática fallará sola cada tanto y nadie estará mirando la pantalla para reintentar.
+- Railway puede reiniciar el contenedor → el scheduler debe arrancar con la app y ser
+  **idempotente** (no lanzar si ya hay corrida viva; el 409 ya cubre esto).
+- **Un solo worker**: si algún día hay >1 réplica en Railway, el lock en memoria NO basta
+  (el de BD sí). Hoy es 1 réplica.
+- Dejar **interruptor de apagado** (`ml_config` K-V, p.ej. `sync_auto_activo`) y que el botón
+  manual siga funcionando.
+- Mostrar en `/mercadolibre` que la sync automática está activa y cuándo fue la última.
 
 ### 🔴 HALLAZGO 1 (ABIERTO): la mayoría de las ventas salen "Asignar bodega"
 
