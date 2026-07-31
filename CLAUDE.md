@@ -2,14 +2,14 @@
 
 > Este archivo es el contexto canónico para cualquier sesión de Claude que retome el proyecto. Léelo antes de tocar código.
 
-> 🚨 **PIVOTE EN CURSO (2026-07-16): MIGRACIÓN A LA API DE MERCADO LIBRE.** ML retiró los 2
-> reportes Excel (Ventas ML + Detalle de colecta) que alimentaban el portal. El Módulo 1 migrará a
-> consumir la **API oficial de ML** (OAuth de la cuenta del cliente). La investigación completa está
-> hecha; la implementación NO ha iniciado (esperando las claves API del cliente). **Antes de tocar
-> cualquier cosa del Módulo 1, leer la sección 8 (cierre 2026-07-16) y la skill
-> `.claude/skills/mercadolibre-api/SKILL.md`.** Las reglas de la sección 3 sobre columnas de Excel
-> siguen vigentes como REFERENCIA para el mapeo Excel↔API (y para datos ya cargados), pero los
-> uploads de ventas/colecta van a desaparecer.
+> ✅ **PIVOTE COMPLETADO (2026-07-31): EL PORTAL YA SE ALIMENTA DE LA API DE MERCADO LIBRE.**
+> ML retiró los 2 reportes Excel (Ventas ML + Detalle de colecta); el Módulo 1 migró a la **API
+> oficial** (OAuth de la cuenta del cliente). **La cuenta está conectada y el backfill de 12 meses
+> ya corrió: 27,136 ventas y 27,067 envíos cargados.** Quedan 2 hallazgos abiertos (asignación de
+> bodega + 2,258 órdenes con error de red) — ver sección 8. **Antes de tocar cualquier cosa del
+> Módulo 1, leer la sección 8 y las skills `mercadolibre-api` y `api-seguridad`.** Las reglas de la
+> sección 3 sobre columnas de Excel siguen vigentes como REFERENCIA para el mapeo Excel↔API (y para
+> los datos legacy ya cargados), pero los uploads de ventas/colecta quedaron obsoletos.
 
 ---
 
@@ -284,50 +284,117 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-31 — ✅ CUENTA ML CONECTADA + poda de webhooks desplegada; falta correr la 1a sync y el backfill)
+## 8. Estado actual (último update: 2026-07-31 — 🎉 MIGRACIÓN API VIVA: backfill 12 meses completado, 27,136 ventas cargadas; 2 hallazgos abiertos)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> ✅ **PASO 1 YA VERIFICADO (2026-07-31, con screenshot del portal):** la conexión está
-> sana y **multi-origen ACTIVO**. Los 5 depósitos mapean 1:1 a bodega
-> (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`) y `MATRIZ` sale en gris
-> (sin bodega = bodega propia, correcto). **La asignación de proveedor vendrá estructurada
-> desde ML** → Gaby casi no tendrá que reasignar bodegas a mano. Seller 389112733,
-> nickname RELUVSA AUTOPARTES, token vigente con auto-renovación.
-> **Sólo faltan los pasos 2 (sync incremental) y 3 (backfill 12 meses).**
+> 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA Y EL BACKFILL DE 12 MESES SE COMPLETÓ (2026-07-31).**
+> **27,136 ventas y 27,067 envíos** cargados desde la API — la historia que ML iba a borrar
+> ya está a salvo. Los 3 pasos que estaban pendientes al abrir la sesión quedaron HECHOS.
+> El árbol de git está **limpio** (nada sin commitear). Último commit: `696d9ac`.
 
-> ✅ **PODA DE `ml_notificaciones` DESPLEGADA (commit `2f965a7`, push hecho, Railway
-> verificado 200/401).** Ver el bloque "webhooks de alto volumen" abajo. **Ya no hay
-> cambios sin commitear**: el árbol quedó limpio.
+**🚦 ESTADO: esperando retroalimentación del administrador de RELUVSA.** Mario decidió
+(2026-07-31, al cierre) que **el administrador revise el portal** con los datos ya cargados
+y reporte qué ve, ANTES de tocar más código. **Arrancar preguntándole si ya tiene esos
+comentarios.**
 
-> **🎉 LA CUENTA DE ML YA ESTÁ CONECTADA (2026-07-31).** El OAuth quedó resuelto: el fallo
-> era **PKCE activado en el panel** (ver abajo). El portal confirmó *"Cuenta RELUVSA
-> AUTOPARTES conectada"*. **Lo que sigue es la 1a sincronización — todavía NO se ha corrido
-> ninguna.**
+**Los 3 pasos, cerrados:**
 
-**Mario pidió explícitamente NO ejecutar nada** y resolver sus dudas ANTES de tocar
-"Sincronizar ahora" y "Backfill 12 meses". **Arrancar preguntándole si quiere proceder.**
+1. ✅ **Conexión verificada**: multi-origen ACTIVO, 5 depósitos mapeados 1:1
+   (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`), `MATRIZ` en gris sin
+   bodega (correcto, es propia). Seller **389112733**, nickname RELUVSA AUTOPARTES, token
+   con auto-renovación.
+2. ✅ **1a sincronización corrida.** ⚠️ **Ojo, gotcha del botón: sin `ultima_sync`,
+   "Sincronizar ahora" DEGRADA A BACKFILL** (`sync_ml.py::_run_incremental` → sin config
+   previa cae a `_run_backfill`), así que el primer clic ya lanza la corrida grande, no una
+   incremental como sugiere la UI.
+3. ✅ **Backfill 12 meses COMPLETADO** (20:33 → 21:31, **~58 min**):
+   `29,394 órdenes · 27,136 ventas · 27,067 envíos · 2,258 errores`.
 
-**Los 3 pasos pendientes, en orden:**
-
-1. ✅ **HECHO — Verificar la conexión** en `/mercadolibre`: multi-origen ACTIVO y los 5
-   depósitos mapeados 1:1 (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`),
-   `MATRIZ` en gris sin bodega (correcto, es propia). Seller 389112733.
-2. ⬜ **"Sincronizar ahora"** (incremental, rápida) → luego validar **~5 órdenes** en la
-   pestaña Ventas contra el panel de ML (num_venta, fecha, título, depósito).
-3. ⬜ **"Backfill 12 meses"** 🔴 **URGENTE** — la API solo entrega 12 meses hacia atrás; cada
-   semana que pasa se pierde historia irrecuperable. Tarda (ventanas de 15 días), se lanza y
-   se deja correr con contadores en vivo.
-
-**⚠️ HAY CAMBIOS SIN COMMITEAR** (ver "Cambios pendientes de commit" abajo): endpoint de
-diagnóstico `GET /api/ml/api-log` + registro del error de OAuth. Ya pasaron el checklist
-completo (tests 15/15 y 21/21, `api-guardian` APROBADO 7/7). Mario aún no decidió si
-desplegar antes o después de la sync — **preguntarle**.
+**⬜ LO QUE QUEDA ABIERTO — los 2 hallazgos de la 1a carga (bloque dedicado abajo):**
+- 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA).
+- 🟡 **2,258 órdenes (7.7%) no se guardaron** por errores de red. Recuperables re-corriendo
+  el backfill (todo es upsert, no duplica).
 
 ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
 y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
 Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
 POST /oauth/token.
+
+### 🔴 HALLAZGO 1 (ABIERTO): la mayoría de las ventas salen "Asignar bodega"
+
+**Síntoma** (verificado con screenshot de la pestaña Ventas, 2026-07-31): tras el backfill,
+la mayoría de las filas muestran el selector **"⚠ Asignar bodega…"** y **SLA en `—`**.
+Sólo unas pocas salieron completas (ej. `QUALITY HOSES` con SLA ✅, y `KIMS AUTO CORPORATION`
+con SLA ✅ + **✓ Facturado folio K29827** — o sea: cuando resuelve, el motor cruza
+venta→envío→factura solo, sin que nadie toque nada).
+
+**Pista clave:** proveedor y SLA salen vacíos **juntos**. Ambos viven en `envios_colecta`, no
+en `ventas_ml` → o falta el envío, o falta resolver su origen. Como
+`27,136 ventas ≈ 27,067 envíos` (sólo 69 de diferencia), **los envíos SÍ se crearon** → lo
+que falla es **resolver de qué bodega salieron**.
+
+**HIPÓTESIS PRINCIPAL (sin confirmar — es el 1er paso de la próxima sesión):**
+`parser_colecta.py::LUGAR_A_BODEGA` sólo reconoce **6 nombres EXACTOS**
+(`AG`, `CAUPLAS`, `KG`, `KIM`, `VAZLO`, `MATRIZ`) y `_resolver_proveedor` hace lookup exacto
+(`lugar.strip().upper()` contra las llaves del dict) → si no coincide carácter por carácter
+devuelve `None`. Ese dict se escribió para la **columna J del Excel**, donde el valor venía
+literal. **Ahora el nombre viene de la API** (`sync_ml.py::_resolver_lugar`:
+`origin.node.node_id` → `stores["por_node"]`, con fallback a `stock.store_id`) y ML puede
+mandarlo distinto (`"Cauplas"`, `"CAUPLAS MTY"`, `"Bodega CAUPLAS"`, un nombre largo…).
+Encaja con el síntoma: unas pocas coinciden por suerte, el resto no.
+
+⚠️ **OJO — la contradicción aparente que hay que explicar:** la tarjeta de conexión muestra
+los 5 depósitos **mapeados 1:1** (`CAUPLAS→CAUPLAS`…). Eso prueba que `ml_stores` quedó bien
+poblado, pero **NO** que `_resolver_lugar` esté devolviendo esos mismos strings por envío.
+No dar por bueno el mapeo de la tarjeta como prueba de que el origen resuelve.
+
+**Hipótesis alternativa (no descartada):** puede ser sólo un artefacto de **ventas frescas**.
+Todas las filas del screenshot eran del **31 jul (ese mismo día)** — órdenes recién creadas
+cuyo envío aún no trae `origin` completo. Si las ventas de meses cerrados sí traen proveedor,
+NO hay bug.
+
+**CÓMO DIAGNOSTICARLO (2 clics en la pestaña Ventas, o vía API con token admin):**
+| # | Filtros | Qué contesta |
+|---|---|---|
+| 1 | Depósito=Todos, resto Todas | total real |
+| 2 | + Cruce con colecta = **envío sin proveedor** | tamaño del problema |
+| 3 | Venta desde 01/06/2026 hasta 30/06/2026 (mes cerrado) | ¿pasa también en datos viejos? |
+| 4 | #3 + cruce = envío sin proveedor | **decide entre las 2 hipótesis** |
+
+Si #4 sale alto → es `LUGAR_A_BODEGA`. Si sale bajo → sólo eran ventas del día.
+
+**La verificación decisiva:** mirar **qué valores REALES quedaron en
+`envios_colecta.lugar_indicado`** (`SELECT lugar_indicado, COUNT(*) ... GROUP BY 1`). Eso da
+la respuesta exacta sin adivinar.
+
+✅ **Lo importante: se arregla SIN volver a pedirle nada a ML.** El nombre del origen ya está
+persistido en `lugar_indicado`; basta hacer el mapeo tolerante (normalizar, matching por
+substring/prefijo) y re-resolver `proveedor_id` sobre lo que ya está en la BD. **Respetar
+`lugar_override` de Gaby** (manda sobre lo que diga la API).
+
+### 🟡 HALLAZGO 2 (ABIERTO): 2,258 órdenes no se guardaron (7.7%)
+
+`29,394 órdenes vistas − 27,136 ventas guardadas = 2,258` **exactamente el número de
+errores** → son órdenes que se vieron pero no se persistieron. Causa probable: fallos de red
+puntuales por orden (el sync los **cuenta y continúa** en vez de tumbar la corrida —
+comportamiento correcto y deliberado).
+
+**Antecedente que lo respalda:** el 1er intento de sync murió con
+`MLError: Error de red hacia ML (ConnectError) en /orders/search` (20:12:51). El 2º intento
+completó.
+
+⚠️ **HUECO DE RESILIENCIA IDENTIFICADO (mejora candidata, ~5 líneas):**
+`ml_client.py::_request` reintenta con backoff+jitter ante **429**, pero ante un
+`httpx.HTTPError` (error de red) **lanza `MLError` de inmediato, sin reintentar**
+(`ml_client.py:170-173`). Por eso un parpadeo de red de 1 segundo tumbó un backfill de 25
+ventanas. Agregar 1-2 reintentos con backoff corto para errores de red (mismo patrón del 429)
+haría el backfill mucho más robusto. **NO implementado** — se decidió no meter código a media
+sincronización.
+
+**Recuperación:** re-correr el backfill. Es **idempotente por upsert**, no duplica nada.
+Diagnóstico disponible sin tocar código: **`GET /api/ml/api-log?solo_errores=true`**
+(admin, ya desplegado) da el status real de cada llamada fallida.
 
 ### 📍 CIERRE SESIÓN 2026-07-31 (OAuth RESUELTO: era PKCE — cuenta ML conectada)
 
@@ -589,7 +656,15 @@ receptor de webhooks y Mario llenó/documentó la configuración completa de la 
    skill `mercadolibre-api`) y `.claude/settings.local.json` se agregó al `.gitignore`.
 
 **Pendientes que NO son del pivote (siguen vivos):**
-- **Rotar la password del admin `gaby@reluvsa.com`** (higiene, expuesta en chat 06-10/06-11 — sigue sin rotarse).
+- 🔴 **Rotar la password del admin `gaby@reluvsa.com`** (higiene, expuesta en chat 06-10/06-11 —
+  sigue sin rotarse al 2026-07-31). Usar `POST /api/admin/proveedor-password` o el bootstrap.
+- ⬜ **Avisarle POR ESCRITO al cliente** que la app de ML debe **quedarse en "Sin acceso"** en
+  *Publicación y sincronización* del DevCenter. Es lo que impide tocar publicaciones/precios/stock;
+  si alguien lo cambia sin saber, se pierde esa capa de protección. (Pendiente desde 2026-07-28.)
+- ⬜ **Mejora de UI en `/mercadolibre`:** la columna "Procesada" muestra ✅ para las notificaciones
+  **descartadas** (tópico no suscrito, ej. `post_purchase`), lo cual **se lee al revés** de lo que
+  significa. Cambiar el ✅ por una etiqueta "descartada". Le costó explicarse a Mario en la sesión
+  del 07-31. Ver [[project_webhooks_alto_volumen_poda]].
 - Módulo 2 (publicaciones masivas) sigue sin iniciar; queda DETRÁS de la migración API.
 
 **Pendientes puntuales (pre-pivote):**
