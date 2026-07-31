@@ -284,7 +284,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-31 — 🎉 MIGRACIÓN API VIVA: backfill 12 meses completado, 27,136 ventas cargadas; 2 hallazgos abiertos)
+## 8. Estado actual (último update: 2026-07-31 — 🎉 MIGRACIÓN API VIVA + SYNC AUTOMÁTICA cada 30 min desplegada; queda abierto el Hallazgo 1: ventas sin bodega)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
@@ -293,13 +293,15 @@ Convenciones:
 > ya está a salvo. Los 3 pasos que estaban pendientes al abrir la sesión quedaron HECHOS.
 > El árbol de git está **limpio** (nada sin commitear). Último commit: `696d9ac`.
 
-**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN — hay una tarea DECIDIDA, no una pregunta abierta:**
+**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN:**
 
-> ⭐⭐ **IMPLEMENTAR LA SYNC AUTOMÁTICA CADA 30 MIN.** Mario lo pidió y **ya eligió el cómo**
-> (opción A = scheduler periódico, intervalo 30 min). **No replantearle opciones: arrancar
-> implementando.** El plan completo, con el prerequisito y los puntos finos, está en el
-> bloque ⭐⭐ de abajo. **Paso 1 obligatorio: arreglar el reintento de red ANTES del
-> scheduler.**
+> ✅ **LA SYNC AUTOMÁTICA CADA 30 MIN YA ESTÁ DESPLEGADA** (commit `08bf8a9`, 2026-07-31),
+> junto con su prerequisito (reintento de red en `ml_client`). Ver el bloque ✅ de abajo.
+>
+> ⭐ **Lo que queda como tarea principal: el HALLAZGO 1** (la mayoría de las ventas salen
+> "Asignar bodega"). Ahora corre más urgencia: con la sync automática entrando cada 30 min,
+> las ventas nuevas siguen cayendo sin proveedor ni SLA hasta que se arregle. Se diagnostica
+> con un `GROUP BY lugar_indicado` y se arregla **sin volver a pedirle nada a ML**.
 
 En paralelo, **Mario también pidió que el administrador de RELUVSA revise el portal** con los
 datos ya cargados y reporte qué ve (eso alimenta los HALLAZGOS 1 y 2). **Preguntarle si ya
@@ -319,64 +321,69 @@ tiene esos comentarios**, pero no bloquear la sync automática esperándolos: so
    `29,394 órdenes · 27,136 ventas · 27,067 envíos · 2,258 errores`.
 
 **⬜ LO QUE QUEDA ABIERTO (cada uno con su bloque dedicado abajo):**
-- ⭐⭐ **SYNC AUTOMÁTICA CADA 30 MIN — DECIDIDA, lista para implementar.** Hoy nada corre
-  solo: si nadie aprieta el botón, no entran ventas.
-- 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA).
+- 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA). **Ahora es
+  la tarea #1**: con la sync automática viva, las ventas nuevas siguen entrando sin bodega.
 - 🟡 **2,258 órdenes (7.7%) no se guardaron** por errores de red. Recuperables re-corriendo
-  el backfill (todo es upsert, no duplica).
-
-**Orden de trabajo:** el hueco de reintento de red (Hallazgo 2) es **prerequisito** de la
-sync automática — sin él, una sync que corre sola fallará en silencio y nadie estará mirando
-la pantalla para reintentarla. Arreglar eso primero, luego el scheduler.
+  el backfill (todo es upsert, no duplica). ⚠️ **La causa ya se arregló** (reintento de red
+  en `ml_client`, commit `08bf8a9`) — falta re-correr el backfill para recuperarlas.
 
 ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
 y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
 Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
 POST /oauth/token.
 
-### ⭐⭐ ARRANCAR LA PRÓXIMA SESIÓN AQUÍ: IMPLEMENTAR SYNC AUTOMÁTICA CADA 30 MIN
+### ✅ SYNC AUTOMÁTICA CADA 30 MIN — DESPLEGADA (commit `08bf8a9`, 2026-07-31)
 
-> **DECISIÓN TOMADA por Mario (2026-07-31, al cierre): opción A, scheduler periódico,
-> intervalo de 30 MINUTOS.** Ya no hay que plantearle opciones — **arrancar implementando**.
-> (Eligió 30 sobre 60 tras compararlos: el costo extra es ~$0.02/mes, y a 30 min un fallo de
-> red queda cubierto por la siguiente corrida en media hora en vez de dejar 2 h de hueco.)
+**El problema que resolvió:** el sync SÓLO corría si alguien apretaba "Sincronizar ahora"
+(no había cron ni job de fondo) → si nadie lo apretaba, no entraban ventas nuevas al portal.
 
-**El problema que resuelve:** hoy el sync SÓLO corre si alguien aprieta "Sincronizar ahora"
-(no hay cron ni job de fondo) → si nadie lo aprieta, **no entran ventas nuevas al portal**.
+**Cómo quedó:** hilo daemon que arranca con la app (`main.py`, evento `startup`) y cada
+minuto (`SCHEDULER_TICK_SEG`) evalúa si toca lanzar `iniciar_sync("incremental")`. Intervalo
+(default 30 min, acotado 5–1440) e interruptor viven en `ml_config` → ajustables **desde la
+UI de `/mercadolibre` sin redeploy**, vía `POST /api/ml/sync-auto` (admin). El estado sale en
+`GET /api/ml/estado` bajo `sync_auto`. Reusa el anti-concurrencia que ya existía
+(`_sync_lock` + corrida viva en `ml_sync_runs` con heartbeat → 409).
+
+**En el mismo commit, el prerequisito:** `ml_client._request` ahora reintenta ante errores de
+red (antes sólo ante 429). Un parpadeo de red de 1 s tumbaba la corrida entera — es lo que
+mató el backfill del 31-jul (Hallazgo 2).
+
+⚠️ **4 TRAMPAS DEL DISEÑO — un refactor puede romperlas EN SILENCIO.** Todas fijadas en
+`backend/scripts/test_sync_automatica.py` (35/35); no romper esos tests:
+1. **El reintento de red es SÓLO para GET.** `POST /oauth/token` NO se reintenta: si la
+   respuesta se pierde en la red, ML pudo haber rotado ya el refresh token (de un solo uso) y
+   reintentar lo quemaría sin poder persistir el nuevo. Se resuelve re-autorizando.
+2. **Sin `ultima_sync` el scheduler NO dispara.** Porque `iniciar_sync` degrada
+   incremental→backfill de 12 meses (~1 h) cuando no hay `ultima_sync`; sin esta guarda, el
+   arranque de un contenedor lanzaría el backfill solo. Arranca tras la 1a sync manual.
+3. **El reloj es `sync_auto_ultimo_intento`, NO `ultima_sync`.** `ultima_sync` sólo avanza si
+   la corrida TERMINA completa → usarla como reloj haría que una corrida fallida se
+   reintentara en CADA tick (cada minuto), martillando la API de ML.
+4. **Ante `SyncEnCurso` se DEVUELVE el reloj** a su valor previo, para que tras un backfill
+   manual de ~1 h la primera incremental entre al liberarse y no un intervalo después. Las
+   ramas de error real SÍ consumen el intento (eso es lo deseado).
+
+**Notas operativas:**
+- **Un solo worker**: el lock en memoria asume 1 réplica en Railway (hoy es 1). Con >1, la
+  defensa que sigue valiendo es la corrida viva en BD (409), no el lock.
+- El scheduler compara `utcnow()` contra `ultima_sync`, ambos UTC — consistente. Ojo si
+  alguien lo compara alguna vez contra `ml_notificaciones.recibido_en`, que es hora LOCAL MX.
+- El flujo manual y el backfill siguen funcionando igual.
+
+**Checklist de seguridad completo ✅:** solo-lectura 15/15 · sync e2e 21/21 · sync automática
+35/35 · regresiones (poda/recruce/kits) · build CRA · **api-guardian APROBADO 7/7**.
+⚠️ Al agregar un test nuevo que use `httpx.MockTransport`, hay que **añadirlo al set
+`excluidos`** de `test_ml_client_solo_lectura.py` (verificación estática del punto único de
+salida) o ese test se pone en rojo con un falso positivo.
 
 ⚠️ **Esto NO contradice [[feedback_mario_sin_automatismos_no_disparados]]:** aquella regla
-era sobre automatismos en SU entorno de trabajo (rechazó un hook pre-commit). Aquí **Mario
-está pidiendo el automatismo del PRODUCTO**, para Gaby. No citarle esa regla como objeción.
+era sobre automatismos en SU entorno de trabajo (rechazó un hook pre-commit). Aquí Mario
+pidió el automatismo del PRODUCTO, para Gaby. No citarle esa regla como objeción.
 
-**Lo que YA existe y NO hay que construir** (verificado 2026-07-31):
-- `sync_ml.py::lanzar_sync` (línea ~174) ya valida precondiciones, registra la corrida y la
-  lanza en un **thread daemon**.
-- **Anti-concurrencia ya resuelto:** `_sync_lock` (no bloqueante) + corrida "viva" en
-  `ml_sync_runs` con **heartbeat** (`HEARTBEAT_MUERTO_MIN = 10`) → una 2a corrida da **409**
-  en vez de duplicarse. El scheduler puede reusar esto tal cual.
-- El incremental ya usa `date_last_updated` con **solape de 5 min** (`MARGEN_SOLAPE_MIN`) y
-  `ultima_sync` **sólo avanza si la corrida completa** → seguro ante fallos.
-- La poda de `ml_notificaciones` ya corre dentro de `_finalizar`.
-
-**Plan de implementación (en este orden):**
-1. 🔴 **PRIMERO: arreglar el hueco de reintento de red** (ver HALLAZGO 2 abajo,
-   `ml_client.py:170-173`). **Es prerequisito, no opcional:** con el botón manual alguien
-   ve el error y reintenta; con sync automática **no hay nadie mirando** → fallaría en
-   silencio y el hueco se notaría cuando falten ventas. ~5 líneas, mismo patrón del 429.
-2. **Scheduler**: thread daemon que llama `lanzar_sync("incremental")` **cada 30 min**.
-   Intervalo **configurable** (`ml_config`, p.ej. `sync_auto_minutos`) — Mario quiere poder
-   ajustarlo sin tocar código.
-3. **Interruptor de apagado** (`ml_config`, p.ej. `sync_auto_activo`). El botón manual debe
-   seguir funcionando igual.
-4. **UI en `/mercadolibre`**: mostrar que la sync automática está activa, el intervalo y
-   cuándo fue la última corrida.
-
-**Puntos finos:**
-- Railway puede reiniciar el contenedor → el scheduler debe arrancar con la app y ser
-  **idempotente** (no lanzar si ya hay corrida viva; el 409 ya lo cubre).
-- **Un solo worker**: si algún día hay >1 réplica en Railway, el lock en memoria NO basta
-  (el de BD sí). Hoy es 1 réplica.
-- No romper el flujo manual ni el backfill.
+**Opción B (descartada POR AHORA, no borrar):** disparar la sync desde los webhooks
+(`ml_notificaciones WHERE procesada=0`). Da casi tiempo real y le daría uso al buzón, pero a
+**~15k webhooks/día** exige agrupar/debounce o dispararía syncs sin parar. Retomar sólo si
+Gaby pide tiempo real de verdad.
 
 **Opción B (descartada POR AHORA, no borrar):** disparar la sync desde los webhooks
 (`ml_notificaciones WHERE procesada=0`). Da casi tiempo real y le daría uso al buzón, pero a
@@ -446,13 +453,15 @@ comportamiento correcto y deliberado).
 `MLError: Error de red hacia ML (ConnectError) en /orders/search` (20:12:51). El 2º intento
 completó.
 
-⚠️ **HUECO DE RESILIENCIA IDENTIFICADO (mejora candidata, ~5 líneas):**
-`ml_client.py::_request` reintenta con backoff+jitter ante **429**, pero ante un
-`httpx.HTTPError` (error de red) **lanza `MLError` de inmediato, sin reintentar**
-(`ml_client.py:170-173`). Por eso un parpadeo de red de 1 segundo tumbó un backfill de 25
-ventanas. Agregar 1-2 reintentos con backoff corto para errores de red (mismo patrón del 429)
-haría el backfill mucho más robusto. **NO implementado** — se decidió no meter código a media
-sincronización.
+✅ **LA CAUSA YA SE ARREGLÓ (commit `08bf8a9`, 2026-07-31):** `ml_client.py::_request`
+reintentaba con backoff+jitter ante **429**, pero ante un `httpx.HTTPError` (error de red)
+lanzaba `MLError` de inmediato — por eso un parpadeo de red de 1 segundo tumbó un backfill de
+25 ventanas. Ahora reintenta hasta `MAX_REINTENTOS_RED` (2) con backoff+jitter capado a 10 s.
+⚠️ **Sólo para GET**: `POST /oauth/token` no se reintenta (el refresh token es de un solo uso
+y reintentarlo podría quemarlo). Se hizo como prerequisito de la sync automática.
+
+⬜ **Falta re-correr el backfill** para recuperar las 2,258 órdenes. Es idempotente por
+upsert, no duplica.
 
 **Recuperación:** re-correr el backfill. Es **idempotente por upsert**, no duplica nada.
 Diagnóstico disponible sin tocar código: **`GET /api/ml/api-log?solo_errores=true`**
