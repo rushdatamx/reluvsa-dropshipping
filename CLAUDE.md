@@ -293,10 +293,17 @@ Convenciones:
 > ya está a salvo. Los 3 pasos que estaban pendientes al abrir la sesión quedaron HECHOS.
 > El árbol de git está **limpio** (nada sin commitear). Último commit: `696d9ac`.
 
-**🚦 ESTADO: esperando retroalimentación del administrador de RELUVSA.** Mario decidió
-(2026-07-31, al cierre) que **el administrador revise el portal** con los datos ya cargados
-y reporte qué ve, ANTES de tocar más código. **Arrancar preguntándole si ya tiene esos
-comentarios.**
+**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN — hay una tarea DECIDIDA, no una pregunta abierta:**
+
+> ⭐⭐ **IMPLEMENTAR LA SYNC AUTOMÁTICA CADA 30 MIN.** Mario lo pidió y **ya eligió el cómo**
+> (opción A = scheduler periódico, intervalo 30 min). **No replantearle opciones: arrancar
+> implementando.** El plan completo, con el prerequisito y los puntos finos, está en el
+> bloque ⭐⭐ de abajo. **Paso 1 obligatorio: arreglar el reintento de red ANTES del
+> scheduler.**
+
+En paralelo, **Mario también pidió que el administrador de RELUVSA revise el portal** con los
+datos ya cargados y reporte qué ve (eso alimenta los HALLAZGOS 1 y 2). **Preguntarle si ya
+tiene esos comentarios**, pero no bloquear la sync automática esperándolos: son independientes.
 
 **Los 3 pasos, cerrados:**
 
@@ -312,62 +319,69 @@ comentarios.**
    `29,394 órdenes · 27,136 ventas · 27,067 envíos · 2,258 errores`.
 
 **⬜ LO QUE QUEDA ABIERTO (cada uno con su bloque dedicado abajo):**
-- ⭐ **PEDIDO DE MARIO: sync AUTOMÁTICA** ("me gustaría que se vean automáticamente las
-  ventas"). Hoy nada corre solo: si nadie aprieta el botón, no entran ventas. **Análisis y
-  opciones ya preparados** en el bloque de abajo — arrancar por ahí si lo retoma.
+- ⭐⭐ **SYNC AUTOMÁTICA CADA 30 MIN — DECIDIDA, lista para implementar.** Hoy nada corre
+  solo: si nadie aprieta el botón, no entran ventas.
 - 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA).
 - 🟡 **2,258 órdenes (7.7%) no se guardaron** por errores de red. Recuperables re-corriendo
   el backfill (todo es upsert, no duplica).
 
-**Orden sugerido:** el hueco de reintento de red (Hallazgo 2) conviene arreglarlo **ANTES**
-de automatizar — sin eso, una sync automática fallará sola cada tanto y nadie estará mirando
-la pantalla para reintentarla.
+**Orden de trabajo:** el hueco de reintento de red (Hallazgo 2) es **prerequisito** de la
+sync automática — sin él, una sync que corre sola fallará en silencio y nadie estará mirando
+la pantalla para reintentarla. Arreglar eso primero, luego el scheduler.
 
 ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
 y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
 Respetar las 4 reglas de Mario (bloque 🔐 abajo): solo GET; única excepción autorizada
 POST /oauth/token.
 
-### ⭐ PEDIDO DE MARIO PARA LA PRÓXIMA SESIÓN (2026-07-31): SYNC AUTOMÁTICA
+### ⭐⭐ ARRANCAR LA PRÓXIMA SESIÓN AQUÍ: IMPLEMENTAR SYNC AUTOMÁTICA CADA 30 MIN
 
-**Mario lo pidió explícitamente al cierre: "me gustaría que se vean automáticamente las
-ventas".** Hoy el sync SÓLO corre si alguien aprieta "Sincronizar ahora" (no hay cron ni job
-de fondo) → si nadie lo aprieta, no entran ventas nuevas al portal.
+> **DECISIÓN TOMADA por Mario (2026-07-31, al cierre): opción A, scheduler periódico,
+> intervalo de 30 MINUTOS.** Ya no hay que plantearle opciones — **arrancar implementando**.
+> (Eligió 30 sobre 60 tras compararlos: el costo extra es ~$0.02/mes, y a 30 min un fallo de
+> red queda cubierto por la siguiente corrida en media hora en vez de dejar 2 h de hueco.)
+
+**El problema que resuelve:** hoy el sync SÓLO corre si alguien aprieta "Sincronizar ahora"
+(no hay cron ni job de fondo) → si nadie lo aprieta, **no entran ventas nuevas al portal**.
 
 ⚠️ **Esto NO contradice [[feedback_mario_sin_automatismos_no_disparados]]:** aquella regla
-era sobre automatismos en SU flujo de trabajo (rechazó un hook pre-commit). Aquí **Mario
-está pidiendo el automatismo del producto**. Confirmarle el alcance antes de implementar,
-pero el pedido es suyo.
+era sobre automatismos en SU entorno de trabajo (rechazó un hook pre-commit). Aquí **Mario
+está pidiendo el automatismo del PRODUCTO**, para Gaby. No citarle esa regla como objeción.
 
-**Lo que YA existe y no hay que construir** (verificado 2026-07-31):
+**Lo que YA existe y NO hay que construir** (verificado 2026-07-31):
 - `sync_ml.py::lanzar_sync` (línea ~174) ya valida precondiciones, registra la corrida y la
   lanza en un **thread daemon**.
 - **Anti-concurrencia ya resuelto:** `_sync_lock` (no bloqueante) + corrida "viva" en
   `ml_sync_runs` con **heartbeat** (`HEARTBEAT_MUERTO_MIN = 10`) → una 2a corrida da **409**
-  en vez de duplicarse. Una sync automática puede reusar esto tal cual.
+  en vez de duplicarse. El scheduler puede reusar esto tal cual.
 - El incremental ya usa `date_last_updated` con **solape de 5 min** (`MARGEN_SOLAPE_MIN`) y
   `ultima_sync` **sólo avanza si la corrida completa** → seguro ante fallos.
 - La poda de `ml_notificaciones` ya corre dentro de `_finalizar`.
 
-**Las 2 opciones a plantearle (con su trade-off):**
-| Opción | Cómo | Pros | Contras |
-|---|---|---|---|
-| **A. Scheduler periódico** (recomendado por simple) | Thread/APScheduler en el backend que llama `lanzar_sync("incremental")` cada N min | Trivial de construir sobre lo que ya hay; predecible; el 409 protege solapes | Latencia de hasta N min; corre aunque no haya ventas |
-| **B. Disparado por webhooks** | Un worker consume `ml_notificaciones WHERE procesada=0` y sincroniza al detectar `orders_v2`/`shipments` | Casi tiempo real; le da uso real al buzón (hoy sólo se acumula) | Más piezas; a ~15k webhooks/día hay que **agrupar/debounce** o se dispararían syncs sin parar |
+**Plan de implementación (en este orden):**
+1. 🔴 **PRIMERO: arreglar el hueco de reintento de red** (ver HALLAZGO 2 abajo,
+   `ml_client.py:170-173`). **Es prerequisito, no opcional:** con el botón manual alguien
+   ve el error y reintenta; con sync automática **no hay nadie mirando** → fallaría en
+   silencio y el hueco se notaría cuando falten ventas. ~5 líneas, mismo patrón del 429.
+2. **Scheduler**: thread daemon que llama `lanzar_sync("incremental")` **cada 30 min**.
+   Intervalo **configurable** (`ml_config`, p.ej. `sync_auto_minutos`) — Mario quiere poder
+   ajustarlo sin tocar código.
+3. **Interruptor de apagado** (`ml_config`, p.ej. `sync_auto_activo`). El botón manual debe
+   seguir funcionando igual.
+4. **UI en `/mercadolibre`**: mostrar que la sync automática está activa, el intervalo y
+   cuándo fue la última corrida.
 
-**Recomendación:** **A** con intervalo de 15-30 min, y **B** después si Gaby necesita tiempo
-real. B sin debounce sería un error con ese volumen de webhooks.
-
-**Puntos finos a resolver al implementar:**
-- 🔴 **Arreglar ANTES el hueco de reintento de red** (ver HALLAZGO 2): sin eso, una sync
-  automática fallará sola cada tanto y nadie estará mirando la pantalla para reintentar.
+**Puntos finos:**
 - Railway puede reiniciar el contenedor → el scheduler debe arrancar con la app y ser
-  **idempotente** (no lanzar si ya hay corrida viva; el 409 ya cubre esto).
+  **idempotente** (no lanzar si ya hay corrida viva; el 409 ya lo cubre).
 - **Un solo worker**: si algún día hay >1 réplica en Railway, el lock en memoria NO basta
   (el de BD sí). Hoy es 1 réplica.
-- Dejar **interruptor de apagado** (`ml_config` K-V, p.ej. `sync_auto_activo`) y que el botón
-  manual siga funcionando.
-- Mostrar en `/mercadolibre` que la sync automática está activa y cuándo fue la última.
+- No romper el flujo manual ni el backfill.
+
+**Opción B (descartada POR AHORA, no borrar):** disparar la sync desde los webhooks
+(`ml_notificaciones WHERE procesada=0`). Da casi tiempo real y le daría uso al buzón, pero a
+**~15k webhooks/día** exige agrupar/debounce o dispararía syncs sin parar. Retomar sólo si
+Gaby pide tiempo real de verdad.
 
 ### 🔴 HALLAZGO 1 (ABIERTO): la mayoría de las ventas salen "Asignar bodega"
 
