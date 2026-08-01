@@ -2,11 +2,12 @@
 
 > Este archivo es el contexto canónico para cualquier sesión de Claude que retome el proyecto. Léelo antes de tocar código.
 
-> ✅ **PIVOTE COMPLETADO (2026-07-31): EL PORTAL YA SE ALIMENTA DE LA API DE MERCADO LIBRE.**
+> ✅ **PIVOTE COMPLETADO: EL PORTAL YA SE ALIMENTA DE LA API DE MERCADO LIBRE.**
 > ML retiró los 2 reportes Excel (Ventas ML + Detalle de colecta); el Módulo 1 migró a la **API
-> oficial** (OAuth de la cuenta del cliente). **La cuenta está conectada y el backfill de 12 meses
-> ya corrió: 27,136 ventas y 27,067 envíos cargados.** Quedan 2 hallazgos abiertos (asignación de
-> bodega + 2,258 órdenes con error de red) — ver sección 8. **Antes de tocar cualquier cosa del
+> oficial** (OAuth de la cuenta del cliente). **La cuenta está conectada, la sync automática corre
+> sola cada 30 min y al 2026-08-01 la BD de prod tiene 56,804 ventas y 55,487 envíos.**
+> ⭐ **Queda UN hallazgo abierto y es la tarea #1: el 94% de los envíos sin bodega asignada**
+> — ver sección 8. **Antes de tocar cualquier cosa del
 > Módulo 1, leer la sección 8 y las skills `mercadolibre-api` y `api-seguridad`.** Las reglas de la
 > sección 3 sobre columnas de Excel siguen vigentes como REFERENCIA para el mapeo Excel↔API (y para
 > los datos legacy ya cargados), pero los uploads de ventas/colecta quedaron obsoletos.
@@ -284,30 +285,40 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-07-31 — 🎉 MIGRACIÓN API VIVA + SYNC AUTOMÁTICA cada 30 min desplegada; queda abierto el Hallazgo 1: ventas sin bodega)
+## 8. Estado actual (último update: 2026-08-01 — API VIVA + sync automática 30 min + pack_id (# de venta de ML) + backfill re-corrido. ⭐ ÚNICA TAREA ABIERTA: Hallazgo 1, el 94% de envíos sin bodega)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA Y EL BACKFILL DE 12 MESES SE COMPLETÓ (2026-07-31).**
-> **27,136 ventas y 27,067 envíos** cargados desde la API — la historia que ML iba a borrar
-> ya está a salvo. Los 3 pasos que estaban pendientes al abrir la sesión quedaron HECHOS.
-> El árbol de git está **limpio** (nada sin commitear). Último commit: `696d9ac`.
+> 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA.** Al 2026-08-01 la BD de prod tiene **56,804 ventas
+> y 55,487 envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a
+> borrar está a salvo. Árbol de git **limpio**. Último commit: `f325b2f`.
 
-**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN:**
+**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN — hay UNA tarea, y está confirmada con datos:**
 
-> ✅ **LA SYNC AUTOMÁTICA CADA 30 MIN YA ESTÁ DESPLEGADA** (commit `08bf8a9`, 2026-07-31),
-> junto con su prerequisito (reintento de red en `ml_client`). Ver el bloque ✅ de abajo.
+> ⭐⭐ **HALLAZGO 1: el 94% de los envíos NO tiene bodega asignada** (52,297 de 55,487,
+> medido tras el backfill completo del 2026-08-01). **Mario lo pospuso explícitamente
+> ("en otra sesión") — arrancar aquí.**
 >
-> ⭐ **Lo que queda como tarea principal: el HALLAZGO 1** (la mayoría de las ventas salen
-> "Asignar bodega"). Ahora corre más urgencia: con la sync automática entrando cada 30 min,
-> las ventas nuevas siguen cayendo sin proveedor ni SLA hasta que se arregle. Se diagnostica
-> con un `GROUP BY lugar_indicado` y se arregla **sin volver a pedirle nada a ML**.
+> **Ya NO es hipótesis:** con 12 meses cargados queda descartado que fueran "ventas frescas
+> del día". **Es lo que impide que el portal haga su trabajo**: sin proveedor el matcher no
+> cruza facturas (`WHERE e.proveedor_id = X`) ni hay SLA → las 4 métricas no se calculan.
+>
+> **Primer paso, exacto:** `SELECT lugar_indicado, COUNT(*) FROM envios_colecta GROUP BY 1
+> ORDER BY 2 DESC LIMIT 30;` (vía `railway ssh`, ver §8.ssh). Da la respuesta sin adivinar.
+> Detalle completo en el bloque 🔴 de abajo y en [[project_hallazgo_bodegas_sin_asignar]].
 
-En paralelo, **Mario también pidió que el administrador de RELUVSA revise el portal** con los
-datos ya cargados y reporte qué ve (eso alimenta los HALLAZGOS 1 y 2). **Preguntarle si ya
-tiene esos comentarios**, pero no bloquear la sync automática esperándolos: son independientes.
+**✅ Ya cerrado (2026-07-31 / 08-01), no volver a abrirlo:**
+- **Sync automática cada 30 min** desplegada y funcionando (commit `08bf8a9`) + su
+  prerequisito, el reintento de red en `ml_client`.
+- **El # de venta que Gaby ve en ML** (= `pack_id`) ya se guarda, se muestra y **se busca**
+  (commit `f325b2f`). Ver [[project_pack_id_numero_venta_ml]].
+- **Backfill de 12 meses re-corrido** (2026-08-01): 27,186 ventas, 55,487 envíos.
 
-**Los 3 pasos, cerrados:**
+En paralelo sigue vivo que **el administrador de RELUVSA revise el portal** y reporte qué ve
+(alimenta el Hallazgo 1). **Preguntarle a Mario si ya tiene esos comentarios**, pero no
+esperar a que lleguen: el diagnóstico del Hallazgo 1 se hace con SQL, no con su feedback.
+
+**Los 3 pasos de la migración, cerrados (histórico):**
 
 1. ✅ **Conexión verificada**: multi-origen ACTIVO, 5 depósitos mapeados 1:1
    (`AG→AG`, `CAUPLAS→CAUPLAS`, `KG→KG`, `KIM→KIM`, `VAZLO→VAZLO`), `MATRIZ` en gris sin
@@ -320,12 +331,11 @@ tiene esos comentarios**, pero no bloquear la sync automática esperándolos: so
 3. ✅ **Backfill 12 meses COMPLETADO** (20:33 → 21:31, **~58 min**):
    `29,394 órdenes · 27,136 ventas · 27,067 envíos · 2,258 errores`.
 
-**⬜ LO QUE QUEDA ABIERTO (cada uno con su bloque dedicado abajo):**
-- 🔴 **La mayoría de las ventas salen "Asignar bodega"** (sin proveedor ni SLA). **Ahora es
-  la tarea #1**: con la sync automática viva, las ventas nuevas siguen entrando sin bodega.
-- 🟡 **2,258 órdenes (7.7%) no se guardaron** por errores de red. Recuperables re-corriendo
-  el backfill (todo es upsert, no duplica). ⚠️ **La causa ya se arregló** (reintento de red
-  en `ml_client`, commit `08bf8a9`) — falta re-correr el backfill para recuperarlas.
+**⬜ LO QUE QUEDA ABIERTO:**
+- 🔴 **El 94% de los envíos sin bodega asignada** (52,297 de 55,487) → **la única tarea
+  grande viva**. Bloque dedicado abajo.
+- 🟡 El Hallazgo 2 (órdenes perdidas por red) quedó **CERRADO**: causa arreglada + backfill
+  re-corrido el 2026-08-01. Ver su bloque abajo.
 
 ⚠️ Antes de tocar CUALQUIER código de la integración: invocar las skills `mercadolibre-api`
 y **`api-seguridad`**, y pasar por el agente **`api-guardian`** antes de commitear.
@@ -390,7 +400,89 @@ Gaby pide tiempo real de verdad.
 **~15k webhooks/día** exige agrupar/debounce o dispararía syncs sin parar. Retomar sólo si
 Gaby pide tiempo real de verdad.
 
+### §8.ssh — CÓMO OPERAR CONTRA PRODUCCIÓN (Railway CLI) — leer antes de tocar prod
+
+El CLI ya está vinculado (`reluvsa-dropshipping` / production). Para consultar la BD real o
+la API de ML con los tokens del cliente:
+
+```bash
+railway ssh --service reluvsa-dropshipping "cd /app && /opt/venv/bin/python -c \"...\""
+```
+
+- ⚠️ **El python de la app es `/opt/venv/bin/python`** — el del PATH no trae las dependencias.
+- Código en `/app`, BD en `/data/dropshipping.db`.
+- ⚠️ **`railway run` NO sirve** para esto: inyecta las env vars en local pero no da acceso al
+  volumen ni a los tokens de ML (que viven en la BD del volumen).
+- ⚠️ **NUNCA refrescar el token de ML desde la máquina local**: el refresh es de un solo uso;
+  hacerlo invalidaría el de Railway y tumbaría la sync en producción.
+
+🔴 **GOTCHA CARO — NO lanzar el sync con `railway ssh`:**
+`iniciar_sync` lanza un **thread daemon**; al cerrar la sesión SSH muere el proceso y el hilo
+con él → queda una **corrida fantasma** `estado='en_curso'` sin nadie ejecutándola, que
+además bloquea las siguientes (409 por heartbeat). Pasó el 2026-08-01 (run 6) y costó 12 min
+detectarlo. **Lanzarlo golpeando el endpoint HTTP DESDE DENTRO del contenedor** (así el hilo
+vive en el proceso de uvicorn, igual que con el botón del portal):
+
+```python
+from jose import jwt
+from routers.auth import SECRET_KEY, ALGORITHM   # ⚠️ no existe crear_token: el JWT se firma inline en login()
+tok = jwt.encode({'sub': ..., 'email': ..., 'rol': 'admin', 'proveedor_id': None,
+                  'exp': datetime.now(timezone.utc) + timedelta(hours=2)}, SECRET_KEY, algorithm=ALGORITHM)
+urllib.request.urlopen(urllib.request.Request(
+    'http://127.0.0.1:8080/api/ml/sync', data=json.dumps({'tipo':'backfill'}).encode(),
+    headers={'Content-Type':'application/json','Authorization':'Bearer '+tok}, method='POST'))
+```
+
+⚠️ **Cómo detectar una corrida fantasma:** el heartbeat (`ml_sync_runs.actualizado_en`) se
+queda **clavado en la hora de arranque**. NO basta contar filas de `ml_api_log` — las
+llamadas de una sync ANTERIOR se confunden con actividad (ese error se cometió y llevó a
+reportar avance inexistente). La prueba buena: **delta de `COUNT(*)` entre dos lecturas
+separadas**, o `MAX(ts)` del log contra la hora actual.
+
+### ✅ El # de venta que Gaby ve en ML = `pack_id` (commit `f325b2f`, 2026-08-01)
+
+**Reportado por el cliente en junta:** el portal de ML le muestra a Gaby un número distinto
+al del portal de dropshipping, y al buscarlo no encontraba la venta. **Verificado contra la
+API real** (no deducido): la orden trae LOS DOS números.
+
+```
+order.id = 2000017689165588   ← lo que guardábamos como num_venta (PK)
+pack_id  = 2000014293955049   ← lo que ML le muestra a ella
+```
+
+`GET /orders/{pack_id}` da **404**: no es una orden, es el identificador del carrito.
+
+**Implementado:** `ventas_ml.pack_id` (+ migración idempotente + `idx_ventas_pack_id`), se
+puebla en el upsert del sync, se **muestra** en la columna Venta y el CSV, y **es buscable**
+(el filtro `q` de `routers/ventas.py` lo incluye). Gaby trabaja a diario con el número de ML.
+
+⚠️ **Lo que un refactor NO debe romper** (fijado en `backend/scripts/test_pack_id.py`, 12/12):
+1. **`num_venta` (order.id) SIGUE siendo la PK** y la llave de los cruces con factura,
+   albarán y envío. El `pack_id` se AGREGA, jamás sustituye — sustituirlo haría que las
+   ventas ya facturadas volvieran a salir "Pendiente".
+2. **Sólo ~la mitad de las órdenes trae `pack_id`** (medido: 25 de 50). Las de un solo ítem
+   no lo traen, y en ésas **ML muestra el propio order.id** → la UI y el CSV caen a
+   `num_venta` cuando es NULL. Sin ese fallback, media tabla saldría vacía.
+3. El upsert usa `COALESCE(?, pack_id)`: no pisa un pack bueno con NULL.
+4. El `CREATE INDEX` va DENTRO de la migración y DESPUÉS del `ALTER TABLE` (mismo motivo que
+   el crash loop de `idx_envios_venta_ml`, §10).
+
+**Cobertura real:** sólo **14,922 de 56,804 ventas (26%)** tienen `pack_id`, no el ~55% de la
+muestra. Razón: la API sólo entrega **12 meses**; las ventas más viejas vienen de los Excels
+legacy y para ésas ML ya no puede darlo. **No es bug ni recuperable.** En la práctica no
+estorba: las del último año sí lo tienen y las viejas muestran su propio número.
+
 ### 🔴 HALLAZGO 1 (ABIERTO): la mayoría de las ventas salen "Asignar bodega"
+
+> 🔴 **MEDIDO CON DATOS EL 2026-08-01** (tras el backfill completo de 12 meses):
+> ```
+> Envíos totales : 55,487
+>   CON proveedor:  3,190  (6%)
+>   SIN proveedor: 52,297  (94%)   ← el problema
+> ```
+> **Esto DESCARTA la hipótesis alternativa** de más abajo ("son sólo ventas frescas del
+> día"): con 12 meses de historia cargada, el 94% no puede ser un artefacto temporal.
+> Queda en pie la hipótesis principal (`LUGAR_A_BODEGA` con lookup exacto).
 
 **Síntoma** (verificado con screenshot de la pestaña Ventas, 2026-07-31): tras el backfill,
 la mayoría de las filas muestran el selector **"⚠ Asignar bodega…"** y **SLA en `—`**.
@@ -442,7 +534,7 @@ persistido en `lugar_indicado`; basta hacer el mapeo tolerante (normalizar, matc
 substring/prefijo) y re-resolver `proveedor_id` sobre lo que ya está en la BD. **Respetar
 `lugar_override` de Gaby** (manda sobre lo que diga la API).
 
-### 🟡 HALLAZGO 2 (ABIERTO): 2,258 órdenes no se guardaron (7.7%)
+### ✅ HALLAZGO 2 (CERRADO 2026-08-01): 2,258 órdenes no se guardaron (7.7%)
 
 `29,394 órdenes vistas − 27,136 ventas guardadas = 2,258` **exactamente el número de
 errores** → son órdenes que se vieron pero no se persistieron. Causa probable: fallos de red
@@ -460,8 +552,19 @@ lanzaba `MLError` de inmediato — por eso un parpadeo de red de 1 segundo tumb�
 ⚠️ **Sólo para GET**: `POST /oauth/token` no se reintenta (el refresh token es de un solo uso
 y reintentarlo podría quemarlo). Se hizo como prerequisito de la sync automática.
 
-⬜ **Falta re-correr el backfill** para recuperar las 2,258 órdenes. Es idempotente por
-upsert, no duplica.
+✅ **BACKFILL RE-CORRIDO el 2026-08-01** (58 min): `29,443 órdenes · 27,186 ventas ·
+55,487 envíos · 2,257 errores`.
+
+⚠️ **OJO: esos 2,257 errores NO son los mismos de antes.** Que el número sea casi idéntico
+al 2,258 anterior es **coincidencia**; el tipo de error es otro:
+- **Antes (07-31):** cortes de red que **sí perdían ventas**. Causa ya arreglada.
+- **Ahora (08-01):** órdenes sin envío (`GET /orders/{id}/shipments` → 404): canceladas o
+  archivadas. **La venta SÍ se guarda**; sólo no se crea envío donde no lo hay. Suben con la
+  antigüedad (~4% en meses recientes, ~7.5% en los viejos). **No hay pérdida de datos.**
+
+También aparecen muchos **404 y algunos 403 en `/shipments/{id}/sla`** (normales: ML no
+calcula SLA para cancelados/FULL → se tratan como "sin dato") y **1 respuesta 429** que el
+backoff absorbió sin tumbar la corrida.
 
 **Recuperación:** re-correr el backfill. Es **idempotente por upsert**, no duplica nada.
 Diagnóstico disponible sin tocar código: **`GET /api/ml/api-log?solo_errores=true`**
@@ -1263,3 +1366,8 @@ En `~/.claude/projects/-Users-jmariopgarcia-Desktop-2026-RushData-RELUVSA-dropsh
 - `reference_catalogo_reluvsa.md` — repo base copiado
 - `user_mario_rushdata.md` — perfil del usuario
 - `project_migracion_api_ml.md` — ⭐ el pivote a la API de ML (2026-07-16): hallazgos, artefactos, estado
+- `project_hallazgo_bodegas_sin_asignar.md` — ⭐⭐ la tarea #1: 94% de envíos sin bodega
+- `project_pack_id_numero_venta_ml.md` — el # de venta que Gaby ve en ML es el `pack_id`
+- `project_backfill_2026-08-01.md` — backfill del 08-01 + el gotcha de lanzar sync por SSH
+- `project_pedido_sync_automatica.md` — sync automática cada 30 min (desplegada)
+- `feedback_mario_deploy_flujo_normal.md` — deploy = commit a main + push, sin preguntar
