@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
     -- albaran: # de albarán que aporta Gaby en un Excel aparte (uploader propio),
     -- cruzado por num_venta. NO viene en el reporte de Ventas ML ni de colecta.
     albaran TEXT,
+    -- pack_id: el número que Mercado Libre le muestra a Gaby EN SU PROPIO PORTAL
+    -- (el "# de venta" que ella ve y con el que trabaja a diario). NO es el mismo
+    -- que num_venta (= order.id, nuestra llave primaria y la de la API).
+    -- Ejemplo real: order.id 2000017689165588 ↔ pack_id 2000014293955049.
+    -- Sólo lo traen las ventas de carrito (~la mitad); en el resto ML muestra el
+    -- propio order.id, por eso la UI cae a num_venta cuando esto es NULL.
+    pack_id TEXT,
     fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     factura_adjunta_ml TEXT,
     devolucion_unidades INTEGER DEFAULT 0,
@@ -365,6 +372,7 @@ def init_database():
         _migrar_proveedor_desde_lugar_indicado(cursor)
         _migrar_columna_deposito(cursor)
         _migrar_columna_albaran(cursor)
+        _migrar_columna_pack_id(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -498,6 +506,32 @@ def _migrar_columna_albaran(cursor):
     if "albaran" not in cols:
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN albaran TEXT")
         print("[migracion] ventas_ml.albaran agregada.")
+
+
+def _migrar_columna_pack_id(cursor):
+    """Migración idempotente: agrega ventas_ml.pack_id + su índice de búsqueda.
+
+    El portal de Mercado Libre le muestra a Gaby el `pack_id`, no el `order.id` que
+    nosotros guardamos como num_venta (confirmado con la API el 2026-07-31:
+    order.id 2000017689165588 ↔ pack_id 2000014293955049). Ella trabaja a diario con
+    el número de ML, así que hay que mostrarlo Y hacerlo buscable.
+
+    El índice importa: la búsqueda de la pestaña Ventas consulta esta columna en cada
+    tecleo, y la tabla ya trae ~27k filas.
+
+    Las ventas ya cargadas quedan con pack_id NULL hasta la próxima sincronización
+    (el upsert lo va poblando); mientras tanto la UI muestra num_venta, que es lo que
+    ML enseña para las ventas sin pack.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "pack_id" not in cols:
+        cursor.execute("ALTER TABLE ventas_ml ADD COLUMN pack_id TEXT")
+        print("[migracion] ventas_ml.pack_id agregada.")
+    # Va aquí y no en el SCHEMA: el executescript del SCHEMA corre ANTES de las
+    # migraciones, y sobre una BD vieja la columna todavía no existiría → el CREATE
+    # INDEX reventaría el script entero (mismo bug que tumbó Railway con
+    # idx_envios_venta_ml; ver lección en CLAUDE.md §10).
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_pack_id ON ventas_ml(pack_id)")
 
 
 def _migrar_proveedor_desde_lugar_indicado(cursor):

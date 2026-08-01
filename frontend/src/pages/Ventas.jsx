@@ -132,7 +132,7 @@ export default function Ventas() {
                 value={filtros.q}
                 onChange={(e) => set('q', e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && cargar(1)}
-                placeholder="# venta, SKU o título"
+                placeholder="# de venta de ML, SKU o título"
                 className="w-full pl-9 pr-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black"
               />
             </div>
@@ -238,7 +238,13 @@ export default function Ventas() {
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
-                    {v.num_venta}
+                    {/* El número que Gaby ve en el portal de Mercado Libre: el pack_id
+                        cuando la venta viene de un carrito, y si no el num_venta (que es
+                        justo lo que ML muestra en esas). El interno queda en el title
+                        para soporte, sin cargar la tabla. */}
+                    <span title={v.pack_id ? `Nº interno del portal: ${v.num_venta}` : undefined}>
+                      {v.pack_id || v.num_venta}
+                    </span>
                     {v.deposito && (
                       <span
                         className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold ${

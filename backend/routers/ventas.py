@@ -113,9 +113,12 @@ def _construir_filtros(
         params.append(estado)
 
     if q:
-        where.append("(v.num_venta LIKE ? OR v.sku LIKE ? OR v.titulo LIKE ?)")
+        # v.pack_id es el número que ML le muestra a Gaby en su portal, y es el que
+        # ella usa a diario para buscar (casi nunca el num_venta interno). Va indexado
+        # (idx_ventas_pack_id) porque esta consulta corre en cada tecleo sobre ~27k filas.
+        where.append("(v.num_venta LIKE ? OR v.pack_id LIKE ? OR v.sku LIKE ? OR v.titulo LIKE ?)")
         like = f"%{q}%"
-        params.extend([like, like, like])
+        params.extend([like, like, like, like])
 
     # Facturada / sin factura. Se evalúa con un subquery EXISTS para no duplicar
     # filas cuando una venta tiene varios conceptos facturados.
@@ -161,7 +164,7 @@ def _construir_filtros(
 
 
 _SELECT_VENTAS = """
-    SELECT v.num_venta, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
+    SELECT v.num_venta, v.pack_id, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
            v.total, v.albaran, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.proveedor_id, p.nombre as proveedor_nombre,
@@ -275,13 +278,18 @@ def export_csv(
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "Num venta", "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
+        # "Num venta" = el número tal como lo ve Gaby en el portal de ML (pack_id si
+        # existe, si no el order.id). "Num venta interno" se conserva porque es la
+        # llave con la que cruzan factura, albarán y envío.
+        "Num venta", "Num venta interno",
+        "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
         "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada", "Num factura",
         "Componentes kit",
     ])
     for r in rows:
         w.writerow([
-            r["num_venta"], r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
+            r["pack_id"] or r["num_venta"], r["num_venta"],
+            r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",

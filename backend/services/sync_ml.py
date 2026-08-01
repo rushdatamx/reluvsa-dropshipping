@@ -454,6 +454,9 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
     estado = _mapear_estado(order)
     total = order.get("total_amount")
     deposito = _deposito_de_orden(order, stores)
+    # El número que ML le muestra a Gaby en SU portal. Sólo viene en ventas de
+    # carrito (~la mitad); en el resto ML muestra el propio order.id.
+    pack_id = str(order["pack_id"]) if order.get("pack_id") else None
 
     existe = conn.execute(
         "SELECT num_venta FROM ventas_ml WHERE num_venta = ?", (num_venta,)
@@ -461,16 +464,19 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
     if existe:
         conn.execute(
             """UPDATE ventas_ml SET sku=?, deposito=COALESCE(?, deposito), fecha_venta=?, estado=?,
-                                    titulo=?, unidades=?, total=?, comprador=COALESCE(?, comprador)
+                                    titulo=?, unidades=?, total=?, comprador=COALESCE(?, comprador),
+                                    pack_id=COALESCE(?, pack_id)
                WHERE num_venta=?""",
-            (sku, deposito, fecha, estado, titulo, unidades, total, receiver_name, num_venta),
+            (sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
+             pack_id, num_venta),
         )
     else:
         conn.execute(
             """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, estado, titulo,
-                                      unidades, total, comprador)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (num_venta, sku, deposito, fecha, estado, titulo, unidades, total, receiver_name),
+                                      unidades, total, comprador, pack_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (num_venta, sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
+             pack_id),
         )
 
 
