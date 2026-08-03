@@ -289,6 +289,16 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
+> 🚨 **LO PRIMERO DE TODO — VERIFICAR QUE LA SYNC AUTOMÁTICA ESTÉ ENCENDIDA.**
+> El 2026-08-03 se **apagó a propósito** para que la sync automática no matara al backfill
+> (ver Trampa 5). **Debe haberse vuelto a encender al terminar.** Si quedó apagada, el
+> portal **NO recibe ventas nuevas** y nadie se entera.
+> ```
+> GET  /api/ml/estado            -> campo sync_auto.activo debe ser true
+> POST /api/ml/sync-auto {"activo": true}   # para reencenderla
+> ```
+> (o el toggle de la pestaña `/mercadolibre`). Confirmar antes de cualquier otra cosa.
+
 > 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA.** La BD de prod tiene **56,804 ventas y 55,487
 > envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a borrar
 > está a salvo.
@@ -412,6 +422,34 @@ mató el backfill del 31-jul (Hallazgo 2).
 4. **Ante `SyncEnCurso` se DEVUELVE el reloj** a su valor previo, para que tras un backfill
    manual de ~1 h la primera incremental entre al liberarse y no un intervalo después. Las
    ramas de error real SÍ consumen el intento (eso es lo deseado).
+
+🔴 **TRAMPA 5 — DESCUBIERTA EN PRODUCCIÓN EL 2026-08-03: la sync automática MATA a un
+backfill vivo.** `HEARTBEAT_MUERTO_MIN = 10` (`sync_ml.py:42`): si una corrida lleva >10 min
+sin actualizar `actualizado_en`, la siguiente la declara muerta y la marca `abortado`
+(`sync_ml.py:200-208`). **Pero un backfill actualiza el heartbeat por ventana, no por
+llamada**, y una ventana pesada tarda más de 10 min → la sync automática de los :08/:38 lo
+ejecuta aunque **siga vivo y trabajando**.
+
+**Pasó tal cual** (run 133): heartbeat congelado a las 16:28:31, la incremental de las
+16:38:38 lo marcó `abortado`… y el `ml_api_log` muestra al backfill haciendo llamadas
+normales hasta las **16:38:52**, o sea 14 s DESPUÉS de que lo dieran por muerto. Murió a los
+28 min con 8,348 órdenes de ~29,000.
+
+✅ **Sin pérdida de datos** (los upserts ya commiteados quedan) y **es reanudable**: guarda
+`cursor_fecha` y `_run_backfill` retoma desde ahí (`sync_ml.py:272`). El run 135 reanudó
+desde `2026-04-12` sin repetir trabajo.
+
+**Cómo correr un backfill largo sin que lo maten** (lo que se hizo):
+1. **APAGAR la sync automática** → `POST /api/ml/sync-auto {"activo": false}` (o el toggle de
+   `/mercadolibre`).
+2. Lanzar el backfill por el endpoint HTTP desde dentro del contenedor (§8.ssh).
+3. ⚠️ **VOLVER A ENCENDERLA al terminar** — si se olvida, el portal deja de recibir ventas
+   nuevas y nadie se entera.
+
+⬜ **Arreglo de fondo pendiente** (no hecho el 08-03 para no tocar el sync con un backfill en
+vuelo): que el backfill **refresque el heartbeat dentro de la ventana** (cada página, no cada
+ventana), o subir `HEARTBEAT_MUERTO_MIN`. Lo primero es lo correcto: el heartbeat debe latir
+al ritmo del trabajo real, no al de los checkpoints.
 
 **Notas operativas:**
 - **Un solo worker**: el lock en memoria asume 1 réplica en Railway (hoy es 1). Con >1, la
