@@ -285,7 +285,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-03 — API VIVA + sync automática 30 min + pack_id + ⭐ HALLAZGO 1 RESUELTO: era FULL, no un bug + FULL/COLECTA visible)
+## 8. Estado actual (último update: 2026-08-03 — API VIVA + sync 30 min + pack_id + ⭐ HALLAZGO 1 RESUELTO: era FULL, no un bug + FULL/COLECTA visible, commit `a7bb3df`. ⭐ PRÓXIMA TAREA: blindar las métricas contra las FULL)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
@@ -312,11 +312,45 @@ Convenciones:
 - **Backfill de 12 meses re-corrido** (2026-08-01): 27,186 ventas, 55,487 envíos.
 - **Hallazgo 1** (2026-08-03): diagnosticado y cerrado — ver arriba.
 
-**⬜ Lo que queda, todo menor:**
-- Las **métricas por proveedor deberían excluir las ventas FULL** (no son dropshipping;
-  hoy ensucian SLA y tiempos de facturación). Ahora es trivial: el campo ya existe. **Es
-  la siguiente mejora natural** y no se hizo en la sesión del 08-03 para no ampliar el
-  alcance de lo que el cliente pidió.
+**⭐ ARRANCAR LA PRÓXIMA SESIÓN AQUÍ — blindar las métricas contra las ventas FULL**
+
+> **Mario lo pospuso el 2026-08-03** ("lo vemos en otra") y pidió dejar todo documentado
+> para arrancar listo. Detalle completo en [[project_metricas_excluir_full]].
+>
+> ⚠️ **CORRECCIÓN IMPORTANTE de lo que se le dijo a Mario en esa sesión:** se le planteó
+> que las métricas "hoy incluyen las FULL y distorsionan el SLA". **Medido después contra
+> prod, eso NO está pasando:**
+> ```
+> logistic_type    con_proveedor   sin_proveedor
+> cross_docking         279            1508
+> fulfillment             0            4193     <- CERO FULL con proveedor
+> ```
+> Todas las consultas de `routers/metricas.py` filtran por `proveedor_id = ?` y **ningún
+> envío FULL tiene proveedor** (ML manda `origin: null` → `_resolver_proveedor` da `None`).
+> **Las métricas YA excluyen las FULL de facto.** El cambio es **preventivo, no un bug
+> abierto** — decírselo a Mario así, no como que los números están mal hoy.
+>
+> **Por qué hacerlo igual:** la exclusión es **accidental**, no explícita. Se rompe si Gaby
+> **reasigna manualmente** una venta FULL con el selector de bodega (`lugar_override` le
+> pondría proveedor y entraría a las métricas). Hoy hay **0 overrides** en prod, pero ése es
+> justo el flujo que existe para eso — es el riesgo real.
+>
+> **Alcance exacto** (`backend/routers/metricas.py`, las 4 consultas del bucle):
+> `total` y `a_tiempo` ya leen `envios_colecta` (fácil); `tiempo_fact` y `errores` **NO lo
+> tocan hoy** (van facturas→conceptos→ventas_ml) → habría que unir a `envios_colecta` por
+> `e.num_venta_ml = v.num_venta`. Ése es el trabajo real.
+>
+> ⚠️ **La condición debe ser `AND (logistic_type IS NULL OR logistic_type != 'fulfillment')`,
+> NO `= 'cross_docking'`.** Los envíos de los **Excels legacy** (todo lo anterior a 2026-01)
+> tienen `logistic_type` NULL para siempre — la API sólo da 12 meses. Filtrar por
+> `= 'cross_docking'` **borraría de las métricas toda la historia legacy** que el portal
+> rescató.
+>
+> ❓ **Preguntarle a Mario ANTES de implementar:** ¿las FULL **desaparecen** de las métricas
+> o se muestran **como línea aparte**? Gaby podría querer ver el volumen FULL aunque no
+> cuente para el SLA del proveedor. Cambia si es un `WHERE` o una columna adicional.
+
+**⬜ Lo demás, menor:**
 - Rotar la password del admin `gaby@reluvsa.com` (higiene, pendiente desde junio).
 - Avisarle POR ESCRITO al cliente que la app de ML debe quedarse en "Sin acceso" en
   *Publicación y sincronización*.
@@ -618,8 +652,15 @@ Resultó ser la llave que explicó el Hallazgo 1 (arriba).
 revierte— la regla de [[project_columna_deposito_matriz]]: el filtro sigue existiendo, sólo
 cambió cuál es el default.
 
-⬜ **Histórico:** los envíos cargados antes de este cambio quedan con `logistic_type` NULL
-(se muestran con "—") hasta que se re-corra el backfill.
+**Backfill re-corrido el 2026-08-03** (run 133) para etiquetar los 12 meses de historia.
+⚠️ Los envíos de los **Excels legacy** (anteriores a 2026-01) quedan con `logistic_type`
+NULL **para siempre**: la API sólo entrega 12 meses. No es bug ni recuperable — la UI los
+muestra con "—". **Tenerlo presente al escribir cualquier filtro por logística: usar
+`IS NULL OR != 'fulfillment'`, nunca `= 'cross_docking'`** (ver la próxima tarea arriba).
+
+⬜ **Siguiente paso (pospuesto por Mario al 2026-08-03):** blindar `routers/metricas.py`
+contra las FULL. Ver el bloque ⭐ de arranque arriba y [[project_metricas_excluir_full]].
+**No es un bug abierto:** hoy ya se excluyen de facto porque ningún FULL tiene proveedor.
 
 ### ✅ HALLAZGO 2 (CERRADO 2026-08-01): 2,258 órdenes no se guardaron (7.7%)
 
