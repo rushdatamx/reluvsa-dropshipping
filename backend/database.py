@@ -120,6 +120,13 @@ CREATE TABLE IF NOT EXISTS envios_colecta (
     lugar_real TEXT,
     lugar_override TEXT,
     proveedor_id INTEGER REFERENCES proveedores(id) ON DELETE SET NULL,
+    -- logistic_type: cómo despachó ML el envío, tal cual lo manda la API
+    -- (GET /orders/{id}/shipments). Distingue FULL de COLECTA, que es la
+    -- diferencia de negocio clave: en 'fulfillment' (FULL) la mercancía ya está
+    -- en la bodega de ML, NO la surte el proveedor, y por eso ML manda
+    -- origin=null → esos envíos NUNCA tendrán bodega y es correcto que así sea.
+    -- Solo 'cross_docking' (COLECTA) es dropshipping real y debe traer bodega.
+    logistic_type TEXT,
     cumplio_sla INTEGER,
     excluido_analisis INTEGER DEFAULT 0,
     fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -373,6 +380,7 @@ def init_database():
         _migrar_columna_deposito(cursor)
         _migrar_columna_albaran(cursor)
         _migrar_columna_pack_id(cursor)
+        _migrar_columna_logistic_type(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -532,6 +540,44 @@ def _migrar_columna_pack_id(cursor):
     # INDEX reventaría el script entero (mismo bug que tumbó Railway con
     # idx_envios_venta_ml; ver lección en CLAUDE.md §10).
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_pack_id ON ventas_ml(pack_id)")
+
+
+def _migrar_columna_logistic_type(cursor):
+    """Migración idempotente: agrega envios_colecta.logistic_type + su índice.
+
+    Contexto (2026-08-03, verificado contra la API real de producción): el
+    "94% de envíos sin bodega" NO era un bug de mapeo. La hipótesis que se traía
+    documentada — que LUGAR_A_BODEGA fallaba por nombres distintos ("Cauplas",
+    "CAUPLAS MTY") — quedó DESCARTADA: cuando ML manda nombre, viene exacto y
+    mapea bien.
+
+    La causa real es que la mayoría de las ventas son FULL: en 'fulfillment' la
+    mercancía ya está en la bodega de ML, así que ML manda origin=null porque no
+    hay bodega de proveedor que informar. Muestra aleatoria de 60 envíos de 2026:
+        fulfillment   + SIN bodega -> 34
+        cross_docking + CON bodega -> 22
+        cross_docking + SIN bodega ->  4   <- el único caso que sí es problema
+    Sin excepciones en la dirección que importa (ningún fulfillment CON bodega).
+
+    Por qué importa para el negocio: las ventas FULL no son dropshipping (el
+    proveedor no las surte), así que mezclarlas ensucia el SLA y los tiempos de
+    facturación por proveedor. Etiquetarlas es lo que permite que las 4 métricas
+    midan lo que Gaby quiere exigirle a cada proveedor.
+
+    El dato sale de la MISMA llamada que el sync ya hace (no agrega tráfico a ML).
+    Los envíos ya cargados quedan en NULL hasta que se re-corra el backfill.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(envios_colecta)").fetchall()}
+    if "logistic_type" not in cols:
+        cursor.execute("ALTER TABLE envios_colecta ADD COLUMN logistic_type TEXT")
+        print("[migracion] envios_colecta.logistic_type agregada.")
+    # El índice va aquí y NO en el SCHEMA: el executescript del SCHEMA corre ANTES
+    # de las migraciones y sobre una BD vieja la columna aún no existiría → el
+    # CREATE INDEX reventaría el script entero (el bug que tumbó Railway con
+    # idx_envios_venta_ml; ver CLAUDE.md §10). Lo usa el filtro FULL/COLECTA de Ventas.
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_envios_logistic_type ON envios_colecta(logistic_type)"
+    )
 
 
 def _migrar_proveedor_desde_lugar_indicado(cursor):

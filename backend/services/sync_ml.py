@@ -498,6 +498,10 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
     num_envio = str(ship["id"])
     num_venta = str(order["id"])
     lugar_indicado = _resolver_lugar(order, ship, stores)
+    # Cómo despachó ML el envío. Viene en la MISMA respuesta que ya pedimos, así
+    # que no agrega ni una llamada a la API. Es lo que distingue FULL (ML surte,
+    # origin=null, NO es dropshipping) de COLECTA (el proveedor surte).
+    logistic_type = ship.get("logistic_type")
     titulo = None
     items = order.get("order_items") or []
     if items:
@@ -528,17 +532,20 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
         conn.execute(
             """UPDATE envios_colecta SET num_venta=?, num_venta_ml=?, match_cruce_confianza=1.0,
                                          fecha_venta=?, titulo=?, lugar_indicado=?,
-                                         proveedor_id=?, cumplio_sla=?
+                                         proveedor_id=?, cumplio_sla=?,
+                                         logistic_type=COALESCE(?, logistic_type)
                WHERE num_envio=?""",
-            (num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id, cumplio_sla, num_envio),
+            (num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id, cumplio_sla,
+             logistic_type, num_envio),
         )
     else:
         conn.execute(
             """INSERT INTO envios_colecta
                (num_envio, num_venta, num_venta_ml, match_cruce_confianza, fecha_venta,
-                titulo, lugar_indicado, proveedor_id, cumplio_sla)
-               VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?)""",
-            (num_envio, num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id, cumplio_sla),
+                titulo, lugar_indicado, proveedor_id, cumplio_sla, logistic_type)
+               VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?)""",
+            (num_envio, num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id,
+             cumplio_sla, logistic_type),
         )
 
 

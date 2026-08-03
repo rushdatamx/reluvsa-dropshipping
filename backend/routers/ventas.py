@@ -60,6 +60,26 @@ def _componentes_kit_texto(raw):
     return ", ".join(f"{c['codigo']} x{c['cantidad']}" for c in _componentes_kit(raw))
 
 
+# Cómo se le muestra a Gaby cada tipo de logística de ML. FULL y COLECTA son los
+# dos que importan al negocio: en FULL la mercancía ya está en la bodega de ML (no
+# la surte el proveedor, por eso esos envíos nunca traen bodega de origen), mientras
+# que COLECTA es el dropshipping real que el portal mide.
+_LOGISTICA_ETIQUETA = {
+    "fulfillment": "FULL",
+    "cross_docking": "COLECTA",
+    "xd_drop_off": "Places",
+    "self_service": "Flex",
+}
+
+
+def _logistica_txt(valor):
+    """Etiqueta legible del logistic_type. Si ML manda un tipo que no conocemos, se
+    devuelve tal cual (mejor mostrar el crudo que esconder el caso nuevo)."""
+    if not valor:
+        return ""
+    return _LOGISTICA_ETIQUETA.get(valor, valor)
+
+
 def _fecha_corta(iso):
     """Formato corto legible para el CSV ('2026-05-13 23:43' -> '13 may 2026'),
     igual que la tabla de Ventas en el frontend."""
@@ -86,6 +106,7 @@ def _construir_filtros(
     fecha_desde: Optional[str],
     fecha_hasta: Optional[str],
     deposito: Optional[str] = None,
+    logistica: Optional[str] = None,
 ):
     """Arma la cláusula WHERE + JOINs compartida por el listado y el export.
 
@@ -93,9 +114,14 @@ def _construir_filtros(
     agrega solo si algún filtro de facturación lo necesita.
 
     `deposito` controla la bodega de origen (col 'Depósito' del reporte ML):
-      - None / "proveedores" (default): OCULTA MATRIZ (bodega propia, no dropshipping).
+      - None / "todos" (default): sin filtro, muestra TODO incluida MATRIZ.
+      - "proveedores": oculta MATRIZ (solo dropshipping).
       - "matriz": solo MATRIZ.
-      - "todos": sin filtro de bodega.
+
+    `logistica` filtra por cómo despachó ML el envío (envios_colecta.logistic_type):
+      - "full": fulfillment (ML surte desde su bodega; NO es dropshipping).
+      - "colecta": cross_docking (el proveedor surte; el flujo que mide el portal).
+      - "otros": cualquier otro tipo (Places/Flex) con envío existente.
     """
     if user.rol == "proveedor":
         proveedor_id = user.proveedor_id
@@ -142,14 +168,29 @@ def _construir_filtros(
     elif cruce == "sin_proveedor":
         where.append("e.num_envio IS NOT NULL AND e.proveedor_id IS NULL")
 
-    # Bodega de origen (col 'Depósito'). Por defecto se oculta MATRIZ (ruido: es
-    # bodega propia de RELUVSA, no proveedor dropshipping). Gaby ya no la quita a mano.
+    # Bodega de origen (col 'Depósito'). El default MOSTRABA solo dropshipping y
+    # ocultaba MATRIZ; el cliente pidió (2026-08-03) ver también las de MATRIZ, así
+    # que el default pasó a "todos". El selector conserva "Solo proveedores" para
+    # recuperar la vista limpia cuando Gaby la quiera.
     if deposito == "matriz":
         where.append("v.deposito = 'MATRIZ'")
-    elif deposito == "todos":
-        pass  # sin filtro: muestra todo, incluida MATRIZ
-    else:  # None / "proveedores": comportamiento por defecto
+    elif deposito == "proveedores":
         where.append("(v.deposito IS NULL OR v.deposito != 'MATRIZ')")
+    else:  # None / "todos": comportamiento por defecto
+        pass  # sin filtro: muestra todo, incluida MATRIZ
+
+    # Tipo de logística del envío. Separa FULL (ML surte de su propia bodega, no es
+    # dropshipping y por eso nunca trae bodega de proveedor) de COLECTA (el flujo que
+    # el portal realmente mide). Indexado por idx_envios_logistic_type.
+    if logistica == "full":
+        where.append("e.logistic_type = 'fulfillment'")
+    elif logistica == "colecta":
+        where.append("e.logistic_type = 'cross_docking'")
+    elif logistica == "otros":
+        where.append(
+            "e.num_envio IS NOT NULL AND e.logistic_type IS NOT NULL "
+            "AND e.logistic_type NOT IN ('fulfillment', 'cross_docking')"
+        )
 
     # Rango por fecha de venta (ISO 'YYYY-MM-DD...', compara como string).
     if fecha_desde:
@@ -167,6 +208,7 @@ _SELECT_VENTAS = """
     SELECT v.num_venta, v.pack_id, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
            v.total, v.albaran, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
+           e.logistic_type,
            e.proveedor_id, p.nombre as proveedor_nombre,
            (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
            -- Facturas cruzadas a esta venta: cada una como 'serie|folio|codigo_bodega',
@@ -205,6 +247,7 @@ def listar(
     fecha_hasta: Optional[str] = None,
     estado: Optional[str] = None,
     deposito: Optional[str] = None,
+    logistica: Optional[str] = None,
     q: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
@@ -214,7 +257,8 @@ def listar(
         facturada = "false"
 
     where, params, join_factura = _construir_filtros(
-        user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta, deposito
+        user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
+        deposito, logistica
     )
 
     offset = (page - 1) * limit
@@ -259,13 +303,15 @@ def export_csv(
     fecha_hasta: Optional[str] = None,
     estado: Optional[str] = None,
     deposito: Optional[str] = None,
+    logistica: Optional[str] = None,
     q: Optional[str] = None,
 ):
     """Exporta a CSV TODAS las filas que cumplen los filtros (sin paginar).
     Mismos filtros que el listado, para que Gaby baje exactamente lo que ve.
     """
     where, params, join_factura = _construir_filtros(
-        user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta, deposito
+        user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
+        deposito, logistica
     )
     sql = _SELECT_VENTAS.format(join_factura=join_factura, where=" AND ".join(where))
 
@@ -283,7 +329,8 @@ def export_csv(
         # llave con la que cruzan factura, albarán y envío.
         "Num venta", "Num venta interno",
         "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
-        "Num envio", "Lugar indicado", "Bodega override", "Proveedor", "SLA", "Facturada", "Num factura",
+        "Num envio", "Logistica", "Lugar indicado", "Bodega override", "Proveedor", "SLA",
+        "Facturada", "Num factura",
         "Componentes kit",
     ])
     for r in rows:
@@ -293,7 +340,8 @@ def export_csv(
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",
-            r["num_envio"] or "", r["lugar_indicado"] or "", r["lugar_override"] or "",
+            r["num_envio"] or "", _logistica_txt(r["logistic_type"]),
+            r["lugar_indicado"] or "", r["lugar_override"] or "",
             r["proveedor_nombre"] or "", _sla_txt(r["cumplio_sla"]),
             "Si" if r["facturas_count"] > 0 else "No",
             _folios_facturas(r["facturas_raw"]),

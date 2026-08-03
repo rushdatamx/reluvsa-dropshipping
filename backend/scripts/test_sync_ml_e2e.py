@@ -74,9 +74,13 @@ ORDEN_B = _order("3000002", "MTZ-001", "Filtro de aire genérico", "100", "SHIP-
 ORDEN_C = _order("3000003", "KR-1095WP", "Bomba de agua KeepOnGreen", "105", None)
 
 SHIPMENTS = {
+    # SHIP-A: cross_docking (COLECTA) = dropshipping real, con bodega de proveedor.
     "3000001": {"id": "SHIP-A", "origin": {"node": {"node_id": "NODE-KIM"}},
+                "logistic_type": "cross_docking",
                 "receiver_address": {"receiver_name": "Juan Pérez"}},
+    # SHIP-B: fulfillment (FULL) = lo despacha ML desde su bodega, no es dropshipping.
     "3000002": {"id": "SHIP-B", "origin": {"node": {"node_id": "NODE-MATRIZ"}},
+                "logistic_type": "fulfillment",
                 "receiver_address": {"receiver_name": "Ana López"}},
 }
 

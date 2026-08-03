@@ -285,38 +285,44 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-01 — API VIVA + sync automática 30 min + pack_id (# de venta de ML) + backfill re-corrido. ⭐ ÚNICA TAREA ABIERTA: Hallazgo 1, el 94% de envíos sin bodega)
+## 8. Estado actual (último update: 2026-08-03 — API VIVA + sync automática 30 min + pack_id + ⭐ HALLAZGO 1 RESUELTO: era FULL, no un bug + FULL/COLECTA visible)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA.** Al 2026-08-01 la BD de prod tiene **56,804 ventas
-> y 55,487 envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a
-> borrar está a salvo. Árbol de git **limpio**. Último commit: `f325b2f`.
+> 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA.** La BD de prod tiene **56,804 ventas y 55,487
+> envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a borrar
+> está a salvo.
 
-**🚦 ARRANQUE DE LA PRÓXIMA SESIÓN — hay UNA tarea, y está confirmada con datos:**
+**🚦 ARRANQUE — el Hallazgo 1 se cerró; NO quedan tareas grandes abiertas del Módulo 1.**
 
-> ⭐⭐ **HALLAZGO 1: el 94% de los envíos NO tiene bodega asignada** (52,297 de 55,487,
-> medido tras el backfill completo del 2026-08-01). **Mario lo pospuso explícitamente
-> ("en otra sesión") — arrancar aquí.**
+> ✅ **HALLAZGO 1 RESUELTO (2026-08-03): el "94% sin bodega" NUNCA fue un bug.** Son
+> ventas **FULL**: ML las despacha desde su propia bodega y manda `origin: null`, así
+> que es correcto que no tengan proveedor dropshipping. La hipótesis documentada
+> (`LUGAR_A_BODEGA` con lookup exacto) quedó **descartada contra la API real** — cuando
+> ML manda nombre, viene exacto. Detalle y evidencia en el bloque ✅ de abajo.
 >
-> **Ya NO es hipótesis:** con 12 meses cargados queda descartado que fueran "ventas frescas
-> del día". **Es lo que impide que el portal haga su trabajo**: sin proveedor el matcher no
-> cruza facturas (`WHERE e.proveedor_id = X`) ni hay SLA → las 4 métricas no se calculan.
->
-> **Primer paso, exacto:** `SELECT lugar_indicado, COUNT(*) FROM envios_colecta GROUP BY 1
-> ORDER BY 2 DESC LIMIT 30;` (vía `railway ssh`, ver §8.ssh). Da la respuesta sin adivinar.
-> Detalle completo en el bloque 🔴 de abajo y en [[project_hallazgo_bodegas_sin_asignar]].
+> **Se implementó** `envios_colecta.logistic_type` (FULL vs COLECTA) + el cambio de
+> default para mostrar MATRIZ, ambos pedidos del cliente. Ver el bloque "FULL vs COLECTA".
 
-**✅ Ya cerrado (2026-07-31 / 08-01), no volver a abrirlo:**
-- **Sync automática cada 30 min** desplegada y funcionando (commit `08bf8a9`) + su
-  prerequisito, el reintento de red en `ml_client`.
-- **El # de venta que Gaby ve en ML** (= `pack_id`) ya se guarda, se muestra y **se busca**
+**✅ Ya cerrado, no volver a abrirlo:**
+- **Sync automática cada 30 min** desplegada (commit `08bf8a9`) + reintento de red en
+  `ml_client`.
+- **El # de venta que Gaby ve en ML** (= `pack_id`) se guarda, se muestra y **se busca**
   (commit `f325b2f`). Ver [[project_pack_id_numero_venta_ml]].
 - **Backfill de 12 meses re-corrido** (2026-08-01): 27,186 ventas, 55,487 envíos.
+- **Hallazgo 1** (2026-08-03): diagnosticado y cerrado — ver arriba.
 
-En paralelo sigue vivo que **el administrador de RELUVSA revise el portal** y reporte qué ve
-(alimenta el Hallazgo 1). **Preguntarle a Mario si ya tiene esos comentarios**, pero no
-esperar a que lleguen: el diagnóstico del Hallazgo 1 se hace con SQL, no con su feedback.
+**⬜ Lo que queda, todo menor:**
+- Las **métricas por proveedor deberían excluir las ventas FULL** (no son dropshipping;
+  hoy ensucian SLA y tiempos de facturación). Ahora es trivial: el campo ya existe. **Es
+  la siguiente mejora natural** y no se hizo en la sesión del 08-03 para no ampliar el
+  alcance de lo que el cliente pidió.
+- Rotar la password del admin `gaby@reluvsa.com` (higiene, pendiente desde junio).
+- Avisarle POR ESCRITO al cliente que la app de ML debe quedarse en "Sin acceso" en
+  *Publicación y sincronización*.
+- Mejora de UI: la columna "Procesada" de `/mercadolibre` muestra ✅ para notificaciones
+  **descartadas** — se lee al revés. Cambiar por la etiqueta "descartada".
+- Módulo 2 (publicaciones masivas): sigue sin iniciar.
 
 **Los 3 pasos de la migración, cerrados (histórico):**
 
@@ -472,17 +478,53 @@ muestra. Razón: la API sólo entrega **12 meses**; las ventas más viejas viene
 legacy y para ésas ML ya no puede darlo. **No es bug ni recuperable.** En la práctica no
 estorba: las del último año sí lo tienen y las viejas muestran su propio número.
 
-### 🔴 HALLAZGO 1 (ABIERTO): la mayoría de las ventas salen "Asignar bodega"
+### ✅ HALLAZGO 1 (RESUELTO 2026-08-03): NO era un bug — son ventas FULL
 
-> 🔴 **MEDIDO CON DATOS EL 2026-08-01** (tras el backfill completo de 12 meses):
+> ✅ **DIAGNOSTICADO CONTRA LA API REAL DE PRODUCCIÓN.** El "94% de envíos sin bodega"
+> **NO es un bug de mapeo**. La hipótesis que se traía documentada abajo
+> (`LUGAR_A_BODEGA` con lookup exacto fallando ante `"Cauplas"` / `"CAUPLAS MTY"`)
+> quedó **DESCARTADA**: cuando ML manda nombre, viene **exacto** (`KIM`, `CAUPLAS`,
+> `VAZLO`, `AG`, `MATRIZ`) y mapea bien. `ml_stores` está impecable (6 depósitos con su
+> `network_node_id`, 5 mapeados 1:1, MATRIZ→NULL correcto).
+>
+> **La causa real: la mayoría de las ventas son FULL.** En `fulfillment` la mercancía ya
+> está en la bodega de Mercado Libre, así que **ML manda `origin: null`** — no hay bodega
+> de proveedor que informar porque **no la surte un proveedor**. Es correcto que estén
+> vacías.
+>
+> **Evidencia** (muestra aleatoria de 60 envíos de 2026, contra la API real):
 > ```
-> Envíos totales : 55,487
->   CON proveedor:  3,190  (6%)
->   SIN proveedor: 52,297  (94%)   ← el problema
+> fulfillment   + SIN bodega -> 34        cross_docking + CON bodega -> 22
+> cross_docking + SIN bodega ->  4
 > ```
-> **Esto DESCARTA la hipótesis alternativa** de más abajo ("son sólo ventas frescas del
-> día"): con 12 meses de historia cargada, el 94% no puede ser un artefacto temporal.
-> Queda en pie la hipótesis principal (`LUGAR_A_BODEGA` con lookup exacto).
+> Cero `fulfillment` CON bodega — la correlación no tiene excepciones.
+>
+> **Composición de los 52,297 "sin proveedor"** (muestra n=120): **63% FULL**
+> (correctamente sin bodega), 35% `cross_docking`, 2% Flex. Y de esas `cross_docking`,
+> **23 de 31 traen `stock.store_id = 42210569` = MATRIZ** → bodega propia, también
+> correcto que no tengan proveedor dropshipping. En la BD: **10,132 de los "sin
+> proveedor" tienen `deposito = 'MATRIZ'` explícito.**
+>
+> **El residuo real es chico:** ~8 de 31 (≈26% de las cross_docking sin proveedor) son
+> envíos ya `delivered`, muchos antiguos, donde ML dejó de exponer el origen estructurado
+> (`origin: null` + `sender_address` genérico con la dirección fiscal de RELUVSA).
+> **Ésos no se recuperan desde la API**; se resuelven con el `lugar_override` manual de
+> Gaby, que es justo para lo que existe.
+>
+> ⭐ **Lección:** el corte temporal delataba el diagnóstico — hasta 2025-12 el 100% era
+> NULL (datos legacy del Excel, que no traían el campo) y desde 2026-01 baja a ~50-65%
+> (datos de la API). Un "94%" agregado escondía **dos poblaciones distintas**. Medir el
+> agregado sin partirlo por fecha llevó 2 sesiones a la hipótesis equivocada.
+
+**Lo que se implementó (2026-08-03):** columna `envios_colecta.logistic_type` que etiqueta
+cada envío como **FULL** (`fulfillment`) o **COLECTA** (`cross_docking`). Ver el bloque
+"FULL vs COLECTA" abajo. **Por qué importa al negocio:** las ventas FULL **no son
+dropshipping** (el proveedor no las surte), así que mezclarlas **ensucia el SLA y los
+tiempos de facturación** de cada proveedor. Separarlas es lo que hace que las 4 métricas
+midan lo que Gaby quiere exigirle a cada quien.
+
+<details>
+<summary>Histórico: la hipótesis equivocada (conservada para no repetirla)</summary>
 
 **Síntoma** (verificado con screenshot de la pestaña Ventas, 2026-07-31): tras el backfill,
 la mayoría de las filas muestran el selector **"⚠ Asignar bodega…"** y **SLA en `—`**.
@@ -533,6 +575,51 @@ la respuesta exacta sin adivinar.
 persistido en `lugar_indicado`; basta hacer el mapeo tolerante (normalizar, matching por
 substring/prefijo) y re-resolver `proveedor_id` sobre lo que ya está en la BD. **Respetar
 `lugar_override` de Gaby** (manda sobre lo que diga la API).
+
+⚠️ **Nada de lo anterior aplica: se verificó y `LUGAR_A_BODEGA` NO era la causa.** El mapeo
+tolerante que se proponía aquí **no hacía falta** — los nombres ya venían exactos. No
+implementarlo.
+
+</details>
+
+### ⭐ FULL vs COLECTA — `envios_colecta.logistic_type` (2026-08-03)
+
+**Pedido del cliente:** "¿hay forma de mostrar si la venta fue por FULL o COLECTA?".
+Resultó ser la llave que explicó el Hallazgo 1 (arriba).
+
+**De dónde sale:** `logistic_type` del shipment, en la **MISMA llamada que el sync ya hacía**
+(`GET /orders/{id}/shipments`) → **cero llamadas nuevas a ML**, cero costo de rate limit.
+
+| Valor de ML | Se muestra | Significa |
+|---|---|---|
+| `fulfillment` | **FULL** | ML surte desde su bodega. `origin: null` SIEMPRE. **No es dropshipping.** |
+| `cross_docking` | **COLECTA** | El proveedor surte. **Es el flujo que el portal mide.** |
+| `xd_drop_off` | Places | Entrega en punto ML |
+| `self_service` | Flex | Envío propio |
+
+**Dónde lo ve Gaby:** columna **Logística** con badge de color en la tabla Ventas, filtro
+**Logística** (Todas / Solo COLECTA / Solo FULL / Otras) y columna **"Logistica"** en el CSV.
+
+⚠️ **Lo que un refactor NO debe romper** (fijado en `backend/scripts/test_logistica_full_colecta.py`, 21/21):
+1. **El UPDATE usa `COALESCE(?, logistic_type)`**: un shipment que venga sin el campo NO
+   debe borrar una etiqueta buena (mismo criterio que `pack_id`).
+2. **El `CREATE INDEX` va DENTRO de la migración y DESPUÉS del `ALTER TABLE`** — en el SCHEMA
+   reventaría el `executescript` sobre una BD vieja (el bug que tumbó Railway con
+   `idx_envios_venta_ml`, §10).
+3. **En FULL la UI NO muestra el selector "⚠ Asignar bodega…"**, muestra *"No aplica (FULL)"*.
+   Pedirle a Gaby que asigne bodega en una venta que ML despachó era **trabajo inútil sobre
+   una venta que ni siquiera es dropshipping**.
+4. **Un `logistic_type` desconocido se muestra crudo**, no se esconde (si ML agrega un tipo
+   nuevo, que se vea).
+
+**Cambio de default en el mismo pedido:** la pestaña Ventas ahora abre con **Depósito =
+"Todos"** (antes ocultaba MATRIZ). El cliente pidió ver las de MATRIZ. El selector conserva
+**"Solo proveedores"** para recuperar la vista limpia de dropshipping. Esto **matiza** —no
+revierte— la regla de [[project_columna_deposito_matriz]]: el filtro sigue existiendo, sólo
+cambió cuál es el default.
+
+⬜ **Histórico:** los envíos cargados antes de este cambio quedan con `logistic_type` NULL
+(se muestran con "—") hasta que se re-corra el backfill.
 
 ### ✅ HALLAZGO 2 (CERRADO 2026-08-01): 2,258 órdenes no se guardaron (7.7%)
 

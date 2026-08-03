@@ -10,9 +10,22 @@ const FILTROS_VACIOS = {
   sla: '',              // '' = todas | 'a_tiempo' | 'tarde'
   cruce: '',            // '' = todas | 'con_envio' | 'sin_envio' | 'sin_proveedor'
   proveedor_id: '',     // solo admin
-  deposito: 'proveedores', // 'proveedores' (default, oculta MATRIZ) | 'matriz' | 'todos'
+  // 'todos' (default: muestra TODO, incluida MATRIZ) | 'proveedores' (oculta MATRIZ) | 'matriz'.
+  // El default era 'proveedores'; el cliente pidió ver también las de MATRIZ (2026-08-03).
+  deposito: 'todos',
+  logistica: '',        // '' = todas | 'full' | 'colecta' | 'otros'
   fecha_desde: '',
   fecha_hasta: '',
+};
+
+// Etiqueta y color de cada tipo de logística de ML. La distinción que importa:
+// FULL = ML surte desde su bodega (NO es dropshipping, por eso nunca trae bodega
+// de proveedor); COLECTA = el proveedor surte, que es lo que el portal mide.
+const LOGISTICA = {
+  fulfillment:   { txt: 'FULL',    clase: 'bg-purple-100 text-purple-700' },
+  cross_docking: { txt: 'COLECTA', clase: 'bg-blue-100 text-blue-700' },
+  xd_drop_off:   { txt: 'Places',  clase: 'bg-notion-100 text-notion-600' },
+  self_service:  { txt: 'Flex',    clase: 'bg-notion-100 text-notion-600' },
 };
 
 const LIMIT = 50; // ventas por página
@@ -76,8 +89,8 @@ export default function Ventas() {
     setFiltros(FILTROS_VACIOS);
     setLoading(true);
     try {
-      // FILTROS_VACIOS trae deposito='proveedores'; mandamos ese default explícito.
-      const { data } = await listarVentas({ deposito: 'proveedores', page: 1, limit: LIMIT });
+      // FILTROS_VACIOS trae deposito='todos'; mandamos ese default explícito.
+      const { data } = await listarVentas({ deposito: 'todos', page: 1, limit: LIMIT });
       setData(data);
     } finally {
       setLoading(false);
@@ -169,9 +182,19 @@ export default function Ventas() {
             <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Depósito (bodega)</label>
             <select value={filtros.deposito} onChange={(e) => set('deposito', e.target.value)}
               className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="todos">Todos</option>
               <option value="proveedores">Solo proveedores</option>
               <option value="matriz">Solo MATRIZ</option>
-              <option value="todos">Todos</option>
+            </select>
+          </div>
+          <div className="min-w-[160px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Logística</label>
+            <select value={filtros.logistica} onChange={(e) => set('logistica', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="">Todas</option>
+              <option value="colecta">Solo COLECTA</option>
+              <option value="full">Solo FULL</option>
+              <option value="otros">Otras (Places/Flex)</option>
             </select>
           </div>
         </div>
@@ -224,6 +247,7 @@ export default function Ventas() {
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Unidades</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Logística</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Proveedor / Bodega</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SLA</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Factura</th>
@@ -232,9 +256,9 @@ export default function Ventas() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="10" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
+                <tr><td colSpan="11" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
               ) : data.items.length === 0 ? (
-                <tr><td colSpan="10" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
+                <tr><td colSpan="11" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
@@ -277,6 +301,24 @@ export default function Ventas() {
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
                   <td className="px-4 py-3 text-xs">{v.unidades != null ? v.unidades : '—'}</td>
                   <td className="px-4 py-3">
+                    {v.logistic_type ? (
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          (LOGISTICA[v.logistic_type] || {}).clase || 'bg-notion-100 text-notion-600'
+                        }`}
+                        title={
+                          v.logistic_type === 'fulfillment'
+                            ? 'FULL: la mercancía sale de la bodega de Mercado Libre, no del proveedor (no es dropshipping)'
+                            : `Tipo de logística de ML: ${v.logistic_type}`
+                        }
+                      >
+                        {(LOGISTICA[v.logistic_type] || {}).txt || v.logistic_type}
+                      </span>
+                    ) : (
+                      <span className="text-notion-text-secondary text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {v.proveedor_nombre ? (
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 bg-reluvsa-black text-reluvsa-yellow text-xs rounded font-semibold">
@@ -286,6 +328,17 @@ export default function Ventas() {
                           <span className="text-[10px] text-notion-text-secondary" title="Bodega reasignada manualmente">✎ manual</span>
                         )}
                       </div>
+                    ) : v.logistic_type === 'fulfillment' ? (
+                      // FULL: la mercancía ya está en la bodega de ML, así que ML manda
+                      // origin=null y NUNCA habrá bodega de proveedor. Pedirle a Gaby que
+                      // "asigne bodega" aquí era trabajo inútil sobre una venta que ni
+                      // siquiera es dropshipping — por eso se muestra el motivo, no el selector.
+                      <span
+                        className="text-notion-text-secondary text-xs"
+                        title="Las ventas FULL las despacha Mercado Libre desde su propia bodega: no hay proveedor dropshipping que asignar."
+                      >
+                        No aplica (FULL)
+                      </span>
                     ) : v.num_envio ? (
                       // Hay envío de colecta pero la col J (Lugar indicado) no mapea a
                       // un proveedor dropshipping (MATRIZ / vacío). Gaby reasigna aquí.
