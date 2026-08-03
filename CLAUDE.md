@@ -289,15 +289,20 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🚨 **LO PRIMERO DE TODO — VERIFICAR QUE LA SYNC AUTOMÁTICA ESTÉ ENCENDIDA.**
-> El 2026-08-03 se **apagó a propósito** para que la sync automática no matara al backfill
-> (ver Trampa 5). **Debe haberse vuelto a encender al terminar.** Si quedó apagada, el
-> portal **NO recibe ventas nuevas** y nadie se entera.
-> ```
-> GET  /api/ml/estado            -> campo sync_auto.activo debe ser true
-> POST /api/ml/sync-auto {"activo": true}   # para reencenderla
-> ```
-> (o el toggle de la pestaña `/mercadolibre`). Confirmar antes de cualquier otra cosa.
+> ✅ **CIERRE VERIFICADO 2026-08-03 21:00 UTC — todo sano, nada pendiente de operación.**
+> Se apagó la sync automática durante el backfill (Trampa 5) y **se volvió a encender**:
+> `sync_auto_activo = 1`, corriendo sola cada 30 min (runs 139/140 a los :01 y :31).
+> **Cero corridas fantasma** (`en_curso`), **cero checkpoints residuales**, árbol de git
+> limpio y sincronizado con `origin/main`. Backend en prod: `GET /` → 200,
+> `/api/proveedores` sin token → 401. Tests: logística 21/21 · solo-lectura 15/15 ·
+> sync e2e 21/21 · sync automática 35/35.
+>
+> **Cifras de prod al cierre:** 57,266 ventas · 55,938 envíos · 769 facturas ·
+> 35,981 ventas con `pack_id` · **0 overrides** de Gaby · 15,439 notificaciones (163
+> pendientes).
+>
+> ⚠️ **Si en el futuro se vuelve a correr un backfill largo, releer la Trampa 5** (hay que
+> apagar la sync automática y **acordarse de reencenderla**).
 
 > 🎉 **LA MIGRACIÓN A LA API ESTÁ VIVA.** La BD de prod tiene **56,804 ventas y 55,487
 > envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a borrar
@@ -545,10 +550,12 @@ puebla en el upsert del sync, se **muestra** en la columna Venta y el CSV, y **e
 4. El `CREATE INDEX` va DENTRO de la migración y DESPUÉS del `ALTER TABLE` (mismo motivo que
    el crash loop de `idx_envios_venta_ml`, §10).
 
-**Cobertura real:** sólo **14,922 de 56,804 ventas (26%)** tienen `pack_id`, no el ~55% de la
-muestra. Razón: la API sólo entrega **12 meses**; las ventas más viejas vienen de los Excels
-legacy y para ésas ML ya no puede darlo. **No es bug ni recuperable.** En la práctica no
-estorba: las del último año sí lo tienen y las viejas muestran su propio número.
+**Cobertura real (actualizada 2026-08-03 tras el backfill completo): 35,981 de 57,266 ventas
+(63%)** tienen `pack_id` — más del doble del 26% que se midió el 08-01, porque aquel backfill
+había quedado incompleto. El resto son ventas anteriores a ago-2025 que vienen de los Excels
+legacy: la API sólo entrega **12 meses** y para ésas ML ya no puede darlo. **No es bug ni
+recuperable.** En la práctica no estorba: las del último año sí lo tienen y las viejas
+muestran su propio número.
 
 ### ✅ HALLAZGO 1 (RESUELTO 2026-08-03): NO era un bug — son ventas FULL
 
@@ -690,11 +697,37 @@ Resultó ser la llave que explicó el Hallazgo 1 (arriba).
 revierte— la regla de [[project_columna_deposito_matriz]]: el filtro sigue existiendo, sólo
 cambió cuál es el default.
 
-**Backfill re-corrido el 2026-08-03** (run 133) para etiquetar los 12 meses de historia.
-⚠️ Los envíos de los **Excels legacy** (anteriores a 2026-01) quedan con `logistic_type`
-NULL **para siempre**: la API sólo entrega 12 meses. No es bug ni recuperable — la UI los
-muestra con "—". **Tenerlo presente al escribir cualquier filtro por logística: usar
-`IS NULL OR != 'fulfillment'`, nunca `= 'cross_docking'`** (ver la próxima tarea arriba).
+**Backfill completado el 2026-08-03** (run 138, 1h56min, 61,108 órdenes). **Resultado final
+sobre 55,918 envíos:**
+
+```
+FULL    (fulfillment)    34,140   61.1%   <- ML despacha; NO es dropshipping
+COLECTA (cross_docking)  21,145   37.8%   <- el proveedor surte; lo que el portal mide
+Flex    (self_service)      213    0.4%
+sin dato (jul-2025)         420    0.8%   <- fuera de los 12 meses de la API
+```
+
+⭐ **El 61% de las ventas de RELUVSA son FULL** — ése es el número que explica el
+"94% sin bodega". Cobertura del etiquetado: **99.2%**, con todos los meses de ago-2025 a
+ago-2026 al 100% (o 99.8%). El único hueco es **jul-2025 (106 envíos)**, fuera de la ventana
+de 12 meses de la API: **no es bug ni recuperable**.
+
+✅ **Confirmado sobre los 55,918 envíos (ya no en muestra): CERO envíos FULL tienen
+proveedor asignado.** Valida que las métricas ya excluyen las FULL de facto.
+
+⚠️ Los envíos anteriores a ago-2025 (Excels legacy) quedan con `logistic_type` NULL **para
+siempre** — la UI los muestra con "—". **Tenerlo presente al escribir cualquier filtro por
+logística: usar `IS NULL OR != 'fulfillment'`, nunca `= 'cross_docking'`** (ver la próxima
+tarea arriba).
+
+⚠️ **Costó 4 intentos** (runs 133, 135, 136, 138) por la Trampa 5 y un reinicio de
+contenedor. **Sin pérdida de datos en ninguno** (upserts idempotentes + `cursor_fecha`
+reanudable). **Gotcha caro que descubrió esto:** reanudar desde el checkpoint hace que el
+backfill **NO recorra los meses viejos** — el run 136 cerró en `completado` con sólo el 48%
+etiquetado y un hueco de ago-2025 a feb-2026. **Para cubrir los 12 meses de verdad hay que
+neutralizar los checkpoints antes** (`UPDATE ml_sync_runs SET cursor_fecha=NULL WHERE
+tipo='backfill' AND estado IN ('abortado','error')`). Un "completado" NO garantiza cobertura
+total: **verificar siempre la cobertura por mes**, no el estado de la corrida.
 
 ⬜ **Siguiente paso (pospuesto por Mario al 2026-08-03):** blindar `routers/metricas.py`
 contra las FULL. Ver el bloque ⭐ de arranque arriba y [[project_metricas_excluir_full]].
