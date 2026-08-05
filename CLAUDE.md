@@ -285,7 +285,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-03 — API VIVA + sync 30 min + pack_id + ⭐ HALLAZGO 1 RESUELTO: era FULL, no un bug + FULL/COLECTA visible, commit `a7bb3df`. ⭐ PRÓXIMA TAREA: blindar las métricas contra las FULL)
+## 8. Estado actual (último update: 2026-08-05 — API VIVA + sync 30 min + pack_id + FULL/COLECTA visible + ⭐ MÉTRICAS BLINDADAS CONTRA LAS FULL, commit `935c998`. NO quedan tareas grandes abiertas del Módulo 1)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
@@ -326,44 +326,59 @@ Convenciones:
   (commit `f325b2f`). Ver [[project_pack_id_numero_venta_ml]].
 - **Backfill de 12 meses re-corrido** (2026-08-01): 27,186 ventas, 55,487 envíos.
 - **Hallazgo 1** (2026-08-03): diagnosticado y cerrado — ver arriba.
+- **Métricas blindadas contra las ventas FULL** (2026-08-05, commit `935c998`): era
+  preventivo, no un bug; las cifras de prod NO cambiaron. Ver el bloque ✅ de abajo.
 
-**⭐ ARRANCAR LA PRÓXIMA SESIÓN AQUÍ — blindar las métricas contra las ventas FULL**
+**⭐ NO quedan tareas grandes abiertas del Módulo 1.** Lo que sigue es el **Módulo 2**
+(publicaciones masivas), que nunca se ha iniciado, más los pendientes menores de abajo.
 
-> **Mario lo pospuso el 2026-08-03** ("lo vemos en otra") y pidió dejar todo documentado
-> para arrancar listo. Detalle completo en [[project_metricas_excluir_full]].
+**✅ MÉTRICAS BLINDADAS CONTRA LAS VENTAS FULL (2026-08-05, commit `935c998`)**
+
+> **Cerrado.** Mario decidió: las FULL **desaparecen** de las métricas (`WHERE`), sin
+> columna ni línea aparte — Gaby ya tiene el filtro "Logística" en la pestaña Ventas para
+> ver el volumen FULL. **Cero cambios de UI.** Su criterio textual: *"FULL no debería medir
+> las métricas de SLA; de hecho en teoría es imposible, ya que no debería estar catalogada
+> como proveedor ninguna venta de FULL"*. Detalle en [[project_metricas_excluir_full]].
 >
-> ⚠️ **CORRECCIÓN IMPORTANTE de lo que se le dijo a Mario en esa sesión:** se le planteó
-> que las métricas "hoy incluyen las FULL y distorsionan el SLA". **Medido después contra
-> prod, eso NO está pasando:**
-> ```
-> logistic_type    con_proveedor   sin_proveedor
-> cross_docking         279            1508
-> fulfillment             0            4193     <- CERO FULL con proveedor
-> ```
-> Todas las consultas de `routers/metricas.py` filtran por `proveedor_id = ?` y **ningún
-> envío FULL tiene proveedor** (ML manda `origin: null` → `_resolver_proveedor` da `None`).
-> **Las métricas YA excluyen las FULL de facto.** El cambio es **preventivo, no un bug
-> abierto** — decírselo a Mario así, no como que los números están mal hoy.
+> **Era preventivo, NO un bug:** hoy las métricas ya excluían las FULL **de facto** (ML manda
+> `origin: null` → ningún envío FULL tiene proveedor: **0 de 55,918** en prod) y las 4
+> consultas filtran por `proveedor_id = ?`. **Verificado contra la BD de prod: las 4 métricas
+> dan cifras IDÉNTICAS antes y después en los 5 proveedores** (AG 22/59.1% · KG 0 · KIM
+> 1775/73.9%/6.0d/25 · CAUPLAS 1410/75.1%/8.2d/81 · VAZLO 74/63.5%). El cambio sella una
+> exclusión que era **accidental** y se rompía en cuanto alguien reasignara una FULL a mano
+> con el selector de bodega.
 >
-> **Por qué hacerlo igual:** la exclusión es **accidental**, no explícita. Se rompe si Gaby
-> **reasigna manualmente** una venta FULL con el selector de bodega (`lugar_override` le
-> pondría proveedor y entraría a las métricas). Hoy hay **0 overrides** en prod, pero ése es
-> justo el flujo que existe para eso — es el riesgo real.
+> **Implementado** (`backend/routers/metricas.py`): constante `NO_ES_FULL` aplicada a las 4
+> consultas. `total`/`a_tiempo` ya leían `envios_colecta`; `tiempo_fact`/`errores` (que van
+> facturas→conceptos→ventas_ml) se unen ahora por `e.num_venta_ml = v.num_venta`.
 >
-> **Alcance exacto** (`backend/routers/metricas.py`, las 4 consultas del bucle):
-> `total` y `a_tiempo` ya leen `envios_colecta` (fácil); `tiempo_fact` y `errores` **NO lo
-> tocan hoy** (van facturas→conceptos→ventas_ml) → habría que unir a `envios_colecta` por
-> `e.num_venta_ml = v.num_venta`. Ése es el trabajo real.
+> ⚠️ **3 trampas fijadas en `backend/scripts/test_metricas_excluir_full.py` (13/13) — no
+> romperlas en un refactor:**
+> 1. **La condición es `(logistic_type IS NULL OR logistic_type != 'fulfillment')`, NUNCA
+>    `= 'cross_docking'`.** Los envíos de los Excels legacy tienen `logistic_type` NULL para
+>    siempre (la API sólo da 12 meses) → filtrar por igualdad **borraría de las métricas toda
+>    la historia legacy** que el portal rescató.
+> 2. **El JOIN a `envios_colecta` en `tiempo_fact`/`errores` es LEFT, no JOIN.** Con JOIN
+>    normal, un concepto cruzado a una venta que **todavía no tiene envío** desaparecería de
+>    la métrica — eso sí movería los números de hoy.
+> 3. **Un concepto SIN cruzar (`num_venta_match IS NULL`) sigue contando como error.** No
+>    tiene venta ni envío que consultar, así que no puede ser FULL; el filtro sólo aplica a
+>    los de confianza baja.
 >
-> ⚠️ **La condición debe ser `AND (logistic_type IS NULL OR logistic_type != 'fulfillment')`,
-> NO `= 'cross_docking'`.** Los envíos de los **Excels legacy** (todo lo anterior a 2026-01)
-> tienen `logistic_type` NULL para siempre — la API sólo da 12 meses. Filtrar por
-> `= 'cross_docking'` **borraría de las métricas toda la historia legacy** que el portal
-> rescató.
+> **Matiz de semántica** (lo detectó el api-guardian, fijado en el test): si una venta llegara
+> a tener un envío FULL y otro COLECTA a la vez, `NO_ES_FULL` **conserva** la venta (OR, no
+> AND) — lo conservador, para no descartar nunca una venta legítimamente COLECTA. En prod es
+> teórico (el sync crea un envío por `order.shipping.id`). El mismo test fija que el LEFT JOIN
+> **no duplica** el `COUNT` de errores en ese caso.
 >
-> ❓ **Preguntarle a Mario ANTES de implementar:** ¿las FULL **desaparecen** de las métricas
-> o se muestran **como línea aparte**? Gaby podría querer ver el volumen FULL aunque no
-> cuente para el SLA del proveedor. Cambia si es un `WHERE` o una columna adicional.
+> ℹ️ **Sesgo preexistente documentado, NO introducido por este cambio:** el `AVG` de tiempo de
+> facturación se calcula por concepto, así que una venta con N envíos hace pesar su factura N
+> veces. Ya era así; el test lo fija para que un refactor no lo altere sin darse cuenta.
+>
+> **api-guardian APROBADO 7/7** (+5/5 puntos específicos: sin red, sin inyección — `NO_ES_FULL`
+> es constante literal y `proveedor_id` sigue como parámetro vinculado —, solo lectura, rol
+> proveedor intacto, LEFT JOIN no infla). Regresiones sin novedad: logística 21/21 ·
+> solo-lectura 15/15 · sync e2e 21/21 · pack_id 12/12.
 
 **⬜ Lo demás, menor:**
 - Rotar la password del admin `gaby@reluvsa.com` (higiene, pendiente desde junio).
@@ -729,9 +744,8 @@ neutralizar los checkpoints antes** (`UPDATE ml_sync_runs SET cursor_fecha=NULL 
 tipo='backfill' AND estado IN ('abortado','error')`). Un "completado" NO garantiza cobertura
 total: **verificar siempre la cobertura por mes**, no el estado de la corrida.
 
-⬜ **Siguiente paso (pospuesto por Mario al 2026-08-03):** blindar `routers/metricas.py`
-contra las FULL. Ver el bloque ⭐ de arranque arriba y [[project_metricas_excluir_full]].
-**No es un bug abierto:** hoy ya se excluyen de facto porque ningún FULL tiene proveedor.
+✅ **Siguiente paso CERRADO (2026-08-05, commit `935c998`):** `routers/metricas.py` ya excluye
+las FULL explícitamente. Ver el bloque ✅ de arranque arriba y [[project_metricas_excluir_full]].
 
 ### ✅ HALLAZGO 2 (CERRADO 2026-08-01): 2,258 órdenes no se guardaron (7.7%)
 
