@@ -72,9 +72,38 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 ### Kits → componentes (2026-06-19)
 - ⚠️ Algunas ventas de ML son **kits**: el SKU (ej. `KIT0337`) es un **código sintético de RELUVSA** que **NO existe en ninguna factura**. El proveedor factura los **componentes reales** del kit (ej. `KDTL-057`, `KDTL-058`). Por eso una venta-kit salía siempre **"Pendiente"** aunque su factura estuviera cargada: el matcher buscaba `KIT0337` en los conceptos y nunca cruzaba.
 - **Solución:** Gaby sube **su propio Excel** de relación kit→componentes (3 columnas: `Paquete -> Tag` = KIT, `Componente -> Tag`, `Cantidad`) por un **uploader propio** (`POST /api/uploads/kits`, 4a tarjeta en Uploads.jsx). Parser `services/parser_kits.py` → tabla puente `kit_componentes (kit_sku, componente_codigo, cantidad)`. **Carga incremental** (upsert por PK; re-subir actualiza+agrega, no borra). `kit_sku` normalizado UPPER+TRIM (el Excel trae formatos inconsistentes y espacios finales). El Excel real: 656 kits, **1847 relaciones únicas** (1853 filas con 6 pares duplicados internos que el upsert colapsa).
-- **El matcher gana un 4º paso `kit_componente`** (`services/matcher.py`, conf 0.95, tras id-interno y antes del fuzzy): cruza el código del concepto contra los componentes del kit de una venta del proveedor (exacto o substring en ambos sentidos → **tolera el sufijo `-K`** que traen los componentes del Excel y que la factura probablemente no trae). El 1er componente que cruce marca la venta-kit como facturada (criterio `facturas_count>0`; sin estados "parciales"). **Un solo proveedor por kit** (decisión de Gaby): todos los componentes de un kit se facturan al mismo proveedor.
+- **El matcher gana un 4º paso `kit_componente`** (`services/matcher.py`, conf 0.95, tras id-interno y antes del fuzzy): cruza el código del concepto contra los componentes del kit de una venta del proveedor. El 1er componente que cruce marca la venta-kit como facturada (criterio `facturas_count>0`; sin estados "parciales"). **Un solo proveedor por kit** (decisión de Gaby): todos los componentes de un kit se facturan al mismo proveedor.
 - **Gaby ve los componentes** debajo del SKU en la tabla Ventas (gris, `KDTL-057 ×1`) y en una columna del CSV ("Componentes kit"). El campo `kit_componentes` lo arma `routers/ventas.py` con un subquery a `kit_componentes WHERE kit_sku = UPPER(TRIM(v.sku))`.
-- ⚠️ **El candado de tipo NO usa el nombre de hoja "KITS"**: el workbook de control interno de Gaby tiene 47 hojas (una llamada `KITS`) → daría falso positivo. Se detecta por el **header de la 1a hoja** (componente+cantidad+paquete/kit). Cero infra nueva en Railway (tabla creada por el SCHEMA al arrancar). **Pendiente:** validar con un XML real de factura de kit (el sufijo `-K` se asumió, no se probó con factura real). Ver [[project_kits_componentes]].
+- ⚠️ **El candado de tipo NO usa el nombre de hoja "KITS"**: el workbook de control interno de Gaby tiene 47 hojas (una llamada `KITS`) → daría falso positivo. Se detecta por el **header de la 1a hoja** (componente+cantidad+paquete/kit). Cero infra nueva en Railway (tabla creada por el SCHEMA al arrancar). Ver [[project_kits_componentes]].
+
+#### ⭐ Los kits cruzan por ID interno (2026-08-05, commit `1be1f99`) — leer antes de tocar `_match_por_kit`
+
+- **Reporte de Gaby:** *"los kits sigue sin detectarlos :( no detecta con las facturas. Si lo detecta en el desglose porque marka kit y los componentes pero al asignarle factura no"*. Traducido: la tabla Ventas SÍ muestra el kit y sus componentes (su Excel cargó bien), pero la venta seguía **"Pendiente"** aunque el XML estuviera cargado.
+- **Causa real** (diagnosticada contra la BD de prod con su ejemplo — factura CAUPLAS `970096331`, kits `KIT0216` y `KIT03554`): la cadena estaba **intacta** (ventas, envío con proveedor CAUPLAS, factura de CAUPLAS, componentes cargados). Fallaba **sólo el formato del código**:
+  ```
+  Excel de Gaby   ->  CAU11370
+  Factura CAUPLAS ->  11370  M2650963
+  ```
+  Es el **mismo desfase de esquemas que el paso 2 (`codigo_id_interno`) ya resolvía desde junio** para los SKU normales; el paso 3 comparaba **texto crudo**. En prod, **798 de 1859 componentes** usan ese formato.
+- ❌ **La hipótesis del sufijo `-K` quedó DESCARTADA** (estaba anotada como pendiente desde junio): sólo **8 de 1859** relaciones lo traen y de los 106 conceptos huérfanos **CERO** coincidían con un componente ni quitándoselo. **No volver a investigarla.** El cruce por texto se conservó igual (no cuesta nada).
+- **Resultado en prod:** 106 conceptos sin cruzar → **65**. Ventas-kit con factura: 20 → **61**. Los 41 recuperados salieron **todos con conf 0.95** y se auditaron uno por uno contra el modelo de coche de la descripción: **0 falsos positivos**.
+- ⚠️ **5 trampas fijadas en `backend/scripts/test_kit_id_interno.py` (20/20) — no romperlas:**
+  1. **`_tokens_componente` recorta el prefijo de bodega ANTES de tokenizar.** Usar `_tokens_codigo` tal cual saca un token fantasma: su regex de códigos-M (`[A-Z]\d{5,}`) se come la última letra del prefijo y devuelve `{'11370', 'U11370'}` para `CAU11370` — `U11370` no está en la factura, así que el subconjunto fallaba **siempre**. `_tokens_codigo` NO se tocó (lo comparten los pasos 1 y 2, en producción).
+  2. **Se exige SUBCONJUNTO de tokens, no intersección.** Con intersección, `VAZLO-30-257` cruzaría contra cualquier concepto que mencione un `30`.
+  3. **Se exige un token de >= 4 caracteres, también en la rama por substring del SQL.** El componente `409` vive en **21 kits distintos** en prod; sin la guarda se roba cualquier concepto que lo contenga.
+  4. 🔴 **Si el componente vive en KITS DISTINTOS y la descripción no desempata → se devuelve `None`, no se adivina.** Una versión intermedia elegía "la venta más reciente" y, medido contra prod, cruzaba `NSN PLATINA 1.6L RAD SUP` al kit de un **Clio** (comparten plataforma → comparten componentes). **Un cruce falso es PEOR que un pendiente:** el pendiente se ve y se corrige, el falso dice "ya facturado" y nadie lo vuelve a mirar.
+  5. **El desempate NO usa `CONFIDENCE_MIN_FUZZY` (0.6) ni `token_set_ratio`.** Ese umbral sirve para hallar una venta entre CIENTOS (paso 4); aquí ya sólo hay 2-3 candidatas y la pregunta es "¿cuál de éstas?". Con títulos de ML ruidosos el ratio deja márgenes de ~2 puntos aunque el ganador sea obvio (`NSN PLATINA…` daba 27.3 vs 25.0). Se cuentan **términos distintivos** (`_afinidad_titulo`, ignora "kit/mangueras/1.6"), que da 1 vs 0 — señal limpia.
+- ℹ️ **Mismo kit repetido ≠ ambigüedad.** Lo habitual en prod es que las N candidatas sean **el mismo kit vendido N veces** (`KIT0454` de Chevy, 6 ventas). Ahí el producto no está en duda: se cruza con conf 0.95 a la más reciente sin facturar. La guarda del punto 4 aplica **sólo** cuando los SKU-kit son distintos. Además, RELUVSA publica el mismo kit con títulos distintos según el coche compatible (`KIT03565` sale como Platina, Clio y Kangoo — mismo motor Renault), así que dentro de un kit único se prefiere la venta cuyo título case con la descripción.
+- **Gaby no tuvo que resubir nada:** `recruzar_conceptos_sin_match` ya corre tras subir ventas/colecta o reasignar bodega (ver [[project_cruce_retroactivo]]). Se disparó a mano una vez tras el deploy.
+
+##### Los 65 conceptos que siguen sin cruzar — ✅ es correcto, NO es bug
+| Causa | Cuántos | Por qué está bien |
+|---|---|---|
+| El proveedor facturó algo **sin venta en el portal** | 58 | Es la **señal de valor**: alimenta "errores de facturación" en Métricas, para reclamarle al proveedor. Mismo caso que los 16 de CAUPLAS de junio |
+| La venta existe pero su **envío no tiene bodega** | 6 (todos KIM) | El matcher sólo busca dentro del proveedor. **Gaby los recupera** con el selector "⚠ Asignar bodega" y el recruce los cierra solo |
+| La venta **ya tiene otra factura** cruzada | 1 | Correcto no duplicar |
+
+Reparto por mes (jun 14 · jul 17 · ago 34) = goteo normal de operación, no un lote roto.
 
 ### Número de factura por proveedor (columna "Factura #" en Ventas)
 - ⚠️ El "# de factura" que cada proveedor ve en su **PDF** NO es un campo aparte: es la **combinación de `Serie` + `Folio` del XML** (que el parser ya extrae), recombinada con orden/separador propio de cada proveedor. **No se lee el PDF.** Reglas en `services/folio_factura.py::formatear_folio` (llave = `codigo_bodega`):
@@ -108,7 +137,7 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 - El match concepto-venta (`services/matcher.py`) tiene **4 pasos en orden**:
   1. **Código exacto**: `NoIdentificacion` del XML == SKU de la venta (o substring). Ej. KIM: `23530559-Z` == `23530559-Z`.
   2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
-  3. **Componente de kit** (agregado 2026-06-19): si la venta es un kit (su SKU está en `kit_componentes`), el proveedor factura los componentes, no el SKU-kit. Cruza el código del concepto contra los componentes del kit (exacto/substring, tolera sufijo `-K`). Ver [[project_kits_componentes]].
+  3. **Componente de kit** (agregado 2026-06-19; **cruce por ID interno agregado 2026-08-05**): si la venta es un kit (su SKU está en `kit_componentes`), el proveedor factura los componentes, no el SKU-kit. Cruza el código del concepto contra los componentes del kit, primero por **texto** (exacto/substring, tolera sufijo `-K`) y luego por **ID interno normalizado** — el Excel trae `CAU11370` donde la factura dice `11370 M2650963`. Ante varios kits candidatos desempata la descripción, y si no hay ganador claro **NO cruza**. Ver la sección "⭐ Los kits cruzan por ID interno" arriba y [[project_kits_cruce_id_interno]].
   4. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
@@ -208,9 +237,14 @@ dropshipping-reluvsa/
 │   │   ├── detector_archivo.py  # candado: detecta tipo de xlsx por contenido
 │   │   ├── folio_factura.py     # # de factura como lo ve cada proveedor (Serie+Folio)
 │   │   ├── uuid_pdf.py          # extrae UUID impreso del PDF (empareja PDF↔XML en subida múltiple)
-│   │   └── matcher.py           # match concepto→venta (código exacto + fuzzy fallback)
-│   ├── scripts/
-│   │   └── crear_usuario.py     # CLI para crear admin o proveedor
+│   │   └── matcher.py           # match concepto→venta: exacto → id interno → kit → fuzzy
+│   ├── scripts/                 # CLI + los tests de regresión (correrlos antes de commitear)
+│   │   ├── crear_usuario.py     # CLI para crear admin o proveedor
+│   │   ├── wipe_transaccional.py
+│   │   └── test_*.py            # 13 suites: kits, kit_id_interno, metricas_excluir_full,
+│   │                            #   logistica_full_colecta, pack_id, sync_ml_e2e,
+│   │                            #   sync_automatica, ml_client_solo_lectura, poda_
+│   │                            #   notificaciones, recruce_retroactivo, cauplas/vazlo/ag_kg
 │   └── uploads/                 # SOLO temporales de parseo; los PDF/XML de factura viven
 │                                #   en UPLOADS_DIR=/data/uploads (volumen, persistente)
 ├── frontend/
@@ -285,7 +319,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-05 — API VIVA + sync 30 min + pack_id + FULL/COLECTA visible + ⭐ MÉTRICAS BLINDADAS CONTRA LAS FULL, commit `935c998`. NO quedan tareas grandes abiertas del Módulo 1)
+## 8. Estado actual (último update: 2026-08-05 — API VIVA + sync 30 min + pack_id + FULL/COLECTA + métricas blindadas contra FULL (`935c998`) + ⭐ KITS CRUZAN POR ID INTERNO (`1be1f99`). NO quedan tareas grandes abiertas del Módulo 1)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
@@ -328,6 +362,11 @@ Convenciones:
 - **Hallazgo 1** (2026-08-03): diagnosticado y cerrado — ver arriba.
 - **Métricas blindadas contra las ventas FULL** (2026-08-05, commit `935c998`): era
   preventivo, no un bug; las cifras de prod NO cambiaron. Ver el bloque ✅ de abajo.
+
+- **Los kits cruzan por ID interno** (2026-08-05, commit `1be1f99`): el reporte de Gaby de
+  que "los kits siguen sin detectarlos". Era el prefijo de bodega (`CAU11370` vs
+  `11370 M2650963`), NO el sufijo `-K`. 41 conceptos recuperados, 0 falsos positivos. Ver
+  la sección "⭐ Los kits cruzan por ID interno" en §3.
 
 **⭐ NO quedan tareas grandes abiertas del Módulo 1.** Lo que sigue es el **Módulo 2**
 (publicaciones masivas), que nunca se ha iniciado, más los pendientes menores de abajo.
@@ -1064,9 +1103,10 @@ receptor de webhooks y Mario llenó/documentó la configuración completa de la 
 - **Tras el deploy: Gaby debe re-subir el reporte de Ventas ML** para que las ventas ya cargadas
   muestren las Unidades (el fix corrige el parseo de aquí en adelante; el upsert repuebla al re-subir).
   Si re-sube ventas/colecta, el cruce retroactivo de facturas corre solo.
-- **Validar el cruce de kits con un XML real** de factura que traiga componentes (el sufijo `-K`
-  del Excel vs el código sin `-K` en factura): se asumió que el matcher lo tolera por substring
-  (verificado en test con concepto sintético), falta XML real. Pedir a Gaby una factura de kit.
+- ✅ **CERRADO 2026-08-05 — "validar el cruce de kits con un XML real":** se validó con la factura
+  real `970096331` de CAUPLAS que aportó Gaby. El resultado **descartó** la hipótesis del sufijo
+  `-K` (era el prefijo de bodega `CAU`, no el sufijo) y produjo el commit `1be1f99`. Ver la sección
+  "⭐ Los kits cruzan por ID interno" y [[project_kits_cruce_id_interno]].
 - Confirmar con Gaby el ejemplo del mensaje (dijo `92401-05510` del KIT0337, pero en su Excel ese
   componente está en KIT0358; KIT0337 = `KDTL-057-K`+`KDTL-058-K`). No bloqueante.
 - Validar el formato de "Factura #" de **AG** y **VAZLO** contra su primer XML real (las reglas
@@ -1149,6 +1189,8 @@ entregó (`kits/relacion-kits-componentes.xlsx`, ignorado por git). **Implementa
    componente (exacto o substring en ambos sentidos → tolera el sufijo `-K`). Reutiliza el patrón
    JOIN + `fc.id IS NULL` de los otros pasos. El 1er componente que cruce marca la venta-kit como
    facturada (criterio `facturas_count>0` actual; acordado con Mario: sin estados parciales).
+   ⚠️ **Superado el 2026-08-05:** esto NO bastaba (el problema era el prefijo `CAU`, no el
+   sufijo `-K`) → ver "⭐ Los kits cruzan por ID interno" en §3.
 6. ✅ **Ventas muestra los componentes** (`ventas.py` subquery `kit_componentes` + `Ventas.jsx`
    debajo del SKU en gris `KDTL-057 ×1`; CSV columna "Componentes kit"). Sin columnas/filas nuevas.
 
