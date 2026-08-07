@@ -1,8 +1,73 @@
-# 🧹 TAREA ABIERTA — Limpiar los 243 cruces falsos que quedaron persistidos en prod
+# ✅ CERRADA — Limpieza de los 243 cruces falsos persistidos en prod
 
-> **Estado:** MEDIDO Y DOCUMENTADO, **NO EJECUTADO**. Cero cambios en prod.
-> **Fecha:** 2026-08-07. **Decidido por:** Mario.
-> **Prerequisito ya hecho:** el fix de fecha (commit `f699577`, desplegado y verificado).
+> **Estado:** **EJECUTADA EN PRODUCCIÓN el 2026-08-07 17:28 UTC.** Backup en
+> `/data/dropshipping.db.bak-20260807_172825`.
+> **Fecha:** 2026-08-07. **Decidido y aprobado por:** Mario.
+> **Prerequisito:** el fix de fecha (commit `f699577`, desplegado y verificado).
+>
+> ## Resultado (simulación y prod coincidieron exactamente)
+>
+> | de los 243 liberados | n |
+> |---|---|
+> | reasignados a otra venta | **192** |
+> | quedaron pendientes | **51** |
+> | volvieron a la misma venta | **0** |
+>
+> **Medido contra el cruce manual de Gaby (143 casos), estado persistido antes vs después:**
+>
+> | | antes | después |
+> |---|---|---|
+> | aciertos | 49 | **59** |
+> | errores | 43 | **22** |
+> | falsos "✓ Facturado" | 17 | **5** |
+> | CAUPLAS | 68% | **70%** |
+> | KIM | 27% | **42%** |
+>
+> **Garantías verificadas en prod:** 0 cruces buenos preexistentes alterados · 0 cruces
+> imposibles restantes · `factura_conceptos` 1052 → 1052 filas (ninguna borrada) ·
+> `lugar_override`, `albaran`, `ventas_ml`, `envios_colecta`, `facturas` y
+> `kit_componentes` intactos. Conceptos cruzados: 981 → 935.
+>
+> **Impacto visible para Gaby:** 218 ventas pasaron de "Facturado" a "Pendiente" y 187 al
+> revés (casi todo KIM). Borrador de aviso en `mensaje-gaby.md` (fuera del repo).
+>
+> ⬜ **Lo que NO se cerró:** los **5 falsos que sobreviven** son facturas KIM emitidas el
+> **mismo día** de la venta — cronológicamente posibles, así que el filtro de fecha no
+> puede descartarlas. Es la ambigüedad irreducible ya documentada; sólo se cierra con el
+> **# de venta en la factura**. **No es una falla de la limpieza.**
+>
+> ℹ️ **Los 51 que quedaron pendientes no son timidez del matcher:** se verificó que los 51
+> **no tienen ninguna venta candidata válida** en la ventana de facturación. Son facturas
+> cuya venta no está en el portal o cuyo envío no tiene bodega — la señal de "errores de
+> facturación" que alimenta Métricas.
+>
+> **Scripts en el repo:** `backend/scripts/limpiar_cruces_falsos.py` (simulación) y
+> `limpiar_cruces_falsos_prod.py` (el que corrió en el contenedor). Idempotentes: una
+> segunda corrida no encuentra nada que limpiar.
+>
+> ---
+>
+> ### ⚠️ 3 cosas aprendidas al ejecutarla — leer si algo parecido se repite
+>
+> 1. 🔴 **El criterio por `date()` NO es cosmético.** Medido por el api-guardian: por
+>    timestamp habrían salido **258** conceptos en vez de 243. Los **15 de diferencia** son
+>    ventas del mismo día facturadas horas antes (venta 19:02, factura 15:47), todas
+>    `codigo_exact` con **confianza 1.0**. Comparar timestamps habría **destruido 15 cruces
+>    legítimos de máxima calidad**.
+> 2. **La limpieza y el recruce van en UNA transacción** (`BEGIN IMMEDIATE` + un solo
+>    commit). Con commits separados, un fallo entre ambos dejaría 243 conceptos liberados y
+>    sin recruzar — recuperable, pero es un bajón visible para Gaby sin motivo.
+> 3. **Verificar la garantía distinguiendo dos casos.** Un chequeo ingenuo de "¿cambió algo
+>    fuera de la selección?" da falsa alarma: hay conceptos que estaban **pendientes** y
+>    ahora cruzan porque la limpieza liberó la venta que necesitaban (ganancia, no daño).
+>    Lo que hay que exigir es que ningún cruce **preexistente** cambie.
+>
+> ### Método (aplicable a la próxima limpieza de datos)
+>
+> Simular contra copia verificada de prod → medir contra la verdad de Gaby → api-guardian →
+> **apagar la sync automática** → backup `VACUUM INTO` → ejecutar → **reencender la sync** →
+> verificar. La sync se apaga por el lock de escritura de SQLite; **acordarse de
+> reencenderla** (se hizo: `sync_auto_activo = 1`, próxima corrida 17:34 UTC).
 
 ---
 

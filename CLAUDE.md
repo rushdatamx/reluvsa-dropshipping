@@ -323,16 +323,19 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🧹 **TAREA #1 ABIERTA (2026-08-07): limpiar los 243 cruces falsos ya persistidos.**
-> El fix de fecha corrige de aquí en adelante, pero **no limpia lo ya guardado**
-> (`recruzar_conceptos_sin_match` sólo toca conceptos en `NULL`). Medido en prod: **243 de
-> 966 conceptos cruzados (25%) tienen la venta fechada DESPUÉS de su factura** — imposible
-> por definición. Ahí están los **17 que le marcan a Gaby "✓ Facturado" sobre mercancía que
-> no ha salido**. Mario ya decidió limpiarlos; **falta simular contra copia de prod y
-> ejecutar**.
-> ⭐ **LEER `docs/limpieza-cruces-falsos-persistidos.md`** — trae el reparto por proveedor,
-> las 6 trampas, el método de medición contra el cruce manual de Gaby y lo ya verificado
-> (los 21 casos "a 1 día" NO son ruido de zona horaria: se comprobaron las horas).
+> ✅ **LIMPIEZA DE LOS 243 CRUCES FALSOS — EJECUTADA EN PROD (2026-08-07 17:28 UTC).**
+> Simulada, medida, auditada por api-guardian (APROBADO) y ejecutada con backup
+> (`/data/dropshipping.db.bak-20260807_172825`). **192 reasignados · 51 pendientes ·
+> 0 cruces buenos alterados · 0 imposibles restantes · 0 filas borradas.**
+> Contra el cruce manual de Gaby: **aciertos 49→59, errores 43→22, falsos "✓ Facturado"
+> 17→5** (CAUPLAS 68→70%, KIM 27→42%).
+> ⚠️ **Gaby verá movimiento:** 218 ventas pasaron de "Facturado" a "Pendiente" y 187 al
+> revés (casi todo KIM). **Falta avisarle** — borrador listo, ver el doc.
+> ⬜ Los **5 falsos que sobreviven** son facturas KIM del mismo día de la venta: ambigüedad
+> irreducible, sólo se cierra con el **# de venta en la factura**. NO es falla de la limpieza.
+> ⭐ **LEER `docs/limpieza-cruces-falsos-persistidos.md`** — trae el resultado, las 3
+> lecciones de la ejecución (entre ellas: comparar por timestamp en vez de `date()` habría
+> **destruido 15 cruces legítimos con confianza 1.0**) y el método reutilizable.
 
 > ⭐ **FIX DE FECHA APLICADO (2026-08-07): la factura ya no se va a la venta equivocada.**
 > Reportado por Gaby. **Diagnosticado, simulado contra copia de prod y ARREGLADO.** El
