@@ -323,6 +323,17 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
+> 🧹 **TAREA #1 ABIERTA (2026-08-07): limpiar los 243 cruces falsos ya persistidos.**
+> El fix de fecha corrige de aquí en adelante, pero **no limpia lo ya guardado**
+> (`recruzar_conceptos_sin_match` sólo toca conceptos en `NULL`). Medido en prod: **243 de
+> 966 conceptos cruzados (25%) tienen la venta fechada DESPUÉS de su factura** — imposible
+> por definición. Ahí están los **17 que le marcan a Gaby "✓ Facturado" sobre mercancía que
+> no ha salido**. Mario ya decidió limpiarlos; **falta simular contra copia de prod y
+> ejecutar**.
+> ⭐ **LEER `docs/limpieza-cruces-falsos-persistidos.md`** — trae el reparto por proveedor,
+> las 6 trampas, el método de medición contra el cruce manual de Gaby y lo ya verificado
+> (los 21 casos "a 1 día" NO son ruido de zona horaria: se comprobaron las horas).
+
 > ⭐ **FIX DE FECHA APLICADO (2026-08-07): la factura ya no se va a la venta equivocada.**
 > Reportado por Gaby. **Diagnosticado, simulado contra copia de prod y ARREGLADO.** El
 > matcher elegía candidata con `ORDER BY v.fecha_venta DESC LIMIT 1` **sin mirar nunca la
