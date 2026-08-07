@@ -323,6 +323,59 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
+> ⭐ **FIX DE FECHA APLICADO (2026-08-07): la factura ya no se va a la venta equivocada.**
+> Reportado por Gaby. **Diagnosticado, simulado contra copia de prod y ARREGLADO.** El
+> matcher elegía candidata con `ORDER BY v.fecha_venta DESC LIMIT 1` **sin mirar nunca la
+> fecha de la FACTURA** → cuando un SKU se vendía varias veces, la factura se iba a una
+> venta arbitraria. **Ahora se descartan las ventas POSTERIORES a la factura** (nadie
+> factura lo que no ha vendido) y las más viejas que `VENTANA_FACTURACION_DIAS`.
+>
+> **Medido contra el cruce manual de Gaby (143 casos), con el código real sobre copia de prod:**
+>
+> | | antes | después |
+> |---|---|---|
+> | aciertos | 26 | **64** |
+> | errores | 76 | **29** |
+> | falsos "✓ Facturado" sobre mercancía no enviada | 28 | **10** |
+> | CAUPLAS | 57% | **73%** |
+> | KIM | 5% | **45%** |
+>
+> ⚠️ **Las cifras del hallazgo (CAUPLAS 62% / KIM 27%) son del ESTADO de prod, que NO es
+> reproducible**: es el sedimento de meses de eventos intercalados (facturas en 9 lotes,
+> ventas por sync progresivo, `recruzar` corriendo muchas veces). Al re-correr el criterio
+> viejo sobre el universo de hoy, KIM da **5%**, no 27% — el 27% tuvo suerte histórica.
+> Por eso la comparación honesta es viejo-vs-nuevo en igualdad de condiciones, no contra prod.
+>
+> ⬜ **KIM NO queda resuelto y no puede quedarlo con los datos actuales.** Emite ~23 facturas
+> al día y hay 141 combinaciones (SKU, día) con varias ventas: `K29936` y `K29944` salieron
+> el mismo día con **25 minutos** de diferencia para el mismo SKU. Ningún criterio de fecha
+> las distingue. **Se le pidió a Gaby que KIM y CAUPLAS pongan el # de venta en la factura**
+> — es lo único que lo cierra. Ver "Cruce por # de venta" abajo.
+>
+> ❌ **La vía 6.1 del hallazgo (agrupar CAUPLAS por `M######`) quedó DESCARTADA, medida:**
+> da **0 casos** de diferencia. 45 de 75 pedidos tienen un solo concepto, cada `M######` vive
+> en una sola factura, y el pedido `M2650288` reparte sus conceptos entre 2 packs distintos.
+> Es un folio interno de CAUPLAS, no un ancla al carrito. **No implementarla.**
+>
+> ⬜ **BUG A sigue abierto**: 1,042 ventas de carrito sin envío → invisibles para el matcher.
+> ⭐ **LEER `docs/hallazgo-cruce-factura-venta.md`** para las 3 hipótesis ya descartadas.
+
+#### ⬜ Cruce por # de venta (pedido a Gaby, PENDIENTE de que lleguen facturas con el dato)
+
+Cuando KIM/CAUPLAS empiecen a poner el # de venta en la factura, agregar un **paso 0** antes
+del código exacto. ⚠️ **3 reglas que la medición ya dejó fijadas** — no diseñarlo de otro modo:
+
+1. **Buscar primero en `num_venta` (order.id). Si hay match exacto, gana y no se sigue.**
+2. **Sólo si no hay, buscar en `pack_id`** — y desambiguar con el código de la pieza: **778
+   packs tienen varias ventas** (el caso de Gaby: un pack con una Jeep y una Figo).
+3. 🔴 **NUNCA buscar "en order.id O en pack_id" a la vez**: hay **268 números que son order.id
+   de una venta y pack_id de OTRA distinta** → devolvería 2 ventas y reintroduciría el mismo
+   bug, pero peor, porque vendría con confianza 1.0 y nadie lo revisaría.
+
+ℹ️ Hoy **cero** conceptos traen números de 12+ dígitos, así que detectar uno es señal
+inequívoca de que el proveedor lo puso. **Validar el formato contra el primer XML real antes
+de confiar** (mismo criterio que con los kits).
+
 > ✅ **CIERRE VERIFICADO 2026-08-03 21:00 UTC — todo sano, nada pendiente de operación.**
 > Se apagó la sync automática durante el backfill (Trampa 5) y **se volvió a encender**:
 > `sync_auto_activo = 1`, corriendo sola cada 30 min (runs 139/140 a los :01 y :31).

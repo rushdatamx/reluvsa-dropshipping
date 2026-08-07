@@ -266,7 +266,8 @@ def _registrar_factura(conn, parsed: dict, xml_path: Path, pdf_path: Optional[Pa
     factura_id = cur.lastrowid
 
     for c in parsed["conceptos"]:
-        match = match_conceptos_a_ventas(conn, user.proveedor_id, c)
+        match = match_conceptos_a_ventas(conn, user.proveedor_id, c,
+                                         fecha_factura=parsed.get("fecha"))
         conn.execute(
             """INSERT INTO factura_conceptos (factura_id, codigo_prov, descripcion, cantidad,
                                               precio_unitario, importe, num_venta_match, match_method, match_confidence)

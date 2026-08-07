@@ -23,11 +23,59 @@ from rapidfuzz import fuzz, process
 
 CONFIDENCE_MIN_FUZZY = 0.6
 
+# ⭐ Ventana de facturación: cuántos días DESPUÉS de la venta puede emitirse su factura.
+#
+# El filtro que de verdad importa es el otro extremo (una venta POSTERIOR a la factura no
+# puede ser la facturada); este tope sólo evita colgarle a una factura una venta de hace
+# medio año cuando la correcta ya se consumió.
+#
+# Medido contra el cruce manual de Gaby (2026-08-07, 103 pares correctos): CAUPLAS factura
+# entre 0 y 3 días después de la venta, KIM entre 0 y 5. Ni un solo caso por encima de 5.
+# 45 deja holgura de sobra sin abrir la puerta a cruces absurdos. Medido: el resultado es
+# IDÉNTICO con cualquier valor entre 5 y 30 — lo que decide es la regla de no-futuras, no
+# este número, así que no hace falta afinarlo.
+VENTANA_FACTURACION_DIAS = 45
+
 # Términos distintivos (ver `_afinidad_titulo`) que el mejor título debe sacarle al
 # segundo para desempatar entre varias ventas-kit que comparten el mismo componente.
 # No es un umbral de parecido: es la distancia mínima para que la elección no sea azar.
 # Con 1 basta — un solo término propio ('VENTO' vs 'CHEVY') ya identifica el vehículo.
 MARGEN_DESEMPATE_KIT = 1
+
+
+def _filtro_fecha(fecha_factura: Optional[str]):
+    """Devuelve (sql, params) para acotar las ventas candidatas por la fecha de la factura.
+
+    ⭐ EL ARREGLO DE FONDO (2026-08-07). Antes, los 4 pasos elegían candidata sólo con
+    `ORDER BY v.fecha_venta DESC LIMIT 1`, sin mirar nunca la fecha de la FACTURA. Cuando
+    un SKU se vendía varias veces, la factura se iba a una venta arbitraria — medido contra
+    el cruce manual de Gaby, KIM acertaba el 27%, y en 17 casos el portal marcaba
+    "✓ Facturado" sobre mercancía que ni siquiera había salido.
+
+    Dos condiciones, en orden de importancia:
+
+    1. **La venta no puede ser POSTERIOR a la factura.** Nadie factura lo que todavía no ha
+       vendido. Es la regla que hace el trabajo: por sí sola sube los aciertos de 26 a 76
+       sobre los 143 casos de Gaby. En la BD de prod había 237 conceptos KIM cruzados a una
+       venta hasta 45 días posterior a su propia factura — imposibles, todos falsos.
+    2. **Ni más vieja que `VENTANA_FACTURACION_DIAS`**, para no rescatar una venta de hace
+       meses cuando la correcta ya se consumió.
+
+    Con `fecha_factura=None` no filtra nada y el comportamiento es el de siempre. Eso
+    mantiene compatibles a los tests existentes y a cualquier llamador que no tenga la
+    fecha a mano; el filtro es una mejora aditiva, nunca un requisito.
+
+    Se compara con `date()` (no el timestamp) porque `fecha_venta` viene de ML con hora y
+    `fecha_factura` del XML: una factura emitida a las 10:00 del mismo día en que se vendió
+    a las 14:00 es legítima, y comparar timestamps la descartaría.
+    """
+    if not fecha_factura:
+        return "", []
+    return (
+        " AND date(v.fecha_venta) <= date(?) "
+        " AND date(v.fecha_venta) >= date(?, '-' || ? || ' days') ",
+        [fecha_factura, fecha_factura, VENTANA_FACTURACION_DIAS],
+    )
 
 
 def _tokens_codigo(s: str) -> set:
@@ -52,23 +100,26 @@ def _tokens_codigo(s: str) -> set:
     return toks
 
 
-def _match_por_id_interno(conn, proveedor_id: int, codigo: str) -> Optional[dict]:
+def _match_por_id_interno(conn, proveedor_id: int, codigo: str,
+                          fecha_factura: Optional[str] = None) -> Optional[dict]:
     """Cruza el código de la factura contra los SKU de las ventas del proveedor
     comparando tokens de ID interno (no string completo)."""
     cod_tokens = _tokens_codigo(codigo)
     if not cod_tokens:
         return None
+    f_sql, f_par = _filtro_fecha(fecha_factura)
     candidates = conn.execute(
-        """SELECT v.num_venta, v.sku
+        f"""SELECT v.num_venta, v.sku
            FROM ventas_ml v
            JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              AND v.sku IS NOT NULL
+             {f_sql}
            ORDER BY v.fecha_venta DESC
            LIMIT 1000""",
-        (proveedor_id,),
+        (proveedor_id, *f_par),
     ).fetchall()
     for c in candidates:
         sku_tokens = _tokens_codigo(c["sku"])
@@ -158,7 +209,8 @@ def _afinidad_titulo(descripcion: str, titulo: str) -> int:
 
 
 def _match_por_kit(conn, proveedor_id: int, codigo: str,
-                   descripcion: str = "") -> Optional[dict]:
+                   descripcion: str = "",
+                   fecha_factura: Optional[str] = None) -> Optional[dict]:
     """Cruza el código del concepto contra los COMPONENTES de un kit.
 
     Una venta-kit tiene un SKU sintético ('KIT0337') que el proveedor nunca factura:
@@ -186,8 +238,9 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     #     ⚠️ El componente debe medir >= 4 caracteres para entrar por substring. Sin esa
     #     guarda, un componente corto como '409' cruza contra CUALQUIER concepto que lo
     #     contenga ('409  M2650963'), y en prod ese código vive en 21 kits distintos.
+    f_sql, f_par = _filtro_fecha(fecha_factura)
     row = conn.execute(
-        """SELECT v.num_venta
+        f"""SELECT v.num_venta
            FROM ventas_ml v
            JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
@@ -198,9 +251,10 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
                    OR ( LENGTH(TRIM(kc.componente_codigo)) >= 4
                         AND ( ? LIKE '%' || kc.componente_codigo || '%'
                               OR kc.componente_codigo LIKE '%' || ? || '%' ) ) )
+             {f_sql}
            ORDER BY v.fecha_venta DESC
            LIMIT 1""",
-        (proveedor_id, codigo, codigo, codigo),
+        (proveedor_id, codigo, codigo, codigo, *f_par),
     ).fetchone()
     if row:
         return {"num_venta": row["num_venta"], "method": "kit_componente", "confidence": 0.95}
@@ -211,16 +265,17 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
         return None
 
     candidatos = conn.execute(
-        """SELECT v.num_venta, v.titulo, v.sku, kc.componente_codigo
+        f"""SELECT v.num_venta, v.titulo, v.sku, kc.componente_codigo
            FROM ventas_ml v
            JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
+             {f_sql}
            ORDER BY v.fecha_venta DESC
            LIMIT 2000""",
-        (proveedor_id,),
+        (proveedor_id, *f_par),
     ).fetchall()
 
     # Ya vienen ordenados por fecha desc: el primero de cada venta gana el desempate
@@ -294,35 +349,45 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     return None
 
 
-def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optional[dict]:
+def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
+                             fecha_factura: Optional[str] = None) -> Optional[dict]:
+    """Cruza un concepto de factura a la venta que le corresponde.
+
+    `fecha_factura` (opcional, ISO) acota las candidatas a las ventas que ya existían
+    cuando se emitió la factura — ver `_filtro_fecha`. Es lo que impide que la factura se
+    vaya a una venta arbitraria cuando el mismo SKU se vendió varias veces. Se pasa desde
+    `routers/facturas.py` y desde el recruce; omitirla conserva el comportamiento anterior.
+    """
     codigo = (concepto.get("codigo") or "").strip()
     descripcion = (concepto.get("descripcion") or "").strip()
+    f_sql, f_par = _filtro_fecha(fecha_factura)
 
     # 1) Match exacto por código contra SKU
     if codigo:
         row = conn.execute(
-            """SELECT v.num_venta
+            f"""SELECT v.num_venta
                FROM ventas_ml v
                JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
                LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
                WHERE e.proveedor_id = ?
                  AND fc.id IS NULL
                  AND (v.sku = ? OR v.sku LIKE ?)
+                 {f_sql}
                ORDER BY v.fecha_venta DESC
                LIMIT 1""",
-            (proveedor_id, codigo, f"%{codigo}%"),
+            (proveedor_id, codigo, f"%{codigo}%", *f_par),
         ).fetchone()
         if row:
             return {"num_venta": row["num_venta"], "method": "codigo_exact", "confidence": 1.0}
 
         # 2) Match por ID interno normalizado (esquemas de SKU distintos por proveedor)
-        por_id = _match_por_id_interno(conn, proveedor_id, codigo)
+        por_id = _match_por_id_interno(conn, proveedor_id, codigo, fecha_factura)
         if por_id:
             return por_id
 
         # 3) Match por componente de kit (la venta-kit factura sus componentes, no el SKU-kit).
         #    La descripción va como desempate cuando el componente vive en varios kits.
-        por_kit = _match_por_kit(conn, proveedor_id, codigo, descripcion)
+        por_kit = _match_por_kit(conn, proveedor_id, codigo, descripcion, fecha_factura)
         if por_kit:
             return por_kit
 
@@ -331,16 +396,17 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict) -> Optiona
 
     # 4) Fuzzy match contra títulos de ventas del proveedor aún sin facturar
     candidates = conn.execute(
-        """SELECT v.num_venta, v.titulo
+        f"""SELECT v.num_venta, v.titulo
            FROM ventas_ml v
            JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              AND v.titulo IS NOT NULL
+             {f_sql}
            ORDER BY v.fecha_venta DESC
            LIMIT 500""",
-        (proveedor_id,),
+        (proveedor_id, *f_par),
     ).fetchall()
 
     if not candidates:
@@ -378,7 +444,7 @@ def recruzar_conceptos_sin_match(conn) -> dict:
     un match existente.
     """
     pendientes = conn.execute(
-        """SELECT fc.id, fc.codigo_prov, fc.descripcion, f.proveedor_id
+        """SELECT fc.id, fc.codigo_prov, fc.descripcion, f.proveedor_id, f.fecha_factura
            FROM factura_conceptos fc
            JOIN facturas f ON f.id = fc.factura_id
            WHERE fc.num_venta_match IS NULL"""
@@ -388,9 +454,14 @@ def recruzar_conceptos_sin_match(conn) -> dict:
     for c in pendientes:
         if c["proveedor_id"] is None:
             continue
+        # La fecha de la factura acota las candidatas igual que en el alta. Sin ella, el
+        # recruce reintroduciría por la puerta de atrás los cruces que el filtro evita:
+        # corre tras cada carga de ventas/colecta, justo cuando entran ventas NUEVAS que
+        # son posteriores a facturas viejas y por tanto no pueden ser suyas.
         match = match_conceptos_a_ventas(
             conn, c["proveedor_id"],
             {"codigo": c["codigo_prov"], "descripcion": c["descripcion"]},
+            fecha_factura=c["fecha_factura"],
         )
         if match:
             conn.execute(
