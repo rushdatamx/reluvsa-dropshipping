@@ -319,10 +319,23 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-05 — API VIVA + sync 30 min + pack_id + FULL/COLECTA + métricas blindadas contra FULL (`935c998`) + ⭐ KITS CRUZAN POR ID INTERNO (`1be1f99`). NO quedan tareas grandes abiertas del Módulo 1)
+## 8. Estado actual (último update: 2026-08-07 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + ⭐ FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 EJECUTADA (`bf6b392`). 🔴 TAREA #1 ABIERTA: BUG A, ventas de carrito sin envío)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
+> 📍 **ARRANCAR AQUÍ: `docs/estado-cruce-factura-venta.md`** — es el índice del bloque
+> factura↔venta. Dice en un tablero qué está cerrado (kits, fix de fecha, limpieza de los
+> 243), qué sigue abierto (**BUG A = tarea #1**) y qué está bloqueado esperando a los
+> proveedores (el # de venta). Leerlo antes que los otros 3 documentos.
+>
+> 🔴 **TAREA #1 ABIERTA: BUG A — 1,042 ventas de carrito sin envío.** Es lo de mayor impacto
+> que queda y **NO depende de terceros**. ML cuelga UN solo envío por carrito de UNA sola de
+> las N órdenes; las demás quedan sin envío → sin proveedor → **invisibles para el matcher**.
+> ⚠️ **El # de venta NO lo arregla**: sin envío no hay proveedor, y el matcher sólo busca
+> `WHERE e.proveedor_id = ?`. Decisión de Gaby ya tomada: propagar el envío a las N ventas
+> del pack, pero **contar el SLA una sola vez por envío**. Toca `metricas.py`, blindado
+> (`935c998`) — releer sus 3 trampas antes.
+>
 > ✅ **LIMPIEZA DE LOS 243 CRUCES FALSOS — EJECUTADA EN PROD (2026-08-07 17:28 UTC).**
 > Simulada, medida, auditada por api-guardian (APROBADO) y ejecutada con backup
 > (`/data/dropshipping.db.bak-20260807_172825`). **192 reasignados · 51 pendientes ·
@@ -409,7 +422,8 @@ de confiar** (mismo criterio que con los kits).
 > envíos**; la sync automática corre sola cada 30 min. La historia que ML iba a borrar
 > está a salvo.
 
-**🚦 ARRANQUE — el Hallazgo 1 se cerró; NO quedan tareas grandes abiertas del Módulo 1.**
+**🚦 ARRANQUE — el Hallazgo 1 se cerró, pero el Módulo 1 SÍ tiene una tarea grande abierta:
+el BUG A (ventas de carrito sin envío). Ver `docs/estado-cruce-factura-venta.md`.**
 
 > ✅ **HALLAZGO 1 RESUELTO (2026-08-03): el "94% sin bodega" NUNCA fue un bug.** Son
 > ventas **FULL**: ML las despacha desde su propia bodega y manda `origin: null`, así
@@ -435,8 +449,10 @@ de confiar** (mismo criterio que con los kits).
   `11370 M2650963`), NO el sufijo `-K`. 41 conceptos recuperados, 0 falsos positivos. Ver
   la sección "⭐ Los kits cruzan por ID interno" en §3.
 
-**⭐ NO quedan tareas grandes abiertas del Módulo 1.** Lo que sigue es el **Módulo 2**
-(publicaciones masivas), que nunca se ha iniciado, más los pendientes menores de abajo.
+**🔴 SÍ queda una tarea grande abierta del Módulo 1: el BUG A** (1,042 ventas de carrito sin
+envío, invisibles para el matcher). Ver `docs/estado-cruce-factura-venta.md` §4. Después de
+eso viene el **Módulo 2** (publicaciones masivas), que nunca se ha iniciado, más los
+pendientes menores de abajo.
 
 **✅ MÉTRICAS BLINDADAS CONTRA LAS VENTAS FULL (2026-08-05, commit `935c998`)**
 

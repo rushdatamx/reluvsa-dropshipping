@@ -1,8 +1,16 @@
-# ⭐ HALLAZGO ABIERTO — El matcher asigna la factura a la venta EQUIVOCADA
+# ⭐ HALLAZGO — El matcher asigna la factura a la venta EQUIVOCADA
 
-> **Estado:** BUG B **ARREGLADO** (2026-08-07, filtro por fecha de factura). BUG A sigue
-> abierto. **Fecha:** 2026-08-05 / 08-07. **Reportado por:** Gaby (vía Mario).
+> 📍 **El índice del bloque es `docs/estado-cruce-factura-venta.md`.** Este documento es el
+> DIAGNÓSTICO de fondo; empieza por el índice si sólo quieres saber qué falta.
+>
+> **Estado:** BUG B **ARREGLADO** (`f699577`) + los 243 cruces falsos **LIMPIADOS en prod**
+> (`bf6b392`, 2026-08-07). 🔴 **BUG A sigue abierto y es la tarea #1.**
+> **Fecha:** 2026-08-05 / 08-07. **Reportado por:** Gaby (vía Mario).
 > **Leer esto ANTES de tocar `backend/services/matcher.py`.**
+>
+> ✅ **2026-08-07: Gaby ya le pidió a KIM y CAUPLAS que pongan el # de venta en la factura.**
+> Se está a la espera de que lleguen facturas con el dato. Las 3 reglas de diseño de ese
+> cruce están en el índice §5 y en el CLAUDE.md §8.
 
 ---
 
