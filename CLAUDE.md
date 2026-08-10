@@ -69,6 +69,74 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 - ⚠️ **Bug conocido NO arreglado — `ventas_ml.estado`:** mismo patrón que Unidades. La columna "Estado" de la venta (col 3 del reporte) tiene **categoría vacía**, pero el parser la busca como `col("Ventas|Estado")` (con categoría) sin fallback por nombre → `idx_estado` siempre es `None` y `estado` nunca se pobla. No se usa en la UI hoy, por eso se dejó pendiente (decisión 2026-06-19). Fix trivial si se necesita: agregar `"Estado"` como fallback en `col(...)` (con el guard de "primera ocurrencia" tomaría la col 3 correcta). Ver [[project_bug_unidades_columnas_duplicadas]].
 - **Columna # de albarán (2026-06-17):** Gaby aporta el **# de albarán** de cada venta en **su propio Excel** (2 columnas: `# de venta` + `# de albarán`) — NO viene en el reporte de Ventas ML ni de colecta. Se sube por un **uploader propio** (`POST /api/uploads/albaran`, 3a tarjeta en Uploads.jsx) que cruza **por num_venta directo** (1:1, NO fecha+título) y hace **solo UPDATE** sobre `ventas_ml.albaran` (parser `services/parser_albaran.py`): si la venta no existe la cuenta como `no_encontrados` (no crea huérfana); fila con albarán vacío no borra el existente. Se muestra como **columna "Albarán"** en la tabla Ventas (junto a Venta) y en el **CSV**. El candado de tipo de archivo reconoce el tipo `"albaran"`. Cero infra nueva (solo columna en tabla existente). Ver [[project_albaran]].
 
+### ⭐ "Total (MXN)" = el neto que ML deposita (2026-08-10)
+
+**Pedido de Gaby:** *"me podría apoyar modificando en el portal para que aparezca el monto
+que se llama «Total (MXN)», ya que actualmente aparece «ingresos por productos (MXN)»"*.
+Su definición: *"es la resta de lo que paga el cliente menos lo que nos quita la plataforma
+de envío y costo de publicación"*.
+
+**El dato NO se calcula: se toma ya restado de ML.** Es `net_received_amount` de
+**`GET /collections/{payment_id}`** (el `payment_id` sale de `order.payments[].id`).
+
+🔴 **NO reconstruir la resta a mano.** Es la trampa de este cambio y por poco se cae en ella:
+**los IMPUESTOS no existen en la Orders API** — `order.taxes` viene `{"amount": null}` y
+`payments[].taxes_amount` en `0.0`. El desglose que mandó Gaby del portal de ML lo dejó ver:
+
+```
+Precio del producto   $ 1,791.97     <- total_amount (lo que ya guardábamos en `total`)
+Cargos por venta      -$   232.96    <- marketplace_fee
+Envíos                -$   161.50    <- senders[].cost de /shipments/{id}/costs
+Impuestos             -$   162.20    <- 🔴 NO ESTÁ EN LA API DE ÓRDENES
+Total                 $ 1,235.31     <- net_received_amount ✅
+```
+
+Calcularlo con los campos de la orden habría dado **$1,397.51: inflado en $162.20 en
+TODAS las filas**, y en silencio. Además, si ML agrega un cargo nuevo, el neto lo absorbe solo.
+
+⚠️ **`payments[].shipping_cost` es 0.00 y NO es el costo de envío del vendedor** (medido en
+12 órdenes: 0.00 en las 12). El que RELUVSA absorbe vive en `/shipments/{id}/costs` →
+`senders[].cost`. Sólo importa si algún día se quiere desglosar; para el Total no hace falta.
+
+**Verificado al centavo** contra las 2 ventas que aportó Gaby, con el código real sobre la
+API de prod: `2000017836986786` → 1,235.31 ✅ y `2000017836987992` → 262.48 ✅. La 2a es
+**FULL** y la 1a **cross_docking** → el campo sirve en ambas logísticas. Cobertura medida en
+16 ventas de ago/jul/may/ene, ambas logísticas y estados `paid`/`cancelled`: **16/16 poblado**
+(el `money_release_date` a 1 mes NO retrasa el dato).
+
+**Implementado:** columna `ventas_ml.total_neto` (+ migración idempotente), poblada en el
+upsert del sync; se muestra como columna **"Total (MXN)"** en la tabla Ventas y en el CSV.
+
+⚠️ **6 trampas fijadas en `backend/scripts/test_sync_ml_e2e.py` (27/27) — no romperlas:**
+1. **`total` se CONSERVA intacto** (= `total_amount`, el precio del producto). Son dos
+   columnas, no una sustitución: en el CSV salen como **"Ingresos por productos (MXN)"** y
+   **"Total (MXN)"**. Decisión de Mario: conservar el anterior como referencia.
+2. **El upsert usa `COALESCE(?, total_neto)`**: una orden cuyo pago no traiga el dato no
+   debe BORRAR un neto bueno (mismo criterio que `pack_id` y `logistic_type`).
+3. **Si ningún pago trae el dato se guarda NULL, nunca 0.0.** Un 0.0 se leería como "esta
+   venta no dejó nada", que es una afirmación falsa y peor que un vacío.
+4. **Una venta puede tener varios pagos** (mensualidades/pagos parciales) → se **suman**.
+5. **`get_opcional`, no `get`**: un pago sin collection no debe tumbar la sincronización de
+   la venta; el resto de sus datos sigue siendo válido.
+6. 🔴 **El neto va en su PROPIO `try/except`** (`sync_ml.py`, bucle de página). Estaba
+   dentro del mismo `try` que `_traer_envio` → un 403/500 de `/collections` (que
+   `get_opcional` NO absorbe, sólo absorbe el 404) **descartaba la orden entera: ni venta
+   ni envío**. Un dato de reporte tumbando el dato de negocio. Lo detectó el api-guardian.
+
+⚠️ **El test e2e pasaba 21/21 SIN ejercitar nada de esto** (segundo hallazgo del guardián):
+sus fixtures no traían `payments` y no había mock de `/collections`, así que
+`_traer_total_neto` recorría una lista vacía. **Verde por omisión, no por cobertura.** Ahora
+hay 6 casos reales (incluido multi-pago y el fallo 500), y se comprobó que el test **falla
+de verdad** al quitar el COALESCE — un assert que no falla cuando rompes el código no prueba
+nada.
+
+**Sin backfill (decisión de Mario):** sólo de aquí en adelante. Las ~58k ventas ya cargadas
+quedan con `total_neto` NULL (la UI muestra "—") y se van poblando conforme el sync las
+vuelve a tocar. ⚠️ **Si algún día se quiere el histórico, ojo:** son ~58k llamadas nuevas a
+`/collections`, y hay que **apagar la sync automática antes** (Trampa 5 del heartbeat, §8).
+En el incremental el costo es despreciable: **~3.6 ventas por corrida** (medido sobre 5,129
+ventas en 30 días) = ~4 requests extra cada 30 min.
+
 ### Kits → componentes (2026-06-19)
 - ⚠️ Algunas ventas de ML son **kits**: el SKU (ej. `KIT0337`) es un **código sintético de RELUVSA** que **NO existe en ninguna factura**. El proveedor factura los **componentes reales** del kit (ej. `KDTL-057`, `KDTL-058`). Por eso una venta-kit salía siempre **"Pendiente"** aunque su factura estuviera cargada: el matcher buscaba `KIT0337` en los conceptos y nunca cruzaba.
 - **Solución:** Gaby sube **su propio Excel** de relación kit→componentes (3 columnas: `Paquete -> Tag` = KIT, `Componente -> Tag`, `Cantidad`) por un **uploader propio** (`POST /api/uploads/kits`, 4a tarjeta en Uploads.jsx). Parser `services/parser_kits.py` → tabla puente `kit_componentes (kit_sku, componente_codigo, cantidad)`. **Carga incremental** (upsert por PK; re-subir actualiza+agrega, no borra). `kit_sku` normalizado UPPER+TRIM (el Excel trae formatos inconsistentes y espacios finales). El Excel real: 656 kits, **1847 relaciones únicas** (1853 filas con 6 pares duplicados internos que el upsert colapsa).

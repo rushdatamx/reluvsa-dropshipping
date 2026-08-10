@@ -88,6 +88,15 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
     -- Sólo lo traen las ventas de carrito (~la mitad); en el resto ML muestra el
     -- propio order.id, por eso la UI cae a num_venta cuando esto es NULL.
     pack_id TEXT,
+    -- total_neto: el "Total (MXN)" que Gaby ve en el portal de ML = lo que RELUVSA
+    -- recibe realmente, ya descontados cargos por venta, envíos e impuestos.
+    -- NO se calcula aquí: es `net_received_amount` de GET /collections/{payment_id},
+    -- o sea la resta que ML ya hizo. Reconstruirla a mano daría un número inflado
+    -- porque los IMPUESTOS no existen en la Orders API (order.taxes viene null y
+    -- payments[].taxes_amount en 0.0) — verificado contra las 2 ventas que aportó
+    -- Gaby el 2026-08-10. `total` (= total_amount, el precio del producto) se
+    -- conserva intacto al lado, como referencia.
+    total_neto REAL,
     fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     factura_adjunta_ml TEXT,
     devolucion_unidades INTEGER DEFAULT 0,
@@ -380,6 +389,7 @@ def init_database():
         _migrar_columna_deposito(cursor)
         _migrar_columna_albaran(cursor)
         _migrar_columna_pack_id(cursor)
+        _migrar_columna_total_neto(cursor)
         _migrar_columna_logistic_type(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
@@ -514,6 +524,29 @@ def _migrar_columna_albaran(cursor):
     if "albaran" not in cols:
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN albaran TEXT")
         print("[migracion] ventas_ml.albaran agregada.")
+
+
+def _migrar_columna_total_neto(cursor):
+    """Migración idempotente: agrega ventas_ml.total_neto si la BD existente aún no
+    la tiene.
+
+    Pedido de Gaby (2026-08-10): en el portal veía el monto de "ingresos por
+    productos" y necesita el "Total (MXN)", que es lo que ML le deposita ya
+    descontados cargos por venta, envíos e impuestos.
+
+    El valor NO se calcula aquí: se toma `net_received_amount` de
+    GET /collections/{payment_id} — la resta que ML ya hizo. Validado al centavo
+    contra las 2 ventas que aportó Gaby (1,235.31 y 262.48), en cross_docking y
+    en fulfillment.
+
+    Sin backfill (decisión de Mario): las ventas ya cargadas quedan con total_neto
+    NULL y se van poblando conforme el sync las vuelve a tocar. `total` no se
+    toca — se conserva como referencia.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "total_neto" not in cols:
+        cursor.execute("ALTER TABLE ventas_ml ADD COLUMN total_neto REAL")
+        print("[migracion] ventas_ml.total_neto agregada.")
 
 
 def _migrar_columna_pack_id(cursor):

@@ -206,7 +206,7 @@ def _construir_filtros(
 
 _SELECT_VENTAS = """
     SELECT v.num_venta, v.pack_id, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
-           v.total, v.albaran, v.comprador_estado, v.forma_entrega,
+           v.total, v.total_neto, v.albaran, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.logistic_type,
            e.proveedor_id, p.nombre as proveedor_nombre,
@@ -328,7 +328,11 @@ def export_csv(
         # existe, si no el order.id). "Num venta interno" se conserva porque es la
         # llave con la que cruzan factura, albarán y envío.
         "Num venta", "Num venta interno",
-        "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades", "Total",
+        # "Ingresos por productos" es el precio del producto (total_amount de ML) — es
+        # el nombre que ML le da en su reporte. "Total (MXN)" es el neto que RELUVSA
+        # recibe ya descontados cargos, envíos e impuestos (pedido de Gaby 2026-08-10).
+        "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades",
+        "Ingresos por productos (MXN)", "Total (MXN)",
         "Num envio", "Logistica", "Lugar indicado", "Bodega override", "Proveedor", "SLA",
         "Facturada", "Num factura",
         "Componentes kit",
@@ -340,6 +344,7 @@ def export_csv(
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",
+            r["total_neto"] if r["total_neto"] is not None else "",
             r["num_envio"] or "", _logistica_txt(r["logistic_type"]),
             r["lugar_indicado"] or "", r["lugar_override"] or "",
             r["proveedor_nombre"] or "", _sla_txt(r["cumplio_sla"]),

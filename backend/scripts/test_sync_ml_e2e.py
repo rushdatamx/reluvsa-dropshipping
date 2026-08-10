@@ -53,7 +53,8 @@ STORES = [
 ]
 
 
-def _order(oid, sku, title, store_id, ship_id, status="paid", tags=None, qty=1, total=100.0):
+def _order(oid, sku, title, store_id, ship_id, status="paid", tags=None, qty=1, total=100.0,
+           pagos=None):
     return {
         "id": oid,
         "status": status,
@@ -66,12 +67,25 @@ def _order(oid, sku, title, store_id, ship_id, status="paid", tags=None, qty=1, 
             "stock": {"store_id": store_id},
         }],
         "shipping": {"id": ship_id} if ship_id else {},
+        "payments": [{"id": p} for p in (pagos or [])],
     }
 
 
-ORDEN_A = _order("3000001", "9025125-Z", "Anillo Reluctor Cigueñal Aveo", "101", "SHIP-A", qty=2, total=350.5)
-ORDEN_B = _order("3000002", "MTZ-001", "Filtro de aire genérico", "100", "SHIP-B", tags=["delivered"])
-ORDEN_C = _order("3000003", "KR-1095WP", "Bomba de agua KeepOnGreen", "105", None)
+ORDEN_A = _order("3000001", "9025125-Z", "Anillo Reluctor Cigueñal Aveo", "101", "SHIP-A", qty=2, total=350.5,
+                 pagos=["PAY-1"])
+ORDEN_B = _order("3000002", "MTZ-001", "Filtro de aire genérico", "100", "SHIP-B", tags=["delivered"],
+                 pagos=["PAY-2A", "PAY-2B"])   # venta en mensualidades: los netos se SUMAN
+ORDEN_C = _order("3000003", "KR-1095WP", "Bomba de agua KeepOnGreen", "105", None,
+                 pagos=["PAY-3"])              # su collection no trae neto → NULL, no 0.0
+
+# El "Total (MXN)" que ve Gaby: net_received_amount de /collections/{payment_id}.
+# NO se calcula restando cargos: los impuestos no vienen en la Orders API.
+COLLECTIONS = {
+    "PAY-1": {"net_received_amount": 253.62},
+    "PAY-2A": {"net_received_amount": 40.0},
+    "PAY-2B": {"net_received_amount": 30.25},
+    "PAY-3": {"net_received_amount": None},
+}
 
 SHIPMENTS = {
     # SHIP-A: cross_docking (COLECTA) = dropshipping real, con bodega de proveedor.
@@ -117,6 +131,12 @@ def _handler(request: httpx.Request) -> httpx.Response:
         oid = path.split("/")[2]
         ship = SHIPMENTS.get(oid)
         return httpx.Response(200, json=ship) if ship else httpx.Response(404, json={})
+    if path.startswith("/collections/"):
+        pid = path.split("/")[2]
+        col = COLLECTIONS.get(pid)
+        if col == "BOOM":   # fallo duro de ML (get_opcional NO lo absorbe: lanza MLError)
+            return httpx.Response(500, json={"message": "boom"})
+        return httpx.Response(200, json=col) if col is not None else httpx.Response(404, json={})
     if path == "/shipments/SHIP-A/sla":
         return httpx.Response(200, json={"status": "on_time", "expected_date": ORDER_DT_STR})
     if path == "/shipments/SHIP-B/sla":
@@ -199,6 +219,16 @@ def main():
     ok(va["fecha_venta"] is not None, "fecha de venta ISO parseada")
     ok(vc is not None and eb is not None, "venta sin envío y envío MATRIZ existen")
 
+    # --- "Total (MXN)": el neto que ML deposita (pedido de Gaby 2026-08-10) ---
+    ok(va["total_neto"] == 253.62,
+       "total_neto = net_received_amount de /collections (NO se calcula restando cargos)")
+    ok(va["total"] == 350.5 and va["total_neto"] == 253.62,
+       "`total` (ingresos por productos) se CONSERVA junto al neto, no se sustituye")
+    ok(vb["total_neto"] == 70.25,
+       "venta con 2 pagos (mensualidades): los netos se SUMAN (40.0 + 30.25)")
+    ok(vc["total_neto"] is None,
+       "collection sin neto → NULL, NUNCA 0.0 (un 0.0 se leería como 'no dejó nada')")
+
     ok(ea["num_venta_ml"] == "3000001" and ea["match_cruce_confianza"] == 1.0,
        "cruce venta↔envío DIRECTO por ID con confianza 1.0")
     ok(ea["proveedor_id"] == kim and ea["lugar_indicado"] == "KIM",
@@ -252,6 +282,45 @@ def main():
     ok(ea2["proveedor_id"] == cauplas and ea2["lugar_override"] == "CAUPLAS",
        "lugar_override de Gaby RESPETADO al re-sincronizar (manda sobre la API)")
     ok(antes == despues, f"re-corrida idempotente: mismos conteos {despues}")
+
+    # --- El COALESCE: un neto bueno ya guardado NO se pisa con NULL ---
+    # Si ML deja de devolver el dato en una corrida posterior (403/500, o un pago
+    # archivado), el monto que Gaby ya veía debe SEGUIR ahí. Sin COALESCE, una sola
+    # corrida degradada vaciaría la columna en toda la tabla.
+    with database.get_db() as conn:
+        neto_previo = conn.execute(
+            "SELECT total_neto FROM ventas_ml WHERE num_venta='3000001'").fetchone()["total_neto"]
+    guardado = COLLECTIONS["PAY-1"]
+    COLLECTIONS["PAY-1"] = {"net_received_amount": None}   # ML deja de mandarlo
+    try:
+        _correr_sync("incremental")
+        with database.get_db() as conn:
+            v = conn.execute("SELECT total_neto FROM ventas_ml WHERE num_venta='3000001'").fetchone()
+        ok(neto_previo == 253.62 and v["total_neto"] == 253.62,
+           "COALESCE: un neto ya guardado NO se pisa con NULL en una corrida posterior")
+    finally:
+        COLLECTIONS["PAY-1"] = guardado
+
+    # --- Un fallo del neto NO puede costar la venta ni el envío ---
+    # El neto es un dato de reporte; venta y envío son el dato de negocio. Si
+    # /collections responde 403/500, la orden debe guardarse igual con neto NULL.
+    with database.get_db() as conn:
+        conn.execute("UPDATE ventas_ml SET total_neto=NULL WHERE num_venta='3000001'")
+        conn.execute("DELETE FROM envios_colecta WHERE num_envio='SHIP-A'")
+    original = COLLECTIONS.pop("PAY-1")
+    try:
+        # Sin fixture, el handler responde 404 → get_opcional devuelve None.
+        # Se fuerza el caso duro (500) para ejercitar el try/except del sync.
+        COLLECTIONS["PAY-1"] = "BOOM"
+        _correr_sync("incremental")
+        with database.get_db() as conn:
+            v = conn.execute("SELECT * FROM ventas_ml WHERE num_venta='3000001'").fetchone()
+            e = conn.execute("SELECT * FROM envios_colecta WHERE num_envio='SHIP-A'").fetchone()
+        ok(v is not None and v["total"] == 350.5 and v["total_neto"] is None,
+           "si /collections falla: la VENTA se guarda igual, con total_neto NULL")
+        ok(e is not None, "si /collections falla: el ENVÍO tampoco se pierde")
+    finally:
+        COLLECTIONS["PAY-1"] = original
 
     print("\n🎉 E2E DEL SYNC ML COMPLETO — TODO PASÓ")
 

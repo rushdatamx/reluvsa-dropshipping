@@ -42,6 +42,15 @@ function fechaCorta(iso) {
   return `${parseInt(dia, 10)} ${MESES_CORTOS[parseInt(mes, 10) - 1]} ${anio}`;
 }
 
+// El "Total (MXN)" que Gaby ve en el portal de ML: lo que RELUVSA recibe ya
+// descontados cargos por venta, envíos e impuestos. Las ventas cargadas antes de
+// que existiera la columna quedan en '—' hasta que el sync las vuelva a tocar
+// (se decidió no hacer backfill), por eso se distingue el null del 0.
+function montoMXN(valor) {
+  if (valor == null) return '—';
+  return valor.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+}
+
 export default function Ventas() {
   const { isAdmin } = useAuth();
   const [data, setData] = useState({ items: [], total: 0, page: 1 });
@@ -247,6 +256,7 @@ export default function Ventas() {
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Unidades</th>
+                <th className="text-right px-4 py-3 font-semibold text-notion-text-secondary">Total (MXN)</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Logística</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Proveedor / Bodega</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SLA</th>
@@ -256,9 +266,9 @@ export default function Ventas() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="11" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
+                <tr><td colSpan="12" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
               ) : data.items.length === 0 ? (
-                <tr><td colSpan="11" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
+                <tr><td colSpan="12" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
@@ -300,6 +310,9 @@ export default function Ventas() {
                   </td>
                   <td className="px-4 py-3 max-w-md truncate">{v.titulo || '—'}</td>
                   <td className="px-4 py-3 text-xs">{v.unidades != null ? v.unidades : '—'}</td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap tabular-nums">
+                    {montoMXN(v.total_neto)}
+                  </td>
                   <td className="px-4 py-3">
                     {v.logistic_type ? (
                       <span

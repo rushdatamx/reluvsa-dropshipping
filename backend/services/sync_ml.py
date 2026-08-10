@@ -336,20 +336,28 @@ def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict) -> 
         results = page.get("results") or []
 
         # 1) Traer de la API todo lo de esta página (sin BD abierta).
-        paquete = []  # (order, ship, sla)
+        paquete = []  # (order, ship, sla, total_neto)
         for order in results:
             stats["ordenes_vistas"] += 1
             try:
-                paquete.append((order,) + _traer_envio(order))
+                # El neto va en su PROPIO try: es un dato de reporte, y un fallo suyo
+                # (403/500 de /collections; get_opcional ya absorbe el 404) NO debe
+                # costar la venta ni el envío de esta orden, que son el dato de negocio.
+                try:
+                    total_neto = _traer_total_neto(order)
+                except Exception as e:
+                    total_neto = None
+                    _anotar_error(stats, f"neto orden {order.get('id')}: {type(e).__name__}: {e}")
+                paquete.append((order,) + _traer_envio(order) + (total_neto,))
             except Exception as e:
                 _anotar_error(stats, f"orden {order.get('id')}: {type(e).__name__}: {e}")
 
         # 2) Upsert de la página completa en una transacción corta.
         with get_db() as conn:
             stores = _cargar_stores(conn)
-            for order, ship, sla in paquete:
+            for order, ship, sla, total_neto in paquete:
                 try:
-                    _procesar_orden(conn, order, ship, sla, stores, stats)
+                    _procesar_orden(conn, order, ship, sla, stores, stats, total_neto)
                 except Exception as e:
                     _anotar_error(stats, f"upsert orden {order.get('id')}: {type(e).__name__}: {e}")
             _tocar_run(conn, run_id, stats)
@@ -371,6 +379,34 @@ def _traer_envio(order: dict) -> Tuple[Optional[dict], Optional[dict]]:
     ship = ml_client.get(f"/orders/{order['id']}/shipments")
     sla = ml_client.get_opcional(f"/shipments/{ship_id}/sla")
     return ship, sla
+
+
+def _traer_total_neto(order: dict) -> Optional[float]:
+    """El "Total (MXN)" que Gaby ve en el portal de ML: lo que RELUVSA recibe ya
+    descontados cargos por venta, envíos e impuestos.
+
+    Es `net_received_amount` de GET /collections/{payment_id} — la resta que ML ya
+    hizo. NO se reconstruye a mano: los IMPUESTOS no están en la Orders API
+    (order.taxes viene null y payments[].taxes_amount en 0.0), así que calcularlo
+    con los campos de la orden daría un neto INFLADO en todas las filas (en la
+    venta que aportó Gaby, $162.20 de más). Además, si ML agrega un cargo nuevo,
+    el neto lo absorbe solo.
+
+    Una venta puede tener varios pagos (mensualidades, pagos parciales) → se suman.
+    Devuelve None si ningún pago trae el dato, para no escribir un 0.0 falso que
+    se leería como "esta venta no dejó nada".
+    """
+    nets = []
+    for pago in order.get("payments") or []:
+        pago_id = pago.get("id")
+        if not pago_id:
+            continue
+        # get_opcional: un pago sin collection (o ya archivado) no debe tumbar la
+        # sincronización de la venta — el resto de sus datos sigue siendo válido.
+        col = ml_client.get_opcional(f"/collections/{pago_id}")
+        if col and col.get("net_received_amount") is not None:
+            nets.append(col["net_received_amount"])
+    return round(sum(nets), 2) if nets else None
 
 
 def _anotar_error(stats: dict, msg: str) -> None:
@@ -417,13 +453,13 @@ def _mapear_estado(order: dict) -> Optional[str]:
 
 
 def _procesar_orden(conn, order: dict, ship: Optional[dict], sla: Optional[dict],
-                    stores: dict, stats: dict) -> None:
+                    stores: dict, stats: dict, total_neto: Optional[float] = None) -> None:
     receiver_name = None
     if ship:
         receiver_name = ((ship.get("receiver_address") or {}).get("receiver_name")
                          or (ship.get("destination") or {}).get("receiver_name"))
 
-    _upsert_venta_api(conn, order, stores, receiver_name)
+    _upsert_venta_api(conn, order, stores, receiver_name, total_neto)
     stats["ventas_upsert"] += 1
 
     if ship and ship.get("id"):
@@ -440,7 +476,8 @@ def _deposito_de_orden(order: dict, stores: dict) -> Optional[str]:
     return None
 
 
-def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[str]) -> None:
+def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[str],
+                      total_neto: Optional[float] = None) -> None:
     """Upsert en ventas_ml con la misma semántica que parser_ventas_ml: UPDATE si
     existe / INSERT si no. NO toca `albaran` (viene del Excel de Gaby) y NO pisa
     `comprador` con NULL (COALESCE: la API enmascara datos tarde o temprano)."""
@@ -465,18 +502,19 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
         conn.execute(
             """UPDATE ventas_ml SET sku=?, deposito=COALESCE(?, deposito), fecha_venta=?, estado=?,
                                     titulo=?, unidades=?, total=?, comprador=COALESCE(?, comprador),
-                                    pack_id=COALESCE(?, pack_id)
+                                    pack_id=COALESCE(?, pack_id),
+                                    total_neto=COALESCE(?, total_neto)
                WHERE num_venta=?""",
             (sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
-             pack_id, num_venta),
+             pack_id, total_neto, num_venta),
         )
     else:
         conn.execute(
             """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, estado, titulo,
-                                      unidades, total, comprador, pack_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                      unidades, total, comprador, pack_id, total_neto)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (num_venta, sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
-             pack_id),
+             pack_id, total_neto),
         )
 
 
