@@ -310,7 +310,8 @@ dropshipping-reluvsa/
 │   │   ├── crear_usuario.py     # CLI para crear admin o proveedor
 │   │   ├── wipe_transaccional.py
 │   │   └── test_*.py            # 13 suites: kits, kit_id_interno, metricas_excluir_full,
-│   │                            #   logistica_full_colecta, pack_id, sync_ml_e2e,
+│   │                            #   logistica_full_colecta, pack_id, sync_ml_e2e (27/27:
+│   │                            #     incluye total_neto — multi-pago, COALESCE, fallo 500),
 │   │                            #   sync_automatica, ml_client_solo_lectura, poda_
 │   │                            #   notificaciones, recruce_retroactivo, cauplas/vazlo/ag_kg
 │   └── uploads/                 # SOLO temporales de parseo; los PDF/XML de factura viven
@@ -358,6 +359,13 @@ usuarios          (id, email, password_hash, rol[admin|proveedor], proveedor_id)
 ventas_ml         (num_venta PK, sku, deposito, fecha_venta, estado, titulo, total,
                    -- deposito = bodega de origen (col C 'Depósito' del reporte ML).
                    --   MATRIZ se oculta por defecto en Ventas (ruido, no dropshipping).
+                   total_neto,
+                   -- total = total_amount de ML ("ingresos por productos": el precio).
+                   -- total_neto = el "Total (MXN)" que Gaby ve en ML: lo que RELUVSA
+                   --   RECIBE, ya restados cargos, envíos e impuestos. Es
+                   --   net_received_amount de /collections/{payment_id} — NO se calcula
+                   --   aquí (los impuestos no vienen en la Orders API). Conviven las 2.
+                   --   NULL en las ventas previas al 2026-08-10 (no hubo backfill).
                    comprador, comprador_estado, forma_entrega,
                    factura_adjunta_ml, devolucion_unidades, reclamos)
 envios_colecta    (num_envio PK, num_venta, num_venta_ml, match_cruce_confianza,
@@ -387,7 +395,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-07 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + ⭐ FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 EJECUTADA (`bf6b392`). 🔴 TAREA #1 ABIERTA: BUG A, ventas de carrito sin envío)
+## 8. Estado actual (último update: 2026-08-10 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 (`bf6b392`) + ⭐ TOTAL (MXN) NETO (`fa3e3aa`). 🔴 TAREA #1 ABIERTA: BUG A, ventas de carrito sin envío)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
@@ -544,6 +552,16 @@ el BUG A (ventas de carrito sin envío). Ver `docs/estado-cruce-factura-venta.md
   que "los kits siguen sin detectarlos". Era el prefijo de bodega (`CAU11370` vs
   `11370 M2650963`), NO el sufijo `-K`. 41 conceptos recuperados, 0 falsos positivos. Ver
   la sección "⭐ Los kits cruzan por ID interno" en §3.
+- **⭐ "Total (MXN)" = el neto que ML deposita** (2026-08-10, commit `fa3e3aa`, **DESPLEGADO
+  Y VERIFICADO EN PROD**): pedido de Gaby, veía "ingresos por productos". Se agregó
+  `ventas_ml.total_neto` (= `net_received_amount` de `/collections/{payment_id}`),
+  **conservando `total`**; sale en la tabla Ventas (antes el monto NO se mostraba en
+  pantalla) y en el CSV. Validado al centavo contra sus 2 ventas, en cross_docking y FULL.
+  🔴 **NO reconstruir la resta a mano: los impuestos no están en la Orders API** (habría
+  inflado el monto $162 en todas las filas, en silencio). **Sin backfill** (decisión de
+  Mario): las ~58k ventas viejas muestran "—" y se pueblan solas hacia adelante. Verificado
+  en prod: 162 ventas pobladas por el sync, 0 en `0.0`, 0 con neto > producto. Ver la
+  sección "⭐ «Total (MXN)»" en §3 y [[project_total_neto_ml]].
 
 **🔴 SÍ queda una tarea grande abierta del Módulo 1: el BUG A** (1,042 ventas de carrito sin
 envío, invisibles para el matcher). Ver `docs/estado-cruce-factura-venta.md` §4. Después de
