@@ -1,6 +1,7 @@
 # 📍 ESTADO DEL CRUCE FACTURA ↔ VENTA — punto de entrada
 
-> **Última actualización:** 2026-08-07 (tras ejecutar la limpieza de los 243).
+> **Última actualización:** 2026-08-07 (tras corregir 110 cruces de KIM con el # de venta
+> impreso en su PDF).
 > **Este documento es el índice.** Dice qué está cerrado, qué sigue abierto y dónde está el
 > detalle de cada cosa. Léelo primero; los otros 3 documentos son el detalle.
 >
@@ -25,7 +26,7 @@ causa que **no depende de nosotros**: que los proveedores pongan el # de venta e
 | 2 | **BUG B**: la factura se iba a la venta equivocada (no se miraba la fecha de la factura) | ✅ **CERRADO** `f699577` | — |
 | 3 | 243 cruces falsos **ya persistidos** en la BD | ✅ **CERRADO** `bf6b392` (ejecutado en prod) | — |
 | 4 | **BUG A**: 1,042 ventas de carrito **sin envío** → invisibles para el matcher | 🔴 **ABIERTO** | nosotros |
-| 5 | Los 5 falsos de KIM (facturas del mismo día) | ⬜ **BLOQUEADO** | **los proveedores** |
+| 5 | Los 5 falsos de KIM (facturas del mismo día) | 🟡 **PARCIAL** — 110 cruces corregidos con el # de venta del PDF de KIM | **los proveedores** (falta el XML) |
 
 ⚠️ **4 y 5 son independientes.** El # de venta (5) **no arregla** el BUG A (4): una venta sin
 envío no tiene proveedor, y el matcher sólo busca `WHERE e.proveedor_id = ?` — no la ve
@@ -39,6 +40,7 @@ aunque la factura traiga el número.
 |---|---|
 | `docs/hallazgo-cruce-factura-venta.md` | El diagnóstico de fondo. **Las 3 hipótesis descartadas** (no repetirlas) y la descripción del BUG A |
 | `docs/limpieza-cruces-falsos-persistidos.md` | La limpieza de los 243: resultado, garantías, las 3 lecciones de la ejecución |
+| `docs/correccion-cruces-num-venta-kim.md` | ⭐ El # de venta que KIM imprime en su PDF: 110 cruces corregidos, las 2 trampas del script y **qué pedirle a KIMS** |
 | `CLAUDE.md` §3 y §8 | Reglas de negocio y las 3 reglas de diseño del cruce por # de venta |
 
 Tests que fijan lo ya arreglado (correrlos antes de commitear cualquier cambio al matcher):
@@ -102,10 +104,27 @@ antes de modificarlo** — en particular que el filtro de FULL es
 
 ---
 
-## 5. ⬜ Cuando los proveedores pongan el # de venta
+## 5. 🟡 El # de venta en la factura — KIM YA LO PONE, pero sólo en el PDF
 
-**Estado: pedido a Gaby, ella ya se lo pidió a KIM y CAUPLAS (2026-08-07). Esperando que
-lleguen facturas con el dato.**
+> ⭐ **NOVEDAD 2026-08-07: Gaby descubrió que KIM ya imprime el # de venta.** Verificado
+> contra las 840 facturas de prod y **usado para corregir 110 cruces** (102 estaban en la
+> venta equivocada, 98 con confianza 1.0). Detalle completo en
+> **`docs/correccion-cruces-num-venta-kim.md`**.
+>
+> 🔴 **Pero está SÓLO en el PDF: en los 750 XML aparece CERO veces**, así que el matcher
+> —que sólo parsea XML— **no puede leerlo automáticamente**. Y viene en **19% de las
+> facturas**, no en todas.
+>
+> ✅ **Lo bueno, ya medido:** de 144 números, **135 cruzan exacto contra `num_venta`**,
+> **cero contra `pack_id` y cero colisiones** → la regla 3 de abajo se confirma en la
+> práctica para KIM.
+>
+> **Pedido a KIMS (decidido por Mario):** que lo pongan **sí o sí en TODAS** las facturas.
+> ⚠️ **Añadir al pedido: que venga en el XML, no sólo impreso** — es lo que lo vuelve
+> automático.
+
+**Estado: pedido a Gaby, ella ya se lo pidió a KIM y CAUPLAS (2026-08-07). CAUPLAS aún no lo
+pone; KIM lo pone en el PDF (19%) pero no en el XML.**
 
 ### Por qué hacía falta pedirlo
 KIM emite **~23 facturas al día** y hay **141 combinaciones (SKU, día) con varias ventas**.

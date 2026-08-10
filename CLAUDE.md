@@ -325,8 +325,9 @@ Convenciones:
 
 > 📍 **ARRANCAR AQUÍ: `docs/estado-cruce-factura-venta.md`** — es el índice del bloque
 > factura↔venta. Dice en un tablero qué está cerrado (kits, fix de fecha, limpieza de los
-> 243), qué sigue abierto (**BUG A = tarea #1**) y qué está bloqueado esperando a los
-> proveedores (el # de venta). Leerlo antes que los otros 3 documentos.
+> 243, **corrección de 110 cruces con el # de venta de KIM**), qué sigue abierto
+> (**BUG A = tarea #1**) y qué falta de los proveedores (**que el # de venta venga en el
+> XML**, hoy sólo está impreso en el PDF de KIM). Leerlo antes que los otros documentos.
 >
 > 🔴 **TAREA #1 ABIERTA: BUG A — 1,042 ventas de carrito sin envío.** Es lo de mayor impacto
 > que queda y **NO depende de terceros**. ML cuelga UN solo envío por carrito de UNA sola de
@@ -387,10 +388,37 @@ Convenciones:
 > ⬜ **BUG A sigue abierto**: 1,042 ventas de carrito sin envío → invisibles para el matcher.
 > ⭐ **LEER `docs/hallazgo-cruce-factura-venta.md`** para las 3 hipótesis ya descartadas.
 
-#### ⬜ Cruce por # de venta (pedido a Gaby, PENDIENTE de que lleguen facturas con el dato)
+#### 🟡 Cruce por # de venta — KIM YA LO PONE, pero sólo en el PDF (2026-08-07)
 
-Cuando KIM/CAUPLAS empiecen a poner el # de venta en la factura, agregar un **paso 0** antes
-del código exacto. ⚠️ **3 reglas que la medición ya dejó fijadas** — no diseñarlo de otro modo:
+> ⭐ **Gaby lo descubrió y se verificó contra las 840 facturas de prod.** Se usó para
+> **corregir 110 cruces** (102 estaban en la venta EQUIVOCADA, **98 con confianza 1.0**).
+> Ejecutado en prod con backup `bak-20260807_225337`; 0 filas borradas, integridad ok.
+> ⭐ **LEER `docs/correccion-cruces-num-venta-kim.md`** antes de retomar este tema.
+>
+> | Pregunta | Medido |
+> |---|---|
+> | ¿Es el `order.id`? | ✅ Sí (= `ventas_ml.num_venta`) |
+> | ¿Está en el **XML**? | 🔴 **NO. Cero de 750** — KIM no lo timbra |
+> | ¿Está en el **PDF**? | ✅ **144 de 748 (19.3%)**, no en todas |
+> | ¿Contra qué cruza? | **135/144 contra `num_venta`**; **0 contra `pack_id`, 0 colisiones** |
+>
+> 🔴 **Al no estar en el XML el matcher NO puede leerlo** → esto fue una corrección de datos
+> puntual (`backend/scripts/corregir_cruces_num_venta_pdf.py`, idempotente), **no** una regla
+> del matcher. ⬜ **Pedido a KIMS (Mario, 2026-08-07): que lo pongan en TODAS. Añadir al
+> pedido que venga EN EL XML**, que es lo que lo vuelve automático.
+>
+> ⚠️ **2 trampas que sólo aparecen al correr el script 2 veces** (fijadas en el doc): (1) el
+> "ocupante ajeno" es **por factura, no por concepto** — una factura puede tener 2 conceptos
+> hacia la misma venta; (2) **2 facturas distintas pueden traer el mismo # de venta**
+> (`K28023`/`K28069` parten una venta en dos) → **ambiguo, no se toca ninguna**.
+>
+> ℹ️ **Medido contra el cruce manual de Gaby: aciertos 59→61, falsos 5→4, KIM 42→45%.** El
+> movimiento es chico **porque sus 143 casos son de mayo-junio y el número sólo está en el
+> 19% de las facturas** — la mayoría de las 110 correcciones cayó fuera de su muestra. **No
+> reportarlo como "KIM ya quedó resuelto".**
+
+Cuando el dato llegue **en el XML**, agregar un **paso 0** antes del código exacto.
+⚠️ **3 reglas que la medición ya dejó fijadas** — no diseñarlo de otro modo:
 
 1. **Buscar primero en `num_venta` (order.id). Si hay match exacto, gana y no se sigue.**
 2. **Sólo si no hay, buscar en `pack_id`** — y desambiguar con el código de la pieza: **778
