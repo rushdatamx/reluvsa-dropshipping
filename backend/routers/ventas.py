@@ -122,6 +122,14 @@ def _construir_filtros(
       - "full": fulfillment (ML surte desde su bodega; NO es dropshipping).
       - "colecta": cross_docking (el proveedor surte; el flujo que mide el portal).
       - "otros": cualquier otro tipo (Places/Flex) con envío existente.
+
+    `estado` filtra por el estado de la venta (ventas_ml.estado, poblado por el sync
+    vía ESTADO_MAP: 'Entregado', 'Pagado', 'Cancelada'...). Pedido de Gaby (2026-08-11):
+    las canceladas le estorbaban en la vista diaria, pero NO quiso borrarlas.
+      - None / "sin_canceladas" (DEFAULT): oculta las canceladas.
+      - "solo_canceladas": únicamente las canceladas (para revisarlas juntas).
+      - "todas": sin filtro.
+      - cualquier otro valor: igualdad exacta (compatibilidad con ?estado=Entregado).
     """
     if user.rol == "proveedor":
         proveedor_id = user.proveedor_id
@@ -134,7 +142,27 @@ def _construir_filtros(
         where.append("e.proveedor_id = ?")
         params.append(proveedor_id)
 
-    if estado:
+    # Estado de la venta. El DEFAULT (estado vacío) oculta las canceladas: Gaby las veía
+    # mezcladas en su trabajo diario y pidió no tenerlas por default, pero explícitamente
+    # NO quiso quitarlas del portal (una cancelada CON factura del proveedor es una
+    # incidencia que hay que poder ver: en prod hay 4 así).
+    #
+    # 🔴 El guard `IS NULL OR` NO es cosmético: en SQL `NULL != 'Cancelada'` evalúa a NULL,
+    # no a true, así que sin él las 279 ventas con estado NULL (todas de jun-2026, entradas
+    # por el Excel legacy que el sync por API nunca volvió a tocar) DESAPARECERÍAN en
+    # silencio de la vista por defecto. Mismo criterio que NO_ES_FULL en metricas.py.
+    # Los 3 modos se comparan en minúscula: un "Todas" con mayúscula caería a la rama de
+    # compatibilidad y filtraría por un estado que no existe -> tabla VACÍA en vez de
+    # "todas", que es un fallo silencioso (parece que no hay ventas, no que el filtro falló).
+    modo_estado = (estado or "").strip().lower()
+    if not modo_estado or modo_estado == "sin_canceladas":
+        where.append("(v.estado IS NULL OR v.estado != 'Cancelada')")
+    elif modo_estado == "solo_canceladas":
+        where.append("v.estado = 'Cancelada'")
+    elif modo_estado == "todas":
+        pass  # sin filtro
+    else:
+        # Compatibilidad: ?estado=Entregado sigue filtrando por igualdad exacta.
         where.append("v.estado = ?")
         params.append(estado)
 

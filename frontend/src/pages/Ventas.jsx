@@ -14,8 +14,27 @@ const FILTROS_VACIOS = {
   // El default era 'proveedores'; el cliente pidió ver también las de MATRIZ (2026-08-03).
   deposito: 'todos',
   logistica: '',        // '' = todas | 'full' | 'colecta' | 'otros'
+  // 'sin_canceladas' (default) | 'todas' | 'solo_canceladas'. Pedido de Gaby (2026-08-11):
+  // las canceladas le estorbaban en la vista diaria. NO se borran del portal, solo dejan
+  // de venir por default; el selector las recupera. El backend aplica el mismo default
+  // aunque no llegue el parámetro, para que el CSV y la API directa no se desincronicen.
+  estado: 'sin_canceladas',
   fecha_desde: '',
   fecha_hasta: '',
+};
+
+// Estado de la venta tal como lo puebla el sync (ESTADO_MAP en sync_ml.py). Un estado
+// que no esté aquí se muestra crudo, no se esconde (mismo criterio que LOGISTICA: si ML
+// agrega un estado nuevo, que se vea).
+const ESTADO_VENTA = {
+  Entregado:        'bg-green-100 text-green-700',
+  Cancelada:        'bg-red-100 text-red-700',
+  Pagado:           'bg-amber-100 text-amber-700',
+  Confirmada:       'bg-blue-100 text-blue-700',
+  'Pago pendiente': 'bg-amber-100 text-amber-700',
+  'Pago en proceso':'bg-amber-100 text-amber-700',
+  'Pago parcial':   'bg-amber-100 text-amber-700',
+  Inválida:         'bg-notion-100 text-notion-600',
 };
 
 // Etiqueta y color de cada tipo de logística de ML. La distinción que importa:
@@ -98,8 +117,11 @@ export default function Ventas() {
     setFiltros(FILTROS_VACIOS);
     setLoading(true);
     try {
-      // FILTROS_VACIOS trae deposito='todos'; mandamos ese default explícito.
-      const { data } = await listarVentas({ deposito: 'todos', page: 1, limit: LIMIT });
+      // FILTROS_VACIOS trae defaults explícitos (deposito='todos', estado='sin_canceladas');
+      // "Limpiar" vuelve a ellos, no a "sin filtro".
+      const { data } = await listarVentas({
+        deposito: 'todos', estado: 'sin_canceladas', page: 1, limit: LIMIT,
+      });
       setData(data);
     } finally {
       setLoading(false);
@@ -206,6 +228,17 @@ export default function Ventas() {
               <option value="otros">Otras (Places/Flex)</option>
             </select>
           </div>
+          <div className="min-w-[170px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Estado de la venta</label>
+            {/* "Sin canceladas" es el default y se nombra así a propósito: le dice a Gaby
+                que las canceladas SIGUEN en el portal, no que se borraron. */}
+            <select value={filtros.estado} onChange={(e) => set('estado', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="sin_canceladas">Sin canceladas</option>
+              <option value="todas">Todas</option>
+              <option value="solo_canceladas">Solo canceladas</option>
+            </select>
+          </div>
         </div>
         <div className="flex gap-3 flex-wrap items-end">
           {isAdmin() && (
@@ -253,6 +286,7 @@ export default function Ventas() {
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Venta</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Albarán</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Fecha</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Estado</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">SKU</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Título</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Unidades</th>
@@ -266,9 +300,9 @@ export default function Ventas() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="12" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
+                <tr><td colSpan="13" className="p-8 text-center text-notion-text-secondary">Cargando...</td></tr>
               ) : data.items.length === 0 ? (
-                <tr><td colSpan="12" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
+                <tr><td colSpan="13" className="p-8 text-center text-notion-text-secondary">Sin ventas registradas. Sube el reporte desde "Cargar reportes".</td></tr>
               ) : data.items.map((v) => (
                 <tr key={v.num_venta} className="border-t border-notion-border hover:bg-notion-bg-subtle">
                   <td className="px-4 py-3 font-mono text-xs">
@@ -296,6 +330,19 @@ export default function Ventas() {
                     {v.albaran ? v.albaran : <span className="text-notion-text-secondary">—</span>}
                   </td>
                   <td className="px-4 py-3 text-xs text-notion-text-secondary whitespace-nowrap">{fechaCorta(v.fecha_venta)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {/* Las ventas legacy del Excel no traen estado (el parser nunca lo pobló);
+                        se muestran con '—' en vez de inventarles uno. */}
+                    {v.estado ? (
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                        ESTADO_VENTA[v.estado] || 'bg-notion-100 text-notion-600'
+                      }`}>
+                        {v.estado}
+                      </span>
+                    ) : (
+                      <span className="text-notion-text-secondary text-xs">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
                     <span className="text-reluvsa-red">{v.sku || '—'}</span>
                     {v.kit_componentes && v.kit_componentes.length > 0 && (
