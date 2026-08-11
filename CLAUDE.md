@@ -137,6 +137,54 @@ vuelve a tocar. ⚠️ **Si algún día se quiere el histórico, ojo:** son ~58k
 En el incremental el costo es despreciable: **~3.6 ventas por corrida** (medido sobre 5,129
 ventas en 30 días) = ~4 requests extra cada 30 min.
 
+### Ventas canceladas: ocultas por default, NO borradas (2026-08-11, commit `244522d`)
+
+**Pedido de Gaby:** *"me di cuenta que también me arroja las ventas canceladas, hay forma
+de quitarlas?? pero sólo las canceladas, no las de reclamos o devoluciones, o me
+recomienda no quitarlas??, quisiera identificarlas más rápido"*.
+
+**Decisión de Mario: NO se borran del portal** — dejan de venir por default y un selector
+las recupera. Borrarlas habría destruido señal: en prod hay **4 ventas canceladas CON
+factura cruzada**, que es justo la incidencia que el portal existe para detectar (el
+proveedor facturó algo que se canceló).
+
+**Medido en prod antes de implementar** (58,687 ventas): `Entregado` 57,011 · `Pagado` 779
+· **`Cancelada` 609** · NULL 279. ⚠️ El bug documentado de `ventas_ml.estado` era **del
+parser de Excel**; el **sync por API sí lo puebla** (`ESTADO_MAP` en `sync_ml.py`:
+`cancelled` → `"Cancelada"`). Las canceladas se reparten parejo entre FULL (284) y COLECTA
+(285), ~45/mes desde jul-2025: no es un fenómeno de una sola logística.
+
+**Implementado** (`routers/ventas.py::_construir_filtros`): el parámetro `estado` pasa de
+igualdad exacta a **3 modos** — `sin_canceladas` (DEFAULT) / `solo_canceladas` / `todas`.
+Un valor desconocido conserva la **igualdad exacta** (compatibilidad con `?estado=Entregado`).
+Se agregó la columna **"Estado"** con badge en la tabla (el CSV ya la traía).
+
+⚠️ **4 trampas fijadas en `backend/scripts/test_filtro_canceladas.py` (16/16):**
+1. 🔴 **El guard es `(v.estado IS NULL OR v.estado != 'Cancelada')`, NUNCA `!=` a secas.**
+   En SQL `NULL != 'Cancelada'` evalúa a **NULL, no a true** → un `!=` suelto haría
+   DESAPARECER en silencio las **279 ventas con estado NULL** (todas de jun-2026, del Excel
+   legacy que el sync por API nunca volvió a tocar). **Medido en prod: 58,078 con el guard
+   vs 57,799 sin él.** Mismo criterio que `NO_ES_FULL` en `metricas.py`.
+2. **El default vive en el BACKEND, no sólo en el React.** Si viviera sólo en el frontend,
+   una llamada directa a la API y el **CSV** traerían canceladas y se desincronizarían de
+   lo que Gaby ve en la tabla.
+3. **Los modos se comparan en minúscula** (hallazgo del api-guardian): un `"Todas"` con
+   mayúscula caería a la rama de compatibilidad y filtraría por un estado inexistente →
+   **tabla VACÍA en vez de "todas"**, que es un fallo silencioso (parece que no hay ventas,
+   no que el filtro falló).
+4. **El label del default se llama "Sin canceladas" a propósito**: le dice a Gaby que las
+   canceladas **siguen ahí**, no que se borraron. Y `solo_canceladas` existe porque ella
+   pidió *"identificarlas más rápido"* — no basta esconderlas, tiene que poder verlas juntas.
+
+ℹ️ **Las métricas NO se tocaron.** Si el SLA de una venta cancelada debe contar contra el
+proveedor es otra decisión de negocio; mezclarla aquí habría movido números que Gaby no
+espera. **Queda pendiente de decidir con ella.**
+
+**Impacto para Gaby:** la vista pasa de 58,687 a **58,078** filas (1,174 → 1,162 páginas).
+Es ~1%: no es el antes/después que sintió con MATRIZ, pero le quita el tropiezo.
+Verificado por mutación (al quitar el guard el test falla con exit 1 en el assert correcto)
+y **api-guardian APROBADO 7/7** + 7 puntos específicos.
+
 ### Kits → componentes (2026-06-19)
 - ⚠️ Algunas ventas de ML son **kits**: el SKU (ej. `KIT0337`) es un **código sintético de RELUVSA** que **NO existe en ninguna factura**. El proveedor factura los **componentes reales** del kit (ej. `KDTL-057`, `KDTL-058`). Por eso una venta-kit salía siempre **"Pendiente"** aunque su factura estuviera cargada: el matcher buscaba `KIT0337` en los conceptos y nunca cruzaba.
 - **Solución:** Gaby sube **su propio Excel** de relación kit→componentes (3 columnas: `Paquete -> Tag` = KIT, `Componente -> Tag`, `Cantidad`) por un **uploader propio** (`POST /api/uploads/kits`, 4a tarjeta en Uploads.jsx). Parser `services/parser_kits.py` → tabla puente `kit_componentes (kit_sku, componente_codigo, cantidad)`. **Carga incremental** (upsert por PK; re-subir actualiza+agrega, no borra). `kit_sku` normalizado UPPER+TRIM (el Excel trae formatos inconsistentes y espacios finales). El Excel real: 656 kits, **1847 relaciones únicas** (1853 filas con 6 pares duplicados internos que el upsert colapsa).
