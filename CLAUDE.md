@@ -69,6 +69,47 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 - ⚠️ **Bug conocido NO arreglado — `ventas_ml.estado`:** mismo patrón que Unidades. La columna "Estado" de la venta (col 3 del reporte) tiene **categoría vacía**, pero el parser la busca como `col("Ventas|Estado")` (con categoría) sin fallback por nombre → `idx_estado` siempre es `None` y `estado` nunca se pobla. No se usa en la UI hoy, por eso se dejó pendiente (decisión 2026-06-19). Fix trivial si se necesita: agregar `"Estado"` como fallback en `col(...)` (con el guard de "primera ocurrencia" tomaría la col 3 correcta). Ver [[project_bug_unidades_columnas_duplicadas]].
 - **Columna # de albarán (2026-06-17):** Gaby aporta el **# de albarán** de cada venta en **su propio Excel** (2 columnas: `# de venta` + `# de albarán`) — NO viene en el reporte de Ventas ML ni de colecta. Se sube por un **uploader propio** (`POST /api/uploads/albaran`, 3a tarjeta en Uploads.jsx) que cruza **por num_venta directo** (1:1, NO fecha+título) y hace **solo UPDATE** sobre `ventas_ml.albaran` (parser `services/parser_albaran.py`): si la venta no existe la cuenta como `no_encontrados` (no crea huérfana); fila con albarán vacío no borra el existente. Se muestra como **columna "Albarán"** en la tabla Ventas (junto a Venta) y en el **CSV**. El candado de tipo de archivo reconoce el tipo `"albaran"`. Cero infra nueva (solo columna en tabla existente). Ver [[project_albaran]].
 
+#### ⭐ El albarán cruza en DOS pasos: num_venta → pack_id (2026-08-12)
+
+**Reporte de Gaby:** *"otra vez me volvió a marcar igual, dice que 79 se actualizaron, 52 no
+se encontraron… yo pensé que iba a ser un tema del número de venta pero no, no es eso porque
+algunos sí está tal cual en la página"*. Tenía razón: **las 52 ventas SÍ existían**.
+
+**Causa:** Gaby captura el número que ML le muestra **en pantalla**, y ML muestra el
+**`pack_id`** cuando la venta viene de un carrito y el `order.id` cuando no. Su archivo trae
+los dos tipos **mezclados sin distintivo**. El parser sólo buscaba por `num_venta`.
+
+**Medido contra prod con su archivo real de KIMS (131 filas):**
+
+| | Cuántos | |
+|---|---|---|
+| cruzan por `num_venta` | **79** | = los "79 actualizados" que vio |
+| cruzan por `pack_id` | **52** | = los "52 no encontrados" |
+| intersección | **0** | la clasificación no tiene ambigüedad |
+| huérfanos reales | **0** | 79+52 = 131 = todas las filas |
+
+**Implementado** (`parser_albaran.py`): dos UPDATE **secuenciales** — `num_venta` primero y,
+sólo si `rowcount == 0`, `pack_id`. Simulado contra prod: **131/131, cero no encontrados.**
+
+⚠️ **4 trampas fijadas en `backend/scripts/test_albaran_pack_id.py` (23/23) — no romperlas:**
+1. 🔴 **NUNCA `WHERE num_venta = ? OR pack_id = ?` en una sola consulta**, y `num_venta`
+   SIEMPRE gana. Hay **268 números que son order.id de una venta y pack_id de OTRA**: el OR
+   escribiría el albarán en la venta equivocada, y encima en silencio. Es la misma regla ya
+   fijada para el cruce por # de venta en §8. El test lo verifica **estáticamente sobre el
+   AST** (excluyendo docstrings, que mencionan el patrón prohibido a propósito).
+2. **Un `pack_id` multi-venta escribe en TODAS sus ventas** (787 packs así en prod, de 2 a 6).
+   Decisión de Mario: el carrito es **un solo paquete físico** y su nota de entrega ampara
+   todo lo que viaja dentro. `ventas_actualizadas` puede ser > `actualizados`.
+3. **Sigue siendo sólo UPDATE**: un número inexistente NO crea venta huérfana, y una fila con
+   albarán vacío NO borra el existente (re-subida parcial).
+4. **Excel entrega los números como int/float** (`_celda_a_texto` quita el `.0`): sin eso, un
+   `2000014366425187` numérico no cruzaría contra la columna TEXT.
+
+**UI:** la tarjeta de Uploads ya no escupe JSON crudo — dice *"131 de 131 filas aplicadas —
+79 por # de venta, 52 por # de carrito"* y **lista los números que no existen** (máx. 25).
+El "52 no encontrados" anterior mandaba a Gaby a revisar ventas a ciegas. Ver
+[[project_albaran_cruce_pack_id]].
+
 ### ⭐ "Total (MXN)" = el neto que ML deposita (2026-08-10)
 
 **Pedido de Gaby:** *"me podría apoyar modificando en el portal para que aparezca el monto

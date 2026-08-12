@@ -3,7 +3,7 @@ import { Upload, FileSpreadsheet } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { subirVentasML, subirColecta, subirAlbaranes, subirKits } from '../services/api';
 
-function UploadCard({ title, description, onSubmit, accept = '.xlsx' }) {
+function UploadCard({ title, description, onSubmit, accept = '.xlsx', renderResult }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -48,10 +48,42 @@ function UploadCard({ title, description, onSubmit, accept = '.xlsx' }) {
       {result && (
         <div className={`mt-3 p-3 rounded-lg text-xs ${result.ok ? 'bg-green-50 text-success' : 'bg-red-50 text-danger'}`}>
           {result.ok ? (
-            <pre>{JSON.stringify(result.data, null, 2)}</pre>
+            renderResult ? renderResult(result.data) : <pre>{JSON.stringify(result.data, null, 2)}</pre>
           ) : (
             result.text
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Resumen legible del resultado de albaranes. El JSON crudo se prestaba a malinterpretar
+// los "no encontrados": la mayoría eran ventas que sí existían, capturadas con el # de
+// carrito. Ahora se dice explícitamente por cuál de los dos números cruzó cada fila.
+function renderResultadoAlbaran(d) {
+  const total = (d.actualizados || 0) + (d.no_encontrados || 0) + (d.sin_albaran || 0);
+  const extras = (d.ventas_actualizadas || 0) - (d.actualizados || 0);
+  return (
+    <div className="space-y-1">
+      <div className="font-semibold">
+        {d.actualizados} de {total} filas aplicadas
+      </div>
+      <ul className="list-disc list-inside space-y-0.5">
+        <li>{d.por_num_venta ?? 0} por # de venta</li>
+        <li>{d.por_pack_id ?? 0} por # de carrito (el que muestra ML en pantalla)</li>
+        {extras > 0 && (
+          <li>{extras} venta(s) adicional(es) del mismo carrito también recibieron su albarán</li>
+        )}
+        {d.sin_albaran > 0 && <li>{d.sin_albaran} fila(s) sin albarán, se omitieron</li>}
+      </ul>
+      {d.no_encontrados > 0 && (
+        <div className="mt-2 text-danger">
+          <div className="font-semibold">{d.no_encontrados} no se encontraron en el portal:</div>
+          <div className="break-all">
+            {(d.ejemplos_no_encontrados || []).join(', ')}
+            {d.no_encontrados > (d.ejemplos_no_encontrados || []).length && ' …'}
+          </div>
         </div>
       )}
     </div>
@@ -79,8 +111,9 @@ export default function Uploads() {
         />
         <UploadCard
           title="Números de albarán"
-          description="Excel con 2 columnas: # de venta y # de albarán. Cruza por número de venta y agrega el albarán a las ventas ya cargadas (solo actualiza, no crea ventas nuevas)."
+          description="Excel con 2 columnas: # de venta y # de albarán. Acepta cualquiera de los dos números que muestra Mercado Libre (el de la venta o el del carrito). Solo actualiza ventas ya cargadas, no crea ventas nuevas."
           onSubmit={subirAlbaranes}
+          renderResult={renderResultadoAlbaran}
         />
         <UploadCard
           title="Relación kits → componentes"
