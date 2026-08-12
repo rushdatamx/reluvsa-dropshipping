@@ -484,10 +484,21 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-10 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 (`bf6b392`) + ⭐ TOTAL (MXN) NETO (`fa3e3aa`). 🔴 TAREA #1 ABIERTA: BUG A, ventas de carrito sin envío)
+## 8. Estado actual (último update: 2026-08-12 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 (`bf6b392`) + TOTAL (MXN) NETO (`fa3e3aa`) + CANCELADAS OCULTAS (`244522d`) + ⭐ ALBARÁN POR PACK_ID (`3b2cf79`). 🔴 TAREA #1 ABIERTA: BUG A, ventas de carrito sin envío)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
+> ✅ **Lo último que se hizo (2026-08-12, commit `3b2cf79`, ya en prod): el albarán cruza
+> también por `pack_id`.** Fue un reporte de Gaby, ya está cerrado y **no requiere
+> seguimiento técnico** — sólo que ella vuelva a subir su reporte (ya se le avisó). Detalle
+> en §3 → "⭐ El albarán cruza en DOS pasos". **Si retomas aquí, la tarea sigue siendo el
+> BUG A, abajo.**
+>
+> ℹ️ **Patrón que ya se repitió 3 veces — sospecharlo primero:** cuando un dato de ML "no
+> cruza", preguntarse **cuál de los dos números es** (`order.id` vs `pack_id`) antes de
+> asumir que el dato falta. Pasó con la búsqueda de Ventas (`f325b2f`), con el # de venta de
+> KIM (`9a72d98`) y ahora con los albaranes (`3b2cf79`). El BUG A es de la misma familia.
+>
 > 📍 **ARRANCAR AQUÍ: `docs/estado-cruce-factura-venta.md`** — es el índice del bloque
 > factura↔venta. Dice en un tablero qué está cerrado (kits, fix de fecha, limpieza de los
 > 243, **corrección de 110 cruces con el # de venta de KIM**), qué sigue abierto
@@ -651,6 +662,18 @@ el BUG A (ventas de carrito sin envío). Ver `docs/estado-cruce-factura-venta.md
   Mario): las ~58k ventas viejas muestran "—" y se pueblan solas hacia adelante. Verificado
   en prod: 162 ventas pobladas por el sync, 0 en `0.0`, 0 con neto > producto. Ver la
   sección "⭐ «Total (MXN)»" en §3 y [[project_total_neto_ml]].
+
+- **⭐ El albarán cruza también por `pack_id`** (2026-08-12, commit `3b2cf79`, **DESPLEGADO Y
+  VERIFICADO EN PROD**): reporte de Gaby, su reporte de albaranes marcaba "79 actualizados,
+  52 no encontrados". **Las 52 ventas SÍ existían**: capturó el # de carrito que ML muestra
+  en pantalla. Cruce en 2 pasos (`num_venta` gana, `pack_id` de fallback) → su archivo real
+  pasa de **79/131 a 131/131**. 🔴 **Nunca un OR entre las 2 llaves** (268 números son
+  order.id de una venta y pack_id de otra). Un pack multi-venta escribe en **todas** sus
+  ventas (decisión de Mario). La tarjeta de Uploads ya explica el resultado en español y
+  lista los no encontrados. Ver la sección "⭐ El albarán cruza en DOS pasos" en §3 y
+  [[project_albaran_cruce_pack_id]].
+  ⬜ **Falta que Gaby vuelva a subir su reporte** para que las 52 entren (el fix corrige el
+  cruce de aquí en adelante; no hubo backfill). Ya se le avisó por WhatsApp.
 
 **🔴 SÍ queda una tarea grande abierta del Módulo 1: el BUG A** (1,042 ventas de carrito sin
 envío, invisibles para el matcher). Ver `docs/estado-cruce-factura-venta.md` §4. Después de
