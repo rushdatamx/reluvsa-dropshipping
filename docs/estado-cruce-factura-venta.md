@@ -1,7 +1,8 @@
 # 📍 ESTADO DEL CRUCE FACTURA ↔ VENTA — punto de entrada
 
-> **Última actualización:** 2026-08-07 (tras corregir 110 cruces de KIM con el # de venta
-> impreso en su PDF).
+> **Última actualización:** 2026-08-12/13 — **el # de venta de KIM quedó cerrado en sus dos
+> mitades**: 228 cruces corregidos hacia atrás (`0161ade`) y el **paso 0 del matcher**, que
+> lee el PDF, desplegado y verificado en prod (`0104d32`).
 > **Este documento es el índice.** Dice qué está cerrado, qué sigue abierto y dónde está el
 > detalle de cada cosa. Léelo primero; los otros 3 documentos son el detalle.
 >
@@ -26,11 +27,28 @@ causa que **no depende de nosotros**: que los proveedores pongan el # de venta e
 | 2 | **BUG B**: la factura se iba a la venta equivocada (no se miraba la fecha de la factura) | ✅ **CERRADO** `f699577` | — |
 | 3 | 243 cruces falsos **ya persistidos** en la BD | ✅ **CERRADO** `bf6b392` (ejecutado en prod) | — |
 | 4 | **BUG A**: 1,042 ventas de carrito **sin envío** → invisibles para el matcher | 🔴 **ABIERTO** | nosotros |
-| 5 | Los 5 falsos de KIM (facturas del mismo día) | 🟡 **PARCIAL** — 110 cruces corregidos con el # de venta del PDF de KIM | **los proveedores** (falta el XML) |
+| 5 | Los falsos de KIM (facturas del mismo día, indistinguibles por fecha) | ✅ **CERRADO** `0161ade` + `0104d32` | — |
+| 6 | El ~45% de facturas de KIM **sin # impreso** degrada a fecha **en silencio** | 🟡 **ABIERTO** | **KIMS** (leyenda fija) |
 
 ⚠️ **4 y 5 son independientes.** El # de venta (5) **no arregla** el BUG A (4): una venta sin
 envío no tiene proveedor, y el matcher sólo busca `WHERE e.proveedor_id = ?` — no la ve
 aunque la factura traiga el número.
+
+### El #5 se cerró en DOS mitades (2026-08-12/13) — leerlas juntas
+
+**La causa que lo desbloqueó fue de Gaby: KIM teclea CEROS DE MÁS** (15-19 dígitos contra
+los 16 del `order.id`). Por eso el script de agosto, que exigía 16 exactos, sólo veía el
+19% de los PDF; con la tolerancia se lee el **54.5%** (ago-2026 ya va en 95.8%).
+
+1. **Hacia atrás** — `0161ade`, ejecutado en prod con backup `bak-20260812_224405`:
+   **228 conceptos corregidos** (216 estaban en la venta EQUIVOCADA, 212 con conf 1.0),
+   40 ocupantes ajenos liberados a pendiente, 0 filas borradas, idempotente.
+2. **Hacia adelante** — `0104d32`, desplegado y verificado: **paso 0 del matcher**, que
+   para KIM lee el # del PDF. La evidencia del proveedor le gana al cruce por fecha.
+
+🔴 **Ojo con lo que NO cierra el #5:** sigue habiendo ~62 facturas cuyo número impreso no
+resuelve (KIM metió un dígito que no es cero, p. ej. `K29628`). Ésas quedan **Pendiente a
+propósito** — ver la regla en el doc de detalle. **No son un bug.**
 
 ---
 
@@ -40,12 +58,14 @@ aunque la factura traiga el número.
 |---|---|
 | `docs/hallazgo-cruce-factura-venta.md` | El diagnóstico de fondo. **Las 3 hipótesis descartadas** (no repetirlas) y la descripción del BUG A |
 | `docs/limpieza-cruces-falsos-persistidos.md` | La limpieza de los 243: resultado, garantías, las 3 lecciones de la ejecución |
-| `docs/correccion-cruces-num-venta-kim.md` | ⭐ El # de venta que KIM imprime en su PDF: 110 cruces corregidos, las 2 trampas del script y **qué pedirle a KIMS** |
+| `docs/correccion-cruces-num-venta-kim.md` | El # de venta que KIM imprime en su PDF: la corrección de agosto (110 cruces) y **qué pedirle a KIMS** |
+| `docs/paso0-num-venta-pdf-kim.md` | ⭐ **LO MÁS RECIENTE.** Los ceros de más, las 228 correcciones y el **paso 0** que automatiza el cruce. Leerlo antes de tocar el matcher o el recruce |
 | `CLAUDE.md` §3 y §8 | Reglas de negocio y las 3 reglas de diseño del cruce por # de venta |
 
 Tests que fijan lo ya arreglado (correrlos antes de commitear cualquier cambio al matcher):
 `test_fecha_factura_venta.py` (13/13) · `test_kit_id_interno.py` (20/20) ·
-`test_recruce_retroactivo.py` · `test_metricas_excluir_full.py` (13/13).
+`test_recruce_retroactivo.py` · `test_metricas_excluir_full.py` (13/13) ·
+**`test_paso0_num_venta_pdf.py` (35/35)** · **`test_num_venta_kim_ceros.py` (46/46)**.
 
 ---
 

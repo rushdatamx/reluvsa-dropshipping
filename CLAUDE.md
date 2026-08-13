@@ -291,14 +291,27 @@ Reparto por mes (jun 14 · jul 17 · ago 34) = goteo normal de operación, no un
   factura, expande la fila para ver los conceptos y a qué venta cruza cada uno, filtra (proveedor,
   fecha, búsqueda, "solo con conceptos sin cruzar"), ve el folio del proveedor y exporta a CSV. Badge
   rojo si falta el PDF o el XML.
-- El match concepto-venta (`services/matcher.py`) tiene **4 pasos en orden**:
+- El match concepto-venta (`services/matcher.py`) tiene **5 pasos en orden** (el 0 se
+  agregó el 2026-08-12):
+  0. ⭐ **# de venta impreso en el PDF — SÓLO KIM** (conf 1.0). Es **evidencia del
+     proveedor**, así que gana sobre los pasos 1-4, que son inferencias nuestras.
+     🔴 Si KIM puso un número y NO resuelve, **el concepto queda pendiente**: no se cae a
+     fecha. Ver "⭐ EL PASO 0 YA EXISTE" abajo.
   1. **Código exacto**: `NoIdentificacion` del XML == SKU de la venta (o substring). Ej. KIM: `23530559-Z` == `23530559-Z`.
   2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
   3. **Componente de kit** (agregado 2026-06-19; **cruce por ID interno agregado 2026-08-05**): si la venta es un kit (su SKU está en `kit_componentes`), el proveedor factura los componentes, no el SKU-kit. Cruza el código del concepto contra los componentes del kit, primero por **texto** (exacto/substring, tolera sufijo `-K`) y luego por **ID interno normalizado** — el Excel trae `CAU11370` donde la factura dice `11370 M2650963`. Ante varios kits candidatos desempata la descripción, y si no hay ganador claro **NO cruza**. Ver la sección "⭐ Los kits cruzan por ID interno" arriba y [[project_kits_cruce_id_interno]].
   4. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
-- **Cruce retroactivo (2026-06-19):** el match se calculaba **una sola vez**, al subir la factura. Si el proveedor facturaba ANTES de que existiera la venta (o antes de que la colecta asignara proveedor al envío), el concepto quedaba huérfano para siempre. Ahora `services/matcher.py::recruzar_conceptos_sin_match(conn)` reintenta TODOS los conceptos con `num_venta_match IS NULL` y se invoca tras cada evento que puede habilitar un cruce: subir **ventas** (`parser_ventas_ml`), subir **colecta** (`parser_colecta`, asigna proveedor) y **reasignar bodega** (`routers/envios.py::reasignar`). Idempotente (solo enriquece, nunca rompe un match existente). Verificado E2E (`backend/scripts/test_recruce_retroactivo.py`): factura subida antes que la venta → cruza al subir la venta. Ver [[project_cruce_retroactivo]].
+- **Cruce retroactivo (2026-06-19):** el match se calculaba **una sola vez**, al subir la factura. Si el proveedor facturaba ANTES de que existiera la venta (o antes de que la colecta asignara proveedor al envío), el concepto quedaba huérfano para siempre. Ahora `services/matcher.py::recruzar_conceptos_sin_match(conn)` reintenta TODOS los conceptos con `num_venta_match IS NULL` y se invoca tras cada evento que puede habilitar un cruce: subir **ventas** (`parser_ventas_ml`), subir **colecta** (`parser_colecta`, asigna proveedor) y **reasignar bodega** (`routers/envios.py::reasignar`). Idempotente. Verificado E2E (`backend/scripts/test_recruce_retroactivo.py`): factura subida antes que la venta → cruza al subir la venta. Ver [[project_cruce_retroactivo]].
+  - ⚠️ **La regla "solo enriquece, nunca rompe un match existente" CAMBIÓ el 2026-08-12.**
+    Dejaba abierto el hueco del **orden de subida**: XML hoy, PDF mañana → el concepto ya
+    cruzó por fecha (posiblemente a la venta equivocada y con conf 1.0) y nadie lo
+    reintentaba. Ahora el recruce **también CORRIGE**, pero **sólo** con el # de venta
+    impreso del PDF de KIM (paso 0) y **sólo** sobre cruces cuyo método no sea ya
+    `num_venta_proveedor`. Nunca pisa evidencia con evidencia, nunca degrada a algo más
+    débil, y un número corrupto **no destruye** un cruce previo. Ver "⭐ EL PASO 0 YA
+    EXISTE" y `docs/paso0-num-venta-pdf-kim.md`.
 
 ### Candado de tipo de archivo en uploads (2026-06-11)
 - Gaby subió por error el archivo equivocado en una sección. Los endpoints validaban solo la extensión, no el contenido. Se agregó `services/detector_archivo.py::detectar_tipo_xlsx` que identifica el tipo por su **huella de contenido** (robusto al renombrado):
@@ -394,11 +407,19 @@ dropshipping-reluvsa/
 │   │   ├── detector_archivo.py  # candado: detecta tipo de xlsx por contenido
 │   │   ├── folio_factura.py     # # de factura como lo ve cada proveedor (Serie+Folio)
 │   │   ├── uuid_pdf.py          # extrae UUID impreso del PDF (empareja PDF↔XML en subida múltiple)
-│   │   └── matcher.py           # match concepto→venta: exacto → id interno → kit → fuzzy
+│   │   ├── num_venta_pdf.py     # ⭐ SOLO KIM: lee el # de venta impreso en el PDF y lo
+│   │   │                        #   resuelve tolerando los ceros de más (R1/R2/R3)
+│   │   └── matcher.py           # match concepto→venta: ⭐ #venta del PDF (KIM) → exacto
+│   │                            #   → id interno → kit → fuzzy
 │   ├── scripts/                 # CLI + los tests de regresión (correrlos antes de commitear)
 │   │   ├── crear_usuario.py     # CLI para crear admin o proveedor
 │   │   ├── wipe_transaccional.py
-│   │   └── test_*.py            # 13 suites: kits, kit_id_interno, metricas_excluir_full,
+│   │   ├── corregir_cruces_num_venta_kim_ceros.py  # ⭐ los 228 (EJECUTADO, idempotente)
+│   │   ├── precalentar_num_venta_pdf.py            # ⬜ CORRER ANTES DE DESPLEGAR cambios
+│   │   │                        #   al paso 0: llena la caché fuera de transacción (~70 s)
+│   │   └── test_*.py            # 15 suites: paso0_num_venta_pdf (35/35),
+│   │                            #   num_venta_kim_ceros (46/46), kits, kit_id_interno,
+│   │                            #   metricas_excluir_full,
 │   │                            #   logistica_full_colecta, pack_id, sync_ml_e2e (27/27:
 │   │                            #     incluye total_neto — multi-pago, COALESCE, fallo 500),
 │   │                            #   sync_automatica, ml_client_solo_lectura, poda_
@@ -464,9 +485,17 @@ envios_colecta    (num_envio PK, num_venta, num_venta_ml, match_cruce_confianza,
                    --   (NO por num_venta; ML usa 2 folios). Resuelto en el parser.
                    -- match_cruce_confianza: 1.0 directo, <1 fuzzy, 0.8 ambiguo.
 facturas          (id, proveedor_id, uuid_cfdi, serie, folio,
-                   rfc_emisor, rfc_receptor, fecha, total, moneda, pdf_path, xml_path)
+                   rfc_emisor, rfc_receptor, fecha, total, moneda, pdf_path, xml_path,
+                   num_venta_pdf)
+                   -- num_venta_pdf = CACHÉ del # de venta impreso en el PDF (sólo KIM).
+                   --   '<num>' = hallado · '' = leído y NO trae · NULL = sin leer.
+                   --   🔴 '' y NULL son estados DISTINTOS: si "leído sin número" fuera
+                   --   NULL, el recruce reabriría ese PDF en CADA corrida (548 PDF con
+                   --   el write lock tomado). Un PDF que aún no existe NO se cachea.
 factura_conceptos (id, factura_id, codigo_prov, descripcion, cantidad, importe,
                    num_venta_match, match_method, match_confidence)
+                   -- match_method = 'num_venta_proveedor' es EVIDENCIA del proveedor
+                   --   (el # que KIM imprime): el recruce nunca la pisa ni la degrada.
 incidencias       (id, num_venta FK, proveedor_id FK, tipo, descripcion, estado)
 kit_componentes   (kit_sku, componente_codigo, cantidad)  -- tabla puente kit->componentes
                   -- PK(kit_sku, componente_codigo). kit_sku normalizado UPPER+TRIM. SIN FK
@@ -599,6 +628,38 @@ Convenciones:
 > movimiento es chico **porque sus 143 casos son de mayo-junio y el número sólo está en el
 > 19% de las facturas** — la mayoría de las 110 correcciones cayó fuera de su muestra. **No
 > reportarlo como "KIM ya quedó resuelto".**
+
+#### ⭐ KIM: ceros de más — 228 cruces corregidos hacia atrás (2026-08-12, commit `0161ade`)
+
+**Reporte de Gaby:** veía facturas *"con diferente número de factura aunque en la factura
+venga el número de venta"*; preguntó si *"se desfasaron"*. **Tenía razón: los folios
+estaban corridos un lugar.**
+
+⭐ **Y el dato que lo desbloqueó también fue suyo: KIM teclea CEROS DE MÁS.** El `order.id`
+es de 16 dígitos y sus PDF traen de **15 a 19**. Por eso el script de agosto (regex de 16
+exactos) sólo veía el **19%** de los PDF; con la tolerancia se lee el **54.5%**.
+Cobertura por mes: jun 53.5% · jul 39.9% · **ago 95.8%** — KIMS ya está cumpliendo.
+
+🔴 **NO BASTA CON "QUITAR LOS CEROS DE ADELANTE"** (1a regla probada, falla): KIM también
+mete ceros **EN MEDIO** y a veces cambia un dígito que no es cero (`K29628` imprimió
+`20000117582609224` donde el real es `2000017582609224`). Y es peligroso: esa regla
+**produce números de 16 dígitos con pinta válida** → cruce falso con conf 1.0. Por eso el
+código **no reconstruye el número: busca la venta y exige evidencia** (R1 sólo borrar
+ceros · R2 la venta debe ser de KIM · R3 el SKU debe cuadrar; ante duda NO se toca).
+
+**Ejecutado en prod** con backup `bak-20260812_224405`: **228 correcciones** (216 estaban
+en la venta EQUIVOCADA, 212 con conf 1.0), **40 ocupantes liberados** a pendiente, 194 ya
+correctos, 58 descartados por las guardas. **Filas 1288 → 1288: ninguna borrada.**
+Idempotente en la 2a corrida. Los 40 ocupantes resultaron **todos de facturas de KIM**
+(se midió la observación del api-guardian → no hizo falta guarda extra).
+
+⚠️ **El test subió de 32 a 46 y tapó un hueco REAL:** la liberación sólo se comprobaba con
+`== 0`, o sea **VERDE POR OMISIÓN** (el mismo error del `total_neto`). Los 2 casos nuevos
+—un ocupante de otra factura que **sí** se libera, y dos hermanos de la **misma** factura
+que **no** se liberan mutuamente— están **verificados por mutación**. El segundo es el bug
+que hacía **oscilar** al script hermano, y en prod existe: `K28119`.
+
+Ver `docs/paso0-num-venta-pdf-kim.md` y [[project_kim_num_venta_ceros]].
 
 #### ⭐ EL PASO 0 YA EXISTE: para KIM el matcher LEE EL PDF (2026-08-12)
 

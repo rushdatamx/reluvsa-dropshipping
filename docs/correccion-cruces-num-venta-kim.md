@@ -1,5 +1,17 @@
 # ✅ EJECUTADA — Corrección de cruces con el # de venta que KIM imprime en el PDF
 
+> ⚠️ **SUPERADO POR `docs/paso0-num-venta-pdf-kim.md` (2026-08-12/13). Leer ése primero.**
+> Lo de aquí abajo **sigue siendo cierto y no se revirtió**, pero se quedó corto por una
+> razón que entonces no se conocía: **KIM teclea ceros de más** (15-19 dígitos contra los
+> 16 del `order.id`). El script de este documento exige **16 exactos**, y por eso sólo veía
+> el **19%** de los PDF; con la tolerancia a ceros se lee el **54.5%**, lo que produjo otras
+> **228 correcciones** (commit `0161ade`).
+>
+> Además, lo de aquí fue una **corrección de datos puntual**: hoy el motor ya lo hace solo
+> (**paso 0 del matcher**, commit `0104d32`). La conclusión de abajo de que "al no estar en
+> el XML el matcher NO puede leerlo" **quedó resuelta leyendo el PDF**, porque KIMS confirmó
+> que no puede timbrarlo.
+>
 > **Estado:** **EJECUTADA EN PRODUCCIÓN el 2026-08-07 22:53 UTC.** Backup en
 > `/data/dropshipping.db.bak-20260807_225337`.
 > **Reportado por:** Gaby. **Decidido y aprobado por:** Mario.
