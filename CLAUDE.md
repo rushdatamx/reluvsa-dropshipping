@@ -488,11 +488,18 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> ✅ **Lo último que se hizo (2026-08-12, commit `3b2cf79`, ya en prod): el albarán cruza
-> también por `pack_id`.** Fue un reporte de Gaby, ya está cerrado y **no requiere
-> seguimiento técnico** — sólo que ella vuelva a subir su reporte (ya se le avisó). Detalle
-> en §3 → "⭐ El albarán cruza en DOS pasos". **Si retomas aquí, la tarea sigue siendo el
-> BUG A, abajo.**
+> ✅ **Lo último que se hizo (2026-08-12): el # de venta de KIM, cerrado en sus DOS mitades.**
+> 1. **Hacia atrás** (commit `0161ade`, EJECUTADO en prod): 228 cruces corregidos —216
+>    estaban en la venta equivocada, 212 con conf 1.0—, 40 ocupantes liberados, 0 filas
+>    borradas. La causa eran los **ceros de más** que KIM teclea. Ver §3 → "KIM: ceros".
+> 2. **Hacia adelante** (paso 0 del matcher): para KIM el portal **lee el PDF** y el #
+>    impreso le gana al cruce por fecha. Ver §3 → "⭐ EL PASO 0 YA EXISTE".
+>
+> ⬜ **Al desplegar el paso 0: correr `scripts/precalentar_num_venta_pdf.py` primero**
+> (si no, la primera carga de Gaby paga ~1 min de lock). **Gaby NO verá movimiento**:
+> medido contra las 952 facturas reales, 0 conceptos cambian de venta.
+>
+> **Si retomas aquí, la tarea sigue siendo el BUG A, abajo.**
 >
 > ℹ️ **Patrón que ya se repitió 3 veces — sospecharlo primero:** cuando un dato de ML "no
 > cruza", preguntarse **cuál de los dos números es** (`order.id` vs `pack_id`) antes de
@@ -593,7 +600,66 @@ Convenciones:
 > 19% de las facturas** — la mayoría de las 110 correcciones cayó fuera de su muestra. **No
 > reportarlo como "KIM ya quedó resuelto".**
 
-Cuando el dato llegue **en el XML**, agregar un **paso 0** antes del código exacto.
+#### ⭐ EL PASO 0 YA EXISTE: para KIM el matcher LEE EL PDF (2026-08-12)
+
+**Decisión de Mario:** *"lo que quiero es que en KIMS ahora se fije siempre en el pdf,
+ahí aseguramos que es el número de venta, sólo tomar en cuenta que algunas veces pueden
+poner 0s de más"*. Como KIMS no puede timbrarlo en el XML, se implementó leyendo el PDF
+(`services/num_venta_pdf.py` + paso 0 en `services/matcher.py`).
+
+**El criterio, y por qué:** el número impreso es **evidencia del proveedor**; los pasos
+1-4 son **inferencias nuestras**. Cuando ambos existen, gana la evidencia.
+
+| Situación | Qué hace |
+|---|---|
+| PDF con # que resuelve | **Cruza ahí**, `num_venta_proveedor` conf 1.0 — le gana a la fecha |
+| PDF con # que **NO** resuelve | 🔴 **Pendiente.** NO se cae a fecha |
+| Sin # / sin PDF (~45% hoy) | Cruza por fecha, como siempre |
+| Cualquier otro proveedor | Ni se abre su PDF |
+
+🔴 **La fila 2 es la decisión fina.** Si KIM dice "esta venta es la 2000011758…" y ese
+número no existe, el dato está corrupto: cruzar por fecha ahí sería adivinar **contra**
+lo que el propio proveedor declaró. Son ~62 facturas; quedan visibles como Pendiente.
+⚠️ **Asimetría deliberada:** en el ALTA un # corrupto deja el concepto pendiente, pero en
+el RECRUCE **no destruye un cruce que ya existía** — borrarlo quitaría información sin
+poner nada mejor. El api-guardian verificó que no hay camino de pérdida de datos.
+
+⭐ **El recruce ahora CORRIGE, no sólo enriquece.** Era la regla vieja
+(*"solo enriquece, nunca rompe un match existente"*) y dejaba abierto el hueco: si el
+proveedor sube el XML hoy y el PDF mañana, el concepto YA cruzó por fecha —posiblemente
+falso, con conf 1.0— y nadie lo reintentaba. Acotado: sólo reescribe cruces cuyo método
+**no** sea ya `num_venta_proveedor`, y sólo si el # resuelve con las 3 reglas.
+
+⚠️ **La caché NO es un detalle de rendimiento, es lo que hace viable el diseño.** El
+recruce corre dentro de la transacción de subir ventas/colecta, o sea **con el write
+lock tomado**. Sin caché habría abierto **548 PDF en CADA corrida** (~62 s de lock
+medidos por el api-guardian, y un escritor concurrente recibe `database is locked`), y
+el ~45% que no trae número se releería para siempre **sin corregir nada nunca**. Por eso
+existe `facturas.num_venta_pdf` (migración idempotente):
+
+- `'<numero>'` = el # hallado · `''` = leído y NO trae número · `NULL` = sin leer
+- 🔴 **`''` y `NULL` son estados DISTINTOS a propósito.** Si "leído sin número" se
+  guardara como NULL sería indistinguible de "sin leer" y la caché no serviría de nada.
+- Un PDF que **aún no existe** NO se cachea: puede llegar después (es justo el caso
+  XML-primero-PDF-después que esto vino a resolver).
+- ⬜ **Antes del deploy, correr `scripts/precalentar_num_venta_pdf.py`** (lee los PDF
+  fuera de transacción, commit por lotes de 50). Si no, la primera carga de Gaby paga
+  el ~1 min de lock.
+
+**Medido contra las 952 facturas reales de KIM antes de desplegar:**
+`0 conceptos cambiarían de venta` · `148 sólo se sellarían`. **Gaby no verá movimiento**
+— la corrección histórica de los 228 ya limpió el pasado; esto actúa hacia adelante.
+
+**Verificación:** `test_paso0_num_venta_pdf.py` **35/35** (con PDF reales generados al
+vuelo, no mocks de la extracción) · **5 mutaciones** que lo ponen en rojo · 12 suites de
+regresión verdes · **api-guardian APROBADO** 7/7 + 8 puntos específicos (cero red, SQL
+injection imposible, sin pérdida de información, sin oscilación en 8 corridas, PDF de
+20 MB corrupto no revienta, exclusividad de KIM probada en 7 proveedores).
+
+---
+
+Si algún día el dato llegara **en el XML**, el paso 0 se simplifica (leerlo de ahí en vez
+del PDF). Las reglas de abajo siguen aplicando igual.
 ⚠️ **3 reglas que la medición ya dejó fijadas** — no diseñarlo de otro modo:
 
 1. **Buscar primero en `num_venta` (order.id). Si hay match exacto, gana y no se sigue.**

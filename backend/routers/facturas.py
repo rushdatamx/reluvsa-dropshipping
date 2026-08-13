@@ -265,9 +265,26 @@ def _registrar_factura(conn, parsed: dict, xml_path: Path, pdf_path: Optional[Pa
     )
     factura_id = cur.lastrowid
 
+    # Paso 0 del matcher: el # de venta impreso en el PDF (sólo KIM). Se arma UNA vez y
+    # se reusa en todos los conceptos — el PDF se lee una sola vez por factura, no una
+    # por concepto. `codigos` va completo a propósito: KIM parte una venta en varias
+    # piezas y cualquiera de ellas sirve para verificar que la venta es la correcta.
+    ctx_factura = {
+        # El id habilita la caché del # impreso (facturas.num_venta_pdf): el PDF se abre
+        # una sola vez y los recruces posteriores ya no lo releen.
+        "id": factura_id,
+        # Acceso defensivo: si un llamador futuro pasa un row sin la columna, el paso 0
+        # se salta en vez de tumbar la subida de la factura.
+        "codigo_bodega": (prov_row["codigo_bodega"]
+                          if prov_row and "codigo_bodega" in prov_row.keys() else None),
+        "pdf_path": str(pdf_path) if pdf_path else None,
+        "codigos": [c.get("codigo") for c in parsed["conceptos"] if c.get("codigo")],
+    }
+
     for c in parsed["conceptos"]:
         match = match_conceptos_a_ventas(conn, user.proveedor_id, c,
-                                         fecha_factura=parsed.get("fecha"))
+                                         fecha_factura=parsed.get("fecha"),
+                                         factura=ctx_factura)
         conn.execute(
             """INSERT INTO factura_conceptos (factura_id, codigo_prov, descripcion, cantidad,
                                               precio_unitario, importe, num_venta_match, match_method, match_confidence)
@@ -393,7 +410,9 @@ async def _upload_multiple_impl(user: UserInfo, xmls: list, pdfs: list) -> dict:
     registradas = []
     with get_db() as conn:
         prov = conn.execute(
-            "SELECT rfc, nombre FROM proveedores WHERE id = ?", (user.proveedor_id,)
+            # codigo_bodega lo necesita el paso 0 del matcher (# de venta impreso, KIM).
+            "SELECT rfc, nombre, codigo_bodega FROM proveedores WHERE id = ?",
+            (user.proveedor_id,),
         ).fetchone()
         for x in xmls_info:
             pdf_path = asignados.get(x["idx"])

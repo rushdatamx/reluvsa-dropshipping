@@ -2,6 +2,11 @@
 Matcher de conceptos de factura ↔ ventas ML.
 
 Estrategia (en orden, el primero que acierta gana):
+0. ⭐ **# de venta impreso en el PDF (SÓLO KIM).** KIM escribe en su factura a qué venta
+   corresponde. Eso es EVIDENCIA del proveedor; los pasos 1-4 son inferencias nuestras,
+   así que cuando el número existe manda sobre todos ellos. Ver `services/num_venta_pdf`.
+   🔴 Si KIM puso un número y no resuelve, NO se cruza: el dato está corrupto y adivinar
+   por fecha sería contradecir lo que el propio proveedor declaró.
 1. Match exacto por código: SKU de la venta == NoIdentificacion del concepto, o substring.
 2. Match por ID interno normalizado: cada proveedor usa su propio esquema de SKU y el
    código de la factura no es idéntico al SKU de ML. Ej. CAUPLAS vende 'CAU2692' pero
@@ -20,6 +25,21 @@ import re
 from typing import Optional
 
 from rapidfuzz import fuzz, process
+
+from database import UPLOADS_DIR
+from services.num_venta_pdf import (
+    CODIGO_BODEGA_KIM,
+    CONFIANZA as CONFIANZA_NUM_IMPRESO,
+    METODO as METODO_NUM_IMPRESO,
+    extraer_numeros_pdf,
+    resolver_num_venta_impreso,
+    resolver_pdf,
+)
+
+# Misma carpeta que usa `routers/facturas.py` (volumen persistente). Se deriva de
+# UPLOADS_DIR y no se importa del router: un service que importa de un router invierte
+# la dependencia y crea un import circular en cuanto el router importe el matcher.
+FACTURAS_DIR = UPLOADS_DIR / "facturas"
 
 CONFIDENCE_MIN_FUZZY = 0.6
 
@@ -349,18 +369,71 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     return None
 
 
+def _match_por_num_impreso(conn, proveedor_id: int, factura: dict,
+                           fecha_factura: Optional[str]) -> Optional[dict]:
+    """Paso 0: el # de venta que KIM imprime en el PDF. Devuelve dict, "CORRUPTO" o None.
+
+    Tres desenlaces, y la diferencia entre los dos últimos es la clave del diseño:
+
+    - dict          -> el número resuelve a UNA venta con evidencia. Se cruza ahí.
+    - "CORRUPTO"    -> KIM SÍ puso número pero no resuelve (ceros irrecuperables, SKU que
+                       no cuadra, o varias candidatas). 🔴 El llamador NO debe seguir a
+                       los pasos 1-4: el proveedor ya declaró cuál es la venta y ese dato
+                       no cuadra, así que cruzar por fecha sería adivinar CONTRA la
+                       evidencia. Queda pendiente y visible.
+    - None          -> no hay número que leer (sin PDF, PDF ilegible, o KIM no lo puso en
+                       esta factura). Se sigue normal: hoy ~45% de sus facturas están así
+                       y dejarlas pendientes le crearía a Gaby trabajo manual que no tiene.
+    """
+    if not factura:
+        return None
+    # ⚠️ EXCLUSIVO DE KIM: es el único proveedor que imprime el número, y la tolerancia a
+    # ceros es un error de captura observado sólo en él (mandato de Mario).
+    if (factura.get("codigo_bodega") or "").strip().upper() != CODIGO_BODEGA_KIM:
+        return None
+
+    # Varios números distintos en un PDF es ambiguo: no sabemos cuál es la venta. Se
+    # trata como ausencia, no como corrupción — puede ser que la plantilla de KIM traiga
+    # otro número largo que aún no conocemos, y no queremos bloquear la factura por eso.
+    impreso = _num_impreso_cacheado(conn, factura.get("id"), factura.get("pdf_path"))
+    if not impreso:
+        return None
+
+    codigos = factura.get("codigos") or []
+    num_venta = resolver_num_venta_impreso(
+        conn, proveedor_id, impreso, codigos, fecha_factura
+    )
+    if not num_venta:
+        return "CORRUPTO"
+
+    return {"num_venta": num_venta, "method": METODO_NUM_IMPRESO,
+            "confidence": CONFIANZA_NUM_IMPRESO}
+
+
 def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
-                             fecha_factura: Optional[str] = None) -> Optional[dict]:
+                             fecha_factura: Optional[str] = None,
+                             factura: Optional[dict] = None) -> Optional[dict]:
     """Cruza un concepto de factura a la venta que le corresponde.
 
     `fecha_factura` (opcional, ISO) acota las candidatas a las ventas que ya existían
     cuando se emitió la factura — ver `_filtro_fecha`. Es lo que impide que la factura se
     vaya a una venta arbitraria cuando el mismo SKU se vendió varias veces. Se pasa desde
     `routers/facturas.py` y desde el recruce; omitirla conserva el comportamiento anterior.
+
+    `factura` (opcional) habilita el PASO 0 — el # de venta impreso en el PDF de KIM. Es
+    un dict `{codigo_bodega, pdf_path, codigos}`. Omitirlo conserva el comportamiento
+    anterior exacto, por eso los tests y scripts viejos siguen valiendo sin tocarse.
     """
     codigo = (concepto.get("codigo") or "").strip()
     descripcion = (concepto.get("descripcion") or "").strip()
     f_sql, f_par = _filtro_fecha(fecha_factura)
+
+    # 0) El # de venta impreso por el proveedor gana sobre cualquier inferencia nuestra.
+    por_impreso = _match_por_num_impreso(conn, proveedor_id, factura, fecha_factura)
+    if por_impreso == "CORRUPTO":
+        return None
+    if por_impreso:
+        return por_impreso
 
     # 1) Match exacto por código contra SKU
     if codigo:
@@ -440,8 +513,19 @@ def recruzar_conceptos_sin_match(conn) -> dict:
     Esta función corre tras subir ventas/colecta: toma cada concepto sin cruzar,
     reconstruye su dict y reintenta match_conceptos_a_ventas con el proveedor de su
     factura. Si ahora cruza, actualiza el concepto. Idempotente: lo que sigue sin
-    cruzar se queda en NULL para el siguiente intento. Solo enriquece, nunca rompe
-    un match existente.
+    cruzar se queda en NULL para el siguiente intento.
+
+    ⭐ ADEMÁS (2026-08-12) CORRIGE los cruces por INFERENCIA de KIM cuando aparece el
+    # de venta impreso. Hasta hoy esta función "sólo enriquecía, nunca rompía un match
+    existente", y esa regla dejaba abierto el hueco que motivó todo esto: si el
+    proveedor sube el XML hoy y el PDF mañana, el concepto YA cruzó por fecha —
+    posiblemente a la venta equivocada y con confianza 1.0 — y nadie lo reintentaba.
+    Justo el estado que produjo los 216 cruces falsos que se corrigieron a mano.
+
+    🔴 Lo que se corrige está acotado a propósito: SÓLO se reescribe un cruce cuyo
+    método NO sea ya `num_venta_proveedor`, y SÓLO si el # impreso resuelve con las 3
+    reglas. O sea, la evidencia del proveedor le gana a nuestra inferencia, pero jamás
+    se pisa una evidencia con otra ni se degrada un cruce a algo más débil.
     """
     pendientes = conn.execute(
         """SELECT fc.id, fc.codigo_prov, fc.descripcion, f.proveedor_id, f.fecha_factura
@@ -462,6 +546,7 @@ def recruzar_conceptos_sin_match(conn) -> dict:
             conn, c["proveedor_id"],
             {"codigo": c["codigo_prov"], "descripcion": c["descripcion"]},
             fecha_factura=c["fecha_factura"],
+            factura=_ctx_factura(conn, c["id"]),
         )
         if match:
             conn.execute(
@@ -472,4 +557,147 @@ def recruzar_conceptos_sin_match(conn) -> dict:
             )
             recruzados += 1
 
-    return {"conceptos_sin_match": len(pendientes), "conceptos_recruzados": recruzados}
+    corregidos = _corregir_por_num_impreso(conn)
+
+    return {"conceptos_sin_match": len(pendientes), "conceptos_recruzados": recruzados,
+            "conceptos_corregidos_por_pdf": corregidos}
+
+
+def _ctx_factura(conn, concepto_id: int) -> Optional[dict]:
+    """Arma el contexto del paso 0 para un concepto: bodega, PDF y códigos hermanos.
+
+    Devuelve None ante cualquier ausencia — sin PDF, sin proveedor, o un esquema que no
+    tenga las columnas. El paso 0 es un ENRIQUECIMIENTO: si no se puede armar, el cruce
+    sigue por los pasos 1-4 como siempre. Nunca debe tumbar el recruce, que corre dentro
+    de la transacción de subir ventas/colecta.
+    """
+    try:
+        f = conn.execute(
+            """SELECT f.id, f.pdf_path, p.codigo_bodega
+               FROM factura_conceptos fc
+               JOIN facturas f ON f.id = fc.factura_id
+               LEFT JOIN proveedores p ON p.id = f.proveedor_id
+               WHERE fc.id = ?""",
+            (concepto_id,),
+        ).fetchone()
+    except Exception:
+        return None
+    if not f or not f["pdf_path"]:
+        return None
+    codigos = [r["codigo_prov"] for r in conn.execute(
+        "SELECT codigo_prov FROM factura_conceptos WHERE factura_id = ?", (f["id"],)
+    ) if r["codigo_prov"]]
+    return {"id": f["id"], "codigo_bodega": f["codigo_bodega"],
+            "pdf_path": f["pdf_path"], "codigos": codigos}
+
+
+def _num_impreso_cacheado(conn, factura_id: Optional[int], pdf_path: Optional[str]
+                          ) -> Optional[str]:
+    """Devuelve el # impreso de una factura, leyendo el PDF UNA sola vez en la vida.
+
+    Abrir un PDF cuesta ~200 ms y el recruce corre tras cada carga de ventas/colecta,
+    dentro de su transacción. Sin caché serían cientos de aperturas por corrida (medido
+    en prod: 548 facturas), y la mayoría sin número — trabajo puro, repetido para
+    siempre. Se persiste en `facturas.num_venta_pdf`.
+
+    Distingue "" (leído, no trae número) de NULL (sin leer): ver la migración. Devuelve
+    None cuando no hay número utilizable.
+    """
+    if factura_id is not None:
+        try:
+            row = conn.execute(
+                "SELECT num_venta_pdf FROM facturas WHERE id = ?", (factura_id,)
+            ).fetchone()
+        except Exception:
+            row = None
+        if row is not None and row["num_venta_pdf"] is not None:
+            return row["num_venta_pdf"] or None       # '' -> None, sin releer el PDF
+
+    ruta = resolver_pdf(pdf_path, str(FACTURAS_DIR))
+    if not ruta:
+        return None                                    # no se cachea: el PDF puede llegar
+
+    numeros = extraer_numeros_pdf(ruta)
+    # Varios números distintos es ambiguo: se trata como ausencia (puede ser otro dato
+    # largo de la plantilla), pero SÍ se cachea — releerlo daría lo mismo.
+    valor = numeros[0] if len(numeros) == 1 else ""
+    if factura_id is not None:
+        try:
+            conn.execute("UPDATE facturas SET num_venta_pdf = ? WHERE id = ?",
+                         (valor, factura_id))
+        except Exception:
+            pass
+    return valor or None
+
+
+def _corregir_por_num_impreso(conn) -> int:
+    """Reescribe los cruces por inferencia de KIM cuando el PDF trae el # de venta.
+
+    Cierra el hueco del PDF que llega DESPUÉS del XML. Sólo mira facturas de KIM con PDF
+    que tengan algún concepto cruzado por un método distinto de `num_venta_proveedor`;
+    una vez corregida, la factura deja de entrar en el conjunto (idempotente).
+
+    ⚠️ Y se excluyen las que ya se leyeron y NO traen número (`num_venta_pdf = ''`). Sin
+    eso el recruce reabriría cientos de PDF en cada corrida para no corregir nada: en
+    prod entrarían 548 facturas de KIM y ~45% no trae número. Ése es el trabajo que la
+    caché elimina — no el de las que sí lo traen, que se corrigen una vez y salen solas.
+
+    ⚠️ Un concepto cuyo cruce ya coincide con la venta impresa se ACTUALIZA igual (para
+    sellar el método y la confianza), pero no se cuenta como corregido: contar ahí haría
+    que el contador nunca llegara a cero y pareciera que el recruce no converge.
+    """
+    try:
+        facturas = conn.execute(
+            """SELECT DISTINCT f.id, f.pdf_path, f.fecha_factura, f.proveedor_id
+                FROM facturas f
+                JOIN proveedores p ON p.id = f.proveedor_id
+                JOIN factura_conceptos fc ON fc.factura_id = f.id
+                WHERE p.codigo_bodega = ?
+                  AND f.pdf_path IS NOT NULL
+                  AND COALESCE(f.num_venta_pdf, 'x') != ''
+                  AND fc.num_venta_match IS NOT NULL
+                  AND COALESCE(fc.match_method, '') != ?""",
+            (CODIGO_BODEGA_KIM, METODO_NUM_IMPRESO),
+        ).fetchall()
+    except Exception:
+        # Esquema sin las columnas (tests con tablas mínimas): no hay nada que corregir.
+        return 0
+
+    corregidos = 0
+    for f in facturas:
+        impreso = _num_impreso_cacheado(conn, f["id"], f["pdf_path"])
+        if not impreso:
+            continue
+
+        conceptos = conn.execute(
+            """SELECT id, codigo_prov, num_venta_match, match_method
+               FROM factura_conceptos WHERE factura_id = ?""",
+            (f["id"],),
+        ).fetchall()
+        codigos = [c["codigo_prov"] for c in conceptos if c["codigo_prov"]]
+
+        real = resolver_num_venta_impreso(
+            conn, f["proveedor_id"], impreso, codigos, f["fecha_factura"]
+        )
+        if not real:
+            # KIM puso un número que no resuelve. NO se toca lo que ya está: aquí, a
+            # diferencia del alta, ya existe un cruce previo y borrarlo destruiría
+            # información sin poner nada mejor en su lugar.
+            continue
+
+        for c in conceptos:
+            if c["match_method"] == METODO_NUM_IMPRESO:
+                continue
+            if c["num_venta_match"] is None:
+                continue
+            cambia = c["num_venta_match"] != real
+            conn.execute(
+                """UPDATE factura_conceptos
+                   SET num_venta_match = ?, match_method = ?, match_confidence = ?
+                   WHERE id = ?""",
+                (real, METODO_NUM_IMPRESO, CONFIANZA_NUM_IMPRESO, c["id"]),
+            )
+            if cambia:
+                corregidos += 1
+
+    return corregidos

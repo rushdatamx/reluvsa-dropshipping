@@ -391,6 +391,7 @@ def init_database():
         _migrar_columna_pack_id(cursor)
         _migrar_columna_total_neto(cursor)
         _migrar_columna_logistic_type(cursor)
+        _migrar_columna_num_venta_pdf(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -524,6 +525,30 @@ def _migrar_columna_albaran(cursor):
     if "albaran" not in cols:
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN albaran TEXT")
         print("[migracion] ventas_ml.albaran agregada.")
+
+
+def _migrar_columna_num_venta_pdf(cursor):
+    """Migración idempotente: agrega facturas.num_venta_pdf (caché del # impreso).
+
+    KIM escribe el # de venta de ML en el PDF de su factura pero NO lo timbra en el
+    XML, así que el paso 0 del matcher tiene que ABRIR EL PDF para leerlo. Sin caché,
+    el recruce (que corre tras cada carga de ventas/colecta) reabriría cientos de PDF
+    en cada corrida — medido en prod: 548 facturas de KIM entrarían al conjunto, y la
+    mayoría NO trae número, así que se releerían para siempre sin corregir nada nunca.
+
+    Esta columna guarda el resultado de la lectura para no repetirla:
+        '<numero>'  -> el # impreso que se halló
+        ''          -> se leyó el PDF y NO trae número (o trae varios: ambiguo)
+        NULL        -> todavía no se ha leído
+
+    ⚠️ El string vacío y el NULL son estados DISTINTOS a propósito. Si "leído y sin
+    número" se guardara como NULL, sería indistinguible de "sin leer" y el recruce
+    volvería a abrir ese PDF en cada corrida — justo lo que la caché evita.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(facturas)").fetchall()}
+    if "num_venta_pdf" not in cols:
+        cursor.execute("ALTER TABLE facturas ADD COLUMN num_venta_pdf TEXT")
+        print("[migracion] facturas.num_venta_pdf agregada.")
 
 
 def _migrar_columna_total_neto(cursor):
