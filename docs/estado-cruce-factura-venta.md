@@ -1,10 +1,11 @@
 # 📍 ESTADO DEL CRUCE FACTURA ↔ VENTA — punto de entrada
 
-> **Última actualización:** 2026-08-12/13 — **el # de venta de KIM quedó cerrado en sus dos
-> mitades**: 228 cruces corregidos hacia atrás (`0161ade`) y el **paso 0 del matcher**, que
-> lee el PDF, desplegado y verificado en prod (`0104d32`).
+> **Última actualización:** 2026-08-17 — **CAUPLAS: la factura ya no puede ser anterior a la
+> venta que ampara** (`18e0ed4`). Reporte de Gaby con verdad de campo de 22 ventas anotadas a
+> mano. El caso que reportó quedó en el folio correcto; **el resto necesita una tanda más
+> grande de anotaciones suyas** (ver #7 abajo).
 > **Este documento es el índice.** Dice qué está cerrado, qué sigue abierto y dónde está el
-> detalle de cada cosa. Léelo primero; los otros 3 documentos son el detalle.
+> detalle de cada cosa. Léelo primero; los otros documentos son el detalle.
 >
 > ⚠️ **Antes de tocar `backend/services/matcher.py`, leer también
 > `docs/hallazgo-cruce-factura-venta.md`** (trae las hipótesis ya descartadas).
@@ -29,6 +30,25 @@ causa que **no depende de nosotros**: que los proveedores pongan el # de venta e
 | 4 | **BUG A**: ventas de carrito **sin envío** → invisibles para el matcher | ✅ **CERRADO** 2026-08-17 | — |
 | 5 | Los falsos de KIM (facturas del mismo día, indistinguibles por fecha) | ✅ **CERRADO** `0161ade` + `0104d32` | — |
 | 6 | El ~45% de facturas de KIM **sin # impreso** degrada a fecha **en silencio** | 🟡 **ABIERTO** | **KIMS** (leyenda fija) |
+| 7 | **CAUPLAS**: la factura se iba a una venta **posterior a su propia emisión** | 🟡 **PARCIAL** `18e0ed4` | **Gaby** (60-80 ventas anotadas) |
+
+### El #7 (CAUPLAS) se arregló a medias el 2026-08-17 — ver `docs/cauplas-factura-anterior-a-la-venta.md`
+
+Reportado por Gaby: *"esta venta en la pagina hizo cruce con esta fac 970096782, pero en la
+factura viene con la 970096819"*. CAUPLAS **reusa el ID interno de la pieza** en todas sus
+facturas y sólo cambia el folio de pedido (`M######`); el matcher comparaba nada más el ID
+interno y podía llevarse una venta ocurrida **horas después** de emitirse la factura.
+
+**Lo que se arregló:** el motor ahora **PREFIERE** las ventas que ya existían cuando se emitió
+la factura (`_orden_candidatas`), y un script corrige hacia atrás los cruces imposibles.
+El caso que reportó Gaby ya sale con el folio correcto; **0 cruces buenos rotos**.
+
+🔴 **Lo que NO se arregló, y por qué:** de los 6 folios equivocados que ella marcó, esto cierra
+**1**. Los otros 5 exigen **desplazar cruces en cadena**, y la reasignación global —que subiría
+los aciertos de 15 a 19— movería **96 conceptos de los cuales ~75 no tienen verificación**
+(su muestra cubre el 6%). Es el mismo riesgo que en la limpieza de los 243 casi destruye 15
+cruces legítimos con conf 1.0. **Se le pidió a Gaby una tanda de 60-80 ventas anotadas** para
+poder validarlo; sin eso no se toca.
 
 ⚠️ **4 y 5 eran independientes** y se cerraron por separado: el # de venta (5) **no arreglaba**
 el BUG A (4), porque una venta sin envío no tiene proveedor y el matcher sólo busca

@@ -591,7 +591,42 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> ✅ **Lo último que se hizo (2026-08-17): el BUG A, la tarea #1, CERRADA.** Reportado por
+> 🟡 **LO ÚLTIMO (2026-08-17, commit `18e0ed4`, EJECUTADO en prod): CAUPLAS — la factura ya
+> no puede ser anterior a la venta que ampara.** Reportado por Gaby: *"esta venta en la
+> pagina hizo cruce con esta fac 970096782, pero en la factura viene con la 970096819"*.
+>
+> **Su archivo NO era un export del portal:** le agregó **una columna a mano** con el folio
+> impreso en cada PDF — verdad de campo de 22 ventas. Contra ella el portal acertaba 15,
+> ponía **6 folios malos** y marcaba 1 como no facturada estándolo.
+>
+> **Causa:** CAUPLAS **reusa el ID interno de la pieza en TODAS sus facturas** y sólo cambia
+> el folio de pedido de al lado (`M######`). El matcher comparaba nada más el ID interno →
+> se llevaba ventas ocurridas **horas DESPUÉS** de emitirse la factura (la de Gaby: factura
+> 12-ago 16:17, venta 12-ago 18:10).
+>
+> **Ejecutado en prod** (backup `bak-20260817_225104`): la venta de Gaby quedó en
+> **970096819** ✅ · 244 conceptos cruzados conservados · **1400 filas intactas, cero
+> borrados** · integridad ok · idempotente.
+>
+> 🔴 **NO decirle a Gaby que "CAUPLAS ya quedó resuelto".** De sus **6 folios malos esto
+> arregla 1**. Los otros 5 exigen **desplazar cruces en cadena**: la reasignación global
+> subiría los aciertos de 15 a 19, **pero movería 96 conceptos de los cuales ~75 no tienen
+> ninguna verificación** (su muestra cubre el 6% de los 339). Es el mismo riesgo que en la
+> limpieza de los 243 casi destruye 15 cruces legítimos con conf 1.0.
+> ⬜ **Se le pidió a Gaby una tanda de 60-80 ventas anotadas**; sin eso NO se toca.
+>
+> ⭐ **LEER `docs/cauplas-factura-anterior-a-la-venta.md`** antes de tocar `_orden_candidatas`
+> o `_filtro_fecha`: trae las **4 reglas** (entre ellas que es una **PREFERENCIA y no un
+> filtro** — una candidata única posterior sí cruza, o la venta `2000017927450774` quedaría
+> pendiente para siempre) y las 6 mutaciones que ponen el test en rojo.
+>
+> ⚠️ **Gotcha de entorno:** macOS cachea el bytecode en
+> `~/Library/Caches/com.apple.python/<ruta del repo>/`, **FUERA del repo** → borrar los
+> `__pycache__` NO lo limpia. Un test se quedó en rojo con el código ya correcto por eso.
+>
+> ---
+>
+> ✅ **Lo anterior (2026-08-17): el BUG A, la tarea #1, CERRADA.** Reportado por
 > Gaby (*"este número de venta sólo viene asociado a un sku cuando la venta es de 2 skus"*).
 > ML cuelga UN solo envío por carrito de UNA sola de las N órdenes → las demás quedaban sin
 > envío, sin proveedor e **invisibles para el matcher**.
@@ -1485,6 +1520,7 @@ A construir:
 | `docs/configuracion-app-ml.md` | Antes de tocar OAuth / la config del DevCenter |
 | `docs/paso0-num-venta-pdf-kim.md` | Antes de tocar el paso 0 del matcher o el # de venta de KIM |
 | `docs/bug-a-envio-carrito.md` | ⭐ Antes de tocar el cruce venta↔envío o `services/envio_pack.py` |
+| `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |
