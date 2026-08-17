@@ -89,6 +89,13 @@ def _filtro_fecha(fecha_factura: Optional[str]):
     Se compara con `date()` (no el timestamp) porque `fecha_venta` viene de ML con hora y
     `fecha_factura` del XML: una factura emitida a las 10:00 del mismo día en que se vendió
     a las 14:00 es legítima, y comparar timestamps la descartaría.
+
+    🔴 NO cambiar el `date()` por una comparación de timestamps para "arreglar" el caso de
+    la factura emitida horas antes de la venta. Se midió (2026-08-17, sobre la copia de
+    prod): hacerlo destruiría **15 cruces legítimos con confianza 1.0**, porque CAUPLAS y
+    KIM facturan a lo largo del día y muchas facturas buenas se emiten antes de la venta
+    que amparan. El desempate del mismo día se resuelve en `_orden_candidatas`, que
+    PREFIERE la venta anterior a la factura sin DESCARTAR a las demás.
     """
     if not fecha_factura:
         return "", []
@@ -96,6 +103,38 @@ def _filtro_fecha(fecha_factura: Optional[str]):
         " AND date(v.fecha_venta) <= date(?) "
         " AND date(v.fecha_venta) >= date(?, '-' || ? || ' days') ",
         [fecha_factura, fecha_factura, VENTANA_FACTURACION_DIAS],
+    )
+
+
+def _orden_candidatas(fecha_factura: Optional[str]):
+    """Devuelve (sql_order, params) para ordenar las ventas candidatas de un concepto.
+
+    ⭐ EL ARREGLO DE 2026-08-17 (reporte de Gaby sobre CAUPLAS). El `ORDER BY
+    v.fecha_venta DESC` a secas tiene un empate silencioso: cuando la factura y varias
+    ventas caen el MISMO día, "la más reciente" puede ser una venta que ocurrió HORAS
+    DESPUÉS de que se emitiera la factura. Físicamente imposible: nadie factura lo que
+    todavía no ha vendido.
+
+    El caso real que lo destapó (venta `2000017906137676`, KIT0342):
+
+        factura 970096782 emitida  12-ago 16:17
+        venta            ocurrida  12-ago 18:10   <- se la llevó, 2 h ANTES de existir
+        factura 970096819 emitida  13-ago 16:19   <- la de verdad, quedó huérfana
+
+    La corrección es un CRITERIO DE PREFERENCIA, no un filtro: primero las ventas que ya
+    existían cuando se emitió la factura (`fecha_venta <= fecha_factura`), y dentro de
+    cada grupo la más reciente. Las posteriores del mismo día siguen siendo elegibles —
+    quedan al final — porque el `date()` del filtro las admite a propósito (ver
+    `_filtro_fecha`) y descartarlas rompería 15 cruces buenos.
+
+    Con `fecha_factura=None` el orden es el de siempre, así que los llamadores que no
+    tienen la fecha a mano (tests y scripts viejos) no cambian de comportamiento.
+    """
+    if not fecha_factura:
+        return " ORDER BY v.fecha_venta DESC, v.num_venta DESC ", []
+    return (
+        " ORDER BY (v.fecha_venta <= ?) DESC, v.fecha_venta DESC, v.num_venta DESC ",
+        [fecha_factura],
     )
 
 
@@ -129,6 +168,7 @@ def _match_por_id_interno(conn, proveedor_id: int, codigo: str,
     if not cod_tokens:
         return None
     f_sql, f_par = _filtro_fecha(fecha_factura)
+    o_sql, o_par = _orden_candidatas(fecha_factura)
     candidates = conn.execute(
         f"""SELECT v.num_venta, v.sku
            FROM ventas_ml v
@@ -138,9 +178,9 @@ def _match_por_id_interno(conn, proveedor_id: int, codigo: str,
              AND fc.id IS NULL
              AND v.sku IS NOT NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC, v.num_venta DESC
+           {o_sql}
            LIMIT 1000""",
-        (proveedor_id, *f_par),
+        (proveedor_id, *f_par, *o_par),
     ).fetchall()
     for c in candidates:
         sku_tokens = _tokens_codigo(c["sku"])
@@ -260,6 +300,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     #     guarda, un componente corto como '409' cruza contra CUALQUIER concepto que lo
     #     contenga ('409  M2650963'), y en prod ese código vive en 21 kits distintos.
     f_sql, f_par = _filtro_fecha(fecha_factura)
+    o_sql, o_par = _orden_candidatas(fecha_factura)
     row = conn.execute(
         f"""SELECT v.num_venta
            FROM ventas_ml v
@@ -273,9 +314,9 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
                         AND ( ? LIKE '%' || kc.componente_codigo || '%'
                               OR kc.componente_codigo LIKE '%' || ? || '%' ) ) )
              {f_sql}
-           ORDER BY v.fecha_venta DESC, v.num_venta DESC
+           {o_sql}
            LIMIT 1""",
-        (proveedor_id, codigo, codigo, codigo, *f_par),
+        (proveedor_id, codigo, codigo, codigo, *f_par, *o_par),
     ).fetchone()
     if row:
         return {"num_venta": row["num_venta"], "method": "kit_componente", "confidence": 0.95}
@@ -294,9 +335,9 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC, v.num_venta DESC
+           {o_sql}
            LIMIT 2000""",
-        (proveedor_id, *f_par),
+        (proveedor_id, *f_par, *o_par),
     ).fetchall()
 
     # Ya vienen ordenados por fecha desc: el primero de cada venta gana el desempate
@@ -428,6 +469,7 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
     codigo = (concepto.get("codigo") or "").strip()
     descripcion = (concepto.get("descripcion") or "").strip()
     f_sql, f_par = _filtro_fecha(fecha_factura)
+    o_sql, o_par = _orden_candidatas(fecha_factura)
 
     # 0) El # de venta impreso por el proveedor gana sobre cualquier inferencia nuestra.
     por_impreso = _match_por_num_impreso(conn, proveedor_id, factura, fecha_factura)
@@ -447,9 +489,9 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
                  AND fc.id IS NULL
                  AND (v.sku = ? OR v.sku LIKE ?)
                  {f_sql}
-               ORDER BY v.fecha_venta DESC, v.num_venta DESC
+               {o_sql}
                LIMIT 1""",
-            (proveedor_id, codigo, f"%{codigo}%", *f_par),
+            (proveedor_id, codigo, f"%{codigo}%", *f_par, *o_par),
         ).fetchone()
         if row:
             return {"num_venta": row["num_venta"], "method": "codigo_exact", "confidence": 1.0}
@@ -478,9 +520,9 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
              AND fc.id IS NULL
              AND v.titulo IS NOT NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC, v.num_venta DESC
+           {o_sql}
            LIMIT 500""",
-        (proveedor_id, *f_par),
+        (proveedor_id, *f_par, *o_par),
     ).fetchall()
 
     if not candidates:
