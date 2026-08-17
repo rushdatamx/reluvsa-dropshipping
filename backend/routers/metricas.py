@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from database import get_db
 from models import UserInfo
 from routers.auth import get_current_user
+from services.envio_pack import ENVIO_CUBRE_VENTA
 
 router = APIRouter(prefix="/api/metricas", tags=["metricas"])
 
@@ -64,12 +65,20 @@ def metricas_proveedores(
             # ser LEFT y no JOIN: un concepto cruzado a una venta que todavía no tiene envío
             # desaparecería de la métrica y cambiaría los números de hoy. Con LEFT, esa venta
             # deja logistic_type en NULL y NO_ES_FULL la conserva.
+            # ⚠️ El AVG se deja SIN deduplicar a propósito. Una venta con varios envíos hace
+            # pesar su factura una vez por envío; es un sesgo PREEXISTENTE que
+            # test_metricas_excluir_full.py fija explícitamente (avg(5,5,10)=6.7) para que un
+            # refactor no lo mueva sin darse cuenta. Se midió antes de tocarlo: de los 1,243
+            # conceptos cruzados en prod, CERO quedan con más de un envío tras el cambio de
+            # carrito, así que deduplicar aquí no arreglaría ningún número real y sí alteraría
+            # una métrica que Gaby ya lee. Si algún día ese conteo deja de ser 0, la decisión
+            # de cambiar el promedio es de negocio y hay que tomarla con ella.
             tiempo_fact = conn.execute(
                 f"""SELECT AVG(JULIANDAY(f.fecha_factura) - JULIANDAY(v.fecha_venta)) as avg_dias
                    FROM facturas f
                    JOIN factura_conceptos fc ON fc.factura_id = f.id
                    JOIN ventas_ml v ON v.num_venta = fc.num_venta_match
-                   LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+                   LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
                    WHERE f.proveedor_id = ? AND v.fecha_venta IS NOT NULL AND f.fecha_factura IS NOT NULL
                      AND {NO_ES_FULL}""",
                 (pid,),
@@ -78,11 +87,17 @@ def metricas_proveedores(
             # Un concepto SIN cruzar (num_venta_match IS NULL) no tiene venta ni envío que
             # consultar, así que no puede ser FULL: se cuenta siempre. El filtro de FULL sólo
             # aplica a los conceptos que sí cruzaron pero con confianza baja.
+            # COUNT(DISTINCT fc.id), no COUNT(*): el LEFT JOIN a envíos puede devolver
+            # varias filas por concepto (la venta tiene su propio envío y además queda
+            # cubierta por el del paquete), y un COUNT(*) contaría el MISMO error 2 veces,
+            # inflando la métrica que Gaby usa para reclamarle al proveedor. Es la trampa
+            # 2 ya fijada en test_metricas_excluir_full.py, ahora que una venta puede
+            # resolver a más de un envío. Ver services/envio_pack.py.
             errores = conn.execute(
-                f"""SELECT COUNT(*) c FROM factura_conceptos fc
+                f"""SELECT COUNT(DISTINCT fc.id) c FROM factura_conceptos fc
                    JOIN facturas f ON f.id = fc.factura_id
                    LEFT JOIN ventas_ml v ON v.num_venta = fc.num_venta_match
-                   LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+                   LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
                    WHERE f.proveedor_id = ?
                      AND (fc.num_venta_match IS NULL
                           OR (fc.match_confidence < 0.5 AND {NO_ES_FULL}))""",

@@ -392,6 +392,7 @@ def init_database():
         _migrar_columna_total_neto(cursor)
         _migrar_columna_logistic_type(cursor)
         _migrar_columna_num_venta_pdf(cursor)
+        _migrar_envio_pack_id(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -679,6 +680,78 @@ def _migrar_proveedor_desde_lugar_indicado(cursor):
 
     if actualizados:
         print(f"[migracion] proveedor_id re-resuelto desde 'Lugar indicado' (J): {actualizados} envíos.")
+
+
+def _migrar_envio_pack_id(cursor):
+    """Migración idempotente: agrega envios_colecta.pack_id y lo rellena desde la
+    venta a la que el envío ya está cruzado (BUG A).
+
+    EL PROBLEMA (reportado por Gaby, 2026-08-17): Mercado Libre crea UN SOLO envío
+    por carrito y lo cuelga de UNA SOLA de las N órdenes del pack. Las demás ventas
+    del mismo paquete quedan sin envío -> sin proveedor -> INVISIBLES para el
+    matcher, que sólo busca candidatas con "WHERE e.proveedor_id = ?". Medido en
+    prod: 796 packs multi-venta = 1,714 ventas, de las cuales 918 sin envío.
+
+    LA SOLUCIÓN: guardar el pack_id EN EL ENVÍO. Así una venta puede resolver su
+    envío de dos formas: directa (e.num_venta_ml = v.num_venta) o por pertenecer al
+    mismo paquete (e.pack_id = v.pack_id). Ver ENVIO_DE_VENTA en envio_pack.py.
+
+    🔴 POR QUÉ UNA COLUMNA Y NO FILAS DUPLICADAS: la alternativa "obvia" era insertar
+    un envío por venta del pack. Eso ROMPE EL SLA. Las métricas cuentan
+    "COUNT(*) FROM envios_colecta", así que un carrito de 6 que llega tarde pesaría
+    6 veces contra el proveedor. Gaby fue explícita: "como 1 retraso porque en
+    general me cuenta toda la venta como 1 retrasada". Con una columna, envios_colecta
+    conserva UNA fila por envío real y el SLA sigue contando una vez por paquete
+    SIN tocar metricas.py.
+
+    El relleno usa el pack_id de la venta cruzada (no una llamada a ML): el dato ya
+    está en ventas_ml.pack_id desde el commit f325b2f. Idempotente: sólo escribe
+    donde el valor cambia, así que converge y no reescribe en cada arranque.
+
+    ⚠️ INVARIANTE: esto es un ESPEJO estricto de ventas_ml.pack_id, no un COALESCE. Si
+    la venta tuviera pack_id NULL y el envío lo tuviera poblado, esta migración lo
+    LIMPIARÍA. Hoy es seguro porque la fuente de verdad está protegida
+    (`sync_ml.py` escribe ventas_ml.pack_id con COALESCE, así que nunca vuelve a NULL) y
+    porque el sync es el único escritor de envios_colecta.pack_id. El comportamiento
+    espejo es justo lo que hace converger la idempotencia. 🔴 Si algún día algo puebla
+    envios_colecta.pack_id por FUERA del sync, esta migración lo borrará en el siguiente
+    arranque — habría que cambiarla a COALESCE antes de introducir ese segundo escritor.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(envios_colecta)").fetchall()}
+    if "pack_id" not in cols:
+        cursor.execute("ALTER TABLE envios_colecta ADD COLUMN pack_id TEXT")
+        print("[migracion] envios_colecta.pack_id agregada.")
+
+    # ¿Existe ventas_ml.pack_id? En una BD vieja aún no, y el UPDATE de abajo
+    # reventaría. (pack_id de ventas_ml lo agrega _migrar_columna_pack_id, que corre
+    # antes que ésta en init_database, pero la guarda mantiene el orden irrelevante.)
+    vcols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "pack_id" not in vcols:
+        return
+
+    # El índice va aquí y NO en el SCHEMA: sobre una BD existente la columna no
+    # existe cuando corre el executescript del SCHEMA y el CREATE INDEX reventaría
+    # el script entero (el bug que tumbó Railway con idx_envios_venta_ml, CLAUDE.md §10).
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_envios_pack_id ON envios_colecta(pack_id)"
+    )
+
+    # Rellena el pack_id del envío desde la venta a la que ya está cruzado. El
+    # "IS NOT" (no "!=") es deliberado: en SQL 'x != NULL' es NULL, nunca true, así
+    # que con != los envíos cuyo pack_id ya está poblado y la venta perdió el dato
+    # no se limpiarían. IS NOT compara NULLs correctamente y hace la migración
+    # idempotente de verdad.
+    cursor.execute(
+        """UPDATE envios_colecta SET pack_id = (
+               SELECT v.pack_id FROM ventas_ml v WHERE v.num_venta = envios_colecta.num_venta_ml
+           )
+           WHERE num_venta_ml IS NOT NULL
+             AND pack_id IS NOT (
+               SELECT v.pack_id FROM ventas_ml v WHERE v.num_venta = envios_colecta.num_venta_ml
+             )"""
+    )
+    if cursor.rowcount and cursor.rowcount > 0:
+        print(f"[migracion] envios_colecta.pack_id poblado: {cursor.rowcount} envíos.")
 
 
 def _bootstrap_admin(cursor):

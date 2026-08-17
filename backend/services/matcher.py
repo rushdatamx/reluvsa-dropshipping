@@ -27,6 +27,7 @@ from typing import Optional
 from rapidfuzz import fuzz, process
 
 from database import UPLOADS_DIR
+from services.envio_pack import ENVIO_CUBRE_VENTA
 from services.num_venta_pdf import (
     CODIGO_BODEGA_KIM,
     CONFIANZA as CONFIANZA_NUM_IMPRESO,
@@ -131,13 +132,13 @@ def _match_por_id_interno(conn, proveedor_id: int, codigo: str,
     candidates = conn.execute(
         f"""SELECT v.num_venta, v.sku
            FROM ventas_ml v
-           JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+           JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              AND v.sku IS NOT NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC
+           ORDER BY v.fecha_venta DESC, v.num_venta DESC
            LIMIT 1000""",
         (proveedor_id, *f_par),
     ).fetchall()
@@ -262,7 +263,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     row = conn.execute(
         f"""SELECT v.num_venta
            FROM ventas_ml v
-           JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+           JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
@@ -272,7 +273,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
                         AND ( ? LIKE '%' || kc.componente_codigo || '%'
                               OR kc.componente_codigo LIKE '%' || ? || '%' ) ) )
              {f_sql}
-           ORDER BY v.fecha_venta DESC
+           ORDER BY v.fecha_venta DESC, v.num_venta DESC
            LIMIT 1""",
         (proveedor_id, codigo, codigo, codigo, *f_par),
     ).fetchone()
@@ -287,13 +288,13 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     candidatos = conn.execute(
         f"""SELECT v.num_venta, v.titulo, v.sku, kc.componente_codigo
            FROM ventas_ml v
-           JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+           JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC
+           ORDER BY v.fecha_venta DESC, v.num_venta DESC
            LIMIT 2000""",
         (proveedor_id, *f_par),
     ).fetchall()
@@ -440,13 +441,13 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
         row = conn.execute(
             f"""SELECT v.num_venta
                FROM ventas_ml v
-               JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+               JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
                LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
                WHERE e.proveedor_id = ?
                  AND fc.id IS NULL
                  AND (v.sku = ? OR v.sku LIKE ?)
                  {f_sql}
-               ORDER BY v.fecha_venta DESC
+               ORDER BY v.fecha_venta DESC, v.num_venta DESC
                LIMIT 1""",
             (proveedor_id, codigo, f"%{codigo}%", *f_par),
         ).fetchone()
@@ -471,13 +472,13 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
     candidates = conn.execute(
         f"""SELECT v.num_venta, v.titulo
            FROM ventas_ml v
-           JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+           JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
              AND fc.id IS NULL
              AND v.titulo IS NOT NULL
              {f_sql}
-           ORDER BY v.fecha_venta DESC
+           ORDER BY v.fecha_venta DESC, v.num_venta DESC
            LIMIT 500""",
         (proveedor_id, *f_par),
     ).fetchall()

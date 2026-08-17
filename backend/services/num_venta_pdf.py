@@ -38,6 +38,8 @@ import re
 from itertools import combinations
 from typing import Optional
 
+from services.envio_pack import ENVIO_CUBRE_VENTA
+
 # El # impreso: empieza con 2 y trae entre 15 y 22 dígitos. El rango es amplio A
 # PROPÓSITO — la validación real la hacen las 3 reglas, no la longitud. Hoy ningún
 # concepto del portal trae números de 12+ dígitos, así que hallar uno en el PDF sigue
@@ -161,11 +163,15 @@ def resolver_num_venta_impreso(conn, proveedor_id: int, impreso: str,
     if not posibles:
         return None
 
+    # El JOIN acepta también el envío del PAQUETE: en un carrito ML cuelga el único
+    # envío de una sola de las N órdenes, así que sin esto R2 fallaría para las ventas
+    # hermanas y el número impreso por KIM no resolvería (BUG A). El DISTINCT ya estaba
+    # y evita que un segundo envío del mismo pack duplique la candidata.
     marcadores = ",".join("?" for _ in posibles)
     ventas = conn.execute(
         f"""SELECT DISTINCT v.num_venta, v.sku, date(v.fecha_venta) AS fv
             FROM ventas_ml v
-            JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+            JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
             WHERE v.num_venta IN ({marcadores})
               AND COALESCE(e.proveedor_id, -1) = ?""",
         (*sorted(posibles), proveedor_id),

@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from database import get_db
 from models import UserInfo
 from routers.auth import get_current_user
+from services.envio_pack import ENVIO_CUBRE_VENTA
 from services.folio_factura import formatear_folio
 
 router = APIRouter(prefix="/api/ventas", tags=["ventas"])
@@ -238,7 +239,21 @@ _SELECT_VENTAS = """
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.logistic_type,
            e.proveedor_id, p.nombre as proveedor_nombre,
+           -- Fija cuál envío gana cuando la venta resuelve a varios (ver el GROUP BY
+           -- de abajo): el que trae proveedor. No se devuelve a la UI, sólo dirige la
+           -- elección de SQLite.
+           MAX(CASE WHEN e.proveedor_id IS NOT NULL THEN 1 ELSE 0 END) as _envio_rank,
            (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
+           -- Cuántas ventas comparten el paquete (carrito). Es 1 en una venta normal.
+           -- Sirve para que la UI marque "Carrito 2 de 2": las N ventas de un pack muestran
+           -- el MISMO número (el pack_id, que es el que ML enseña) y ahora también el mismo
+           -- proveedor/SLA/logística, así que sin la marca se leen como filas duplicadas.
+           -- Es justo la confusión que Gaby reportó ("sólo viene asociado a un sku").
+           -- MAX(1, ...) para que una venta sin pack diga 1 (es un paquete de un producto),
+           -- no 0: el subquery no cuenta filas cuando pack_id es NULL y un "0 productos"
+           -- en el CSV se leería como un dato roto.
+           MAX(1, (SELECT COUNT(*) FROM ventas_ml v2
+                   WHERE v.pack_id IS NOT NULL AND v2.pack_id = v.pack_id)) as pack_ventas,
            -- Facturas cruzadas a esta venta: cada una como 'serie|folio|codigo_bodega',
            -- separadas por coma (group_concat DISTINCT usa coma fija). DISTINCT porque una
            -- factura puede tener varios conceptos cruzando a la misma venta. Se formatea por
@@ -255,12 +270,27 @@ _SELECT_VENTAS = """
             FROM kit_componentes kc
             WHERE kc.kit_sku = UPPER(TRIM(v.sku))) as kit_componentes_raw
     FROM ventas_ml v
-    LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+    LEFT JOIN envios_colecta e ON {envio_cubre_venta}
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
     {join_factura}
     WHERE {where}
-    ORDER BY v.fecha_venta DESC
-"""
+    -- Una venta puede resolver a MÁS DE UN envío: ya pasaba antes de este cambio (en
+    -- prod hay 2 ventas con 2 envíos, reexpediciones del mismo paquete). Sin agrupar,
+    -- la venta saldría en 2 filas y Gaby las leería como ventas duplicadas.
+    --
+    -- El MAX(...) no es decorativo: en un GROUP BY "bare" SQLite elige una fila
+    -- ARBITRARIA para las columnas no agregadas, pero documenta que un MIN/MAX en la
+    -- lista de selección FIJA de qué fila salen las demás. Así preferimos de forma
+    -- determinista el envío que SÍ trae proveedor, que es el útil para Gaby (un envío
+    -- sin bodega la deja sin SLA ni cruce de factura). Sin esto, una venta con 2 envíos
+    -- podría mostrar el vacío y parecer "sin asignar" teniendo bodega buena al lado.
+    GROUP BY v.num_venta
+    ORDER BY v.fecha_venta DESC, v.num_venta DESC
+""".replace("{envio_cubre_venta}", ENVIO_CUBRE_VENTA)
+# La condición del envío se sustituye UNA vez, aquí: no es un parámetro que varíe por
+# llamada y dejarla en el .format() de cada caller obligaba a pasarla en los 3 sitios
+# (uno se olvidó y el test se cayó con KeyError). Los {join_factura}/{where} SÍ siguen
+# resolviéndose por llamada.
 
 
 @router.get("")
@@ -296,10 +326,14 @@ def listar(
 
     with get_db() as conn:
         rows = conn.execute(sql, params).fetchall()
+        # COUNT(DISTINCT v.num_venta), no COUNT(*): el JOIN a envíos puede producir
+        # varias filas por venta (una venta con 2 envíos), y un COUNT(*) devolvería un
+        # total MAYOR que las filas que el listado agrupa -> Gaby vería una última
+        # página vacía y un contador que no cuadra con lo que tiene enfrente.
         count_sql = f"""
-            SELECT COUNT(*) as c
+            SELECT COUNT(DISTINCT v.num_venta) as c
             FROM ventas_ml v
-            LEFT JOIN envios_colecta e ON e.num_venta_ml = v.num_venta
+            LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
             {join_factura}
             WHERE {' AND '.join(where)}
         """
@@ -356,6 +390,9 @@ def export_csv(
         # existe, si no el order.id). "Num venta interno" se conserva porque es la
         # llave con la que cruzan factura, albarán y envío.
         "Num venta", "Num venta interno",
+        # Cuántos productos trae el paquete. En un carrito, las N filas comparten el
+        # "Num venta" y el envío; esta columna explica por qué se repite el número.
+        "Productos del paquete",
         # "Ingresos por productos" es el precio del producto (total_amount de ML) — es
         # el nombre que ML le da en su reporte. "Total (MXN)" es el neto que RELUVSA
         # recibe ya descontados cargos, envíos e impuestos (pedido de Gaby 2026-08-10).
@@ -368,6 +405,7 @@ def export_csv(
     for r in rows:
         w.writerow([
             r["pack_id"] or r["num_venta"], r["num_venta"],
+            r["pack_ventas"] if r["pack_ventas"] else 1,
             r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
@@ -394,8 +432,18 @@ def detalle(num_venta: str, user: UserInfo = Depends(get_current_user)):
         venta = conn.execute(
             "SELECT * FROM ventas_ml WHERE num_venta = ?", (num_venta,)
         ).fetchone()
+        # El envío puede estar cruzado directo a esta venta o cubrirla por pertenecer al
+        # mismo paquete (carrito). Se prefiere el que trae proveedor y, entre iguales, el
+        # cruce directo sobre el heredado del pack, para que el detalle no muestre un
+        # envío sin bodega teniendo al lado uno resuelto.
         envio = conn.execute(
-            "SELECT * FROM envios_colecta WHERE num_venta_ml = ?", (num_venta,)
+            f"""SELECT e.* FROM envios_colecta e
+                JOIN ventas_ml v ON v.num_venta = ?
+                WHERE {ENVIO_CUBRE_VENTA}
+                ORDER BY (e.proveedor_id IS NOT NULL) DESC,
+                         (e.num_venta_ml = v.num_venta) DESC
+                LIMIT 1""",
+            (num_venta,),
         ).fetchone()
         conceptos = conn.execute(
             """SELECT fc.*, f.uuid_cfdi, f.folio, f.fecha_factura

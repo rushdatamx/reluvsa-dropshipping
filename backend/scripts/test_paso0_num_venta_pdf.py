@@ -86,10 +86,12 @@ def bd():
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE proveedores (id INTEGER PRIMARY KEY, nombre TEXT, codigo_bodega TEXT);
+        -- pack_id en las dos tablas: lo usa ENVIO_CUBRE_VENTA para que las ventas
+        -- hermanas de un carrito encuentren el único envío que ML cuelga del pack (BUG A).
         CREATE TABLE ventas_ml (num_venta TEXT PRIMARY KEY, sku TEXT, titulo TEXT,
-                                fecha_venta TEXT);
+                                fecha_venta TEXT, pack_id TEXT);
         CREATE TABLE envios_colecta (num_envio TEXT PRIMARY KEY, num_venta_ml TEXT,
-                                     proveedor_id INTEGER);
+                                     proveedor_id INTEGER, pack_id TEXT);
         CREATE TABLE facturas (id INTEGER PRIMARY KEY, proveedor_id INTEGER, folio TEXT,
                                fecha_factura TEXT, pdf_path TEXT, num_venta_pdf TEXT);
         CREATE TABLE factura_conceptos (id INTEGER PRIMARY KEY, factura_id INTEGER,
@@ -110,12 +112,12 @@ SKU = "96413748-Z"
 
 
 def sembrar(conn, pdf_nombre, texto_pdf):
-    conn.execute("INSERT INTO ventas_ml VALUES (?,?,'Manguera',?)",
+    conn.execute("INSERT INTO ventas_ml (num_venta, sku, titulo, fecha_venta) VALUES (?,?,'Manguera',?)",
                  (VENTA_PDF, SKU, "2026-06-10"))
-    conn.execute("INSERT INTO envios_colecta VALUES ('E1',?,2)", (VENTA_PDF,))
-    conn.execute("INSERT INTO ventas_ml VALUES (?,?,'Manguera',?)",
+    conn.execute("INSERT INTO envios_colecta (num_envio, num_venta_ml, proveedor_id) VALUES ('E1',?,2)", (VENTA_PDF,))
+    conn.execute("INSERT INTO ventas_ml (num_venta, sku, titulo, fecha_venta) VALUES (?,?,'Manguera',?)",
                  (VENTA_FECHA, SKU, "2026-06-12"))   # más reciente -> ganaría por fecha
-    conn.execute("INSERT INTO envios_colecta VALUES ('E2',?,2)", (VENTA_FECHA,))
+    conn.execute("INSERT INTO envios_colecta (num_envio, num_venta_ml, proveedor_id) VALUES ('E2',?,2)", (VENTA_FECHA,))
     ruta = pdf_con_texto(pdf_nombre, texto_pdf) if texto_pdf is not None else None
     conn.execute("INSERT INTO facturas VALUES (10,2,'28116','2026-06-15',?,NULL)", (ruta,))
     conn.commit()
@@ -288,10 +290,10 @@ check("R3: piezas distintas no cuadran", not sku_cuadra("96413748", "96591481-Z"
 
 # 🔴 Ambigüedad: dos variantes válidas del mismo proveedor y la misma pieza -> None.
 ruta, conn = bd()
-conn.execute("INSERT INTO ventas_ml VALUES ('2000016910060548',?,'m','2026-06-10')", (SKU,))
-conn.execute("INSERT INTO ventas_ml VALUES ('2000160910060548',?,'m','2026-06-11')", (SKU,))
-conn.execute("INSERT INTO envios_colecta VALUES ('E1','2000016910060548',2)")
-conn.execute("INSERT INTO envios_colecta VALUES ('E2','2000160910060548',2)")
+conn.execute("INSERT INTO ventas_ml (num_venta, sku, titulo, fecha_venta) VALUES ('2000016910060548',?,'m','2026-06-10')", (SKU,))
+conn.execute("INSERT INTO ventas_ml (num_venta, sku, titulo, fecha_venta) VALUES ('2000160910060548',?,'m','2026-06-11')", (SKU,))
+conn.execute("INSERT INTO envios_colecta (num_envio, num_venta_ml, proveedor_id) VALUES ('E1','2000016910060548',2)")
+conn.execute("INSERT INTO envios_colecta (num_envio, num_venta_ml, proveedor_id) VALUES ('E2','2000160910060548',2)")
 conn.commit()
 check("R3: >1 candidata válida -> None (no se adivina)",
       resolver_num_venta_impreso(conn, 2, "20000160910060548", ["96413748"],
@@ -300,8 +302,8 @@ conn.close(); os.unlink(ruta)
 
 # Garantía heredada: la venta no puede ser posterior a su factura.
 ruta, conn = bd()
-conn.execute("INSERT INTO ventas_ml VALUES ('2000016910060548',?,'m','2026-07-20')", (SKU,))
-conn.execute("INSERT INTO envios_colecta VALUES ('E1','2000016910060548',2)")
+conn.execute("INSERT INTO ventas_ml (num_venta, sku, titulo, fecha_venta) VALUES ('2000016910060548',?,'m','2026-07-20')", (SKU,))
+conn.execute("INSERT INTO envios_colecta (num_envio, num_venta_ml, proveedor_id) VALUES ('E1','2000016910060548',2)")
 conn.commit()
 check("venta POSTERIOR a la factura -> None",
       resolver_num_venta_impreso(conn, 2, "20000016910060548", ["96413748"],

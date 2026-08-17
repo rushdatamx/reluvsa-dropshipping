@@ -39,9 +39,11 @@ def _bd():
         CREATE TABLE proveedores (id INTEGER PRIMARY KEY, nombre TEXT, codigo_bodega TEXT);
         CREATE TABLE ventas_ml (num_venta TEXT PRIMARY KEY, sku TEXT, fecha_venta TEXT,
                                 titulo TEXT, pack_id TEXT);
+        -- pack_id: el paquete del envío. Lo usa la condición ENVIO_CUBRE_VENTA para que
+        -- las ventas hermanas de un carrito también encuentren su envío (BUG A).
         CREATE TABLE envios_colecta (num_envio TEXT PRIMARY KEY, num_venta TEXT,
                                      num_venta_ml TEXT, proveedor_id INTEGER,
-                                     fecha_venta TEXT);
+                                     fecha_venta TEXT, pack_id TEXT);
         CREATE TABLE facturas (id INTEGER PRIMARY KEY, proveedor_id INTEGER,
                                fecha_factura TEXT);
         CREATE TABLE factura_conceptos (id INTEGER PRIMARY KEY, factura_id INTEGER,

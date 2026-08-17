@@ -535,6 +535,10 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
     con NULL. El cruce a la venta es DIRECTO por ID (confianza 1.0)."""
     num_envio = str(ship["id"])
     num_venta = str(order["id"])
+    # El paquete al que pertenece el envío. ML crea UN solo envío por carrito y lo
+    # cuelga de UNA sola de las N órdenes; guardarlo aquí es lo que permite que las
+    # ventas HERMANAS del pack encuentren este envío (BUG A). Ver services/envio_pack.py.
+    pack_id = str(order["pack_id"]) if order.get("pack_id") else None
     lugar_indicado = _resolver_lugar(order, ship, stores)
     # Cómo despachó ML el envío. Viene en la MISMA respuesta que ya pedimos, así
     # que no agrega ni una llamada a la API. Es lo que distingue FULL (ML surte,
@@ -571,19 +575,20 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
             """UPDATE envios_colecta SET num_venta=?, num_venta_ml=?, match_cruce_confianza=1.0,
                                          fecha_venta=?, titulo=?, lugar_indicado=?,
                                          proveedor_id=?, cumplio_sla=?,
-                                         logistic_type=COALESCE(?, logistic_type)
+                                         logistic_type=COALESCE(?, logistic_type),
+                                         pack_id=COALESCE(?, pack_id)
                WHERE num_envio=?""",
             (num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id, cumplio_sla,
-             logistic_type, num_envio),
+             logistic_type, pack_id, num_envio),
         )
     else:
         conn.execute(
             """INSERT INTO envios_colecta
                (num_envio, num_venta, num_venta_ml, match_cruce_confianza, fecha_venta,
-                titulo, lugar_indicado, proveedor_id, cumplio_sla, logistic_type)
-               VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?)""",
+                titulo, lugar_indicado, proveedor_id, cumplio_sla, logistic_type, pack_id)
+               VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?, ?)""",
             (num_envio, num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id,
-             cumplio_sla, logistic_type),
+             cumplio_sla, logistic_type, pack_id),
         )
 
 

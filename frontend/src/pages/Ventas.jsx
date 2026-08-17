@@ -313,6 +313,19 @@ export default function Ventas() {
                     <span title={v.pack_id ? `Nº interno del portal: ${v.num_venta}` : undefined}>
                       {v.pack_id || v.num_venta}
                     </span>
+                    {/* Carrito: las N ventas del paquete muestran el MISMO número (el que
+                        ML enseña) y comparten envío, proveedor y SLA, así que sin esta
+                        marca se leen como filas duplicadas. Es la confusión que Gaby
+                        reportó: "este número sólo viene asociado a un sku cuando la venta
+                        es de 2 skus". El SKU de cada fila dice qué pieza es cada una. */}
+                    {v.pack_ventas > 1 && (
+                      <span
+                        className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-reluvsa-black/10 text-notion-text-secondary"
+                        title={`Venta de carrito: este paquete trae ${v.pack_ventas} productos, cada uno en su propia fila con el mismo número. Comparten un solo envío.`}
+                      >
+                        🛒 {v.pack_ventas} productos
+                      </span>
+                    )}
                     {v.deposito && (
                       <span
                         className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold ${

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from models import IncidenciaCreate, UserInfo
 from routers.auth import get_current_user, require_admin
+from services.envio_pack import ENVIO_CUBRE_VENTA
 
 router = APIRouter(prefix="/api/incidencias", tags=["incidencias"])
 
@@ -46,8 +47,16 @@ def listar(
 @router.post("", dependencies=[Depends(require_admin)])
 def crear(data: IncidenciaCreate, user: UserInfo = Depends(get_current_user)):
     with get_db() as conn:
+        # El proveedor sale del envío de la venta, que puede venir heredado del paquete
+        # (carrito): ML cuelga un solo envío de una sola de las N órdenes del pack, así
+        # que sin esto una incidencia sobre la venta hermana quedaría sin proveedor y no
+        # se le podría reclamar a nadie. Ver services/envio_pack.py.
         envio = conn.execute(
-            "SELECT proveedor_id FROM envios_colecta WHERE num_venta_ml = ?", (data.num_venta,)
+            f"""SELECT e.proveedor_id FROM envios_colecta e
+                JOIN ventas_ml v ON v.num_venta = ?
+                WHERE {ENVIO_CUBRE_VENTA} AND e.proveedor_id IS NOT NULL
+                LIMIT 1""",
+            (data.num_venta,),
         ).fetchone()
         proveedor_id = envio["proveedor_id"] if envio else None
 

@@ -26,13 +26,28 @@ causa que **no depende de nosotros**: que los proveedores pongan el # de venta e
 | 1 | Los kits no cruzaban (`CAU11370` vs `11370 M2650963`) | ✅ **CERRADO** `1be1f99` | — |
 | 2 | **BUG B**: la factura se iba a la venta equivocada (no se miraba la fecha de la factura) | ✅ **CERRADO** `f699577` | — |
 | 3 | 243 cruces falsos **ya persistidos** en la BD | ✅ **CERRADO** `bf6b392` (ejecutado en prod) | — |
-| 4 | **BUG A**: 1,042 ventas de carrito **sin envío** → invisibles para el matcher | 🔴 **ABIERTO** | nosotros |
+| 4 | **BUG A**: ventas de carrito **sin envío** → invisibles para el matcher | ✅ **CERRADO** 2026-08-17 | — |
 | 5 | Los falsos de KIM (facturas del mismo día, indistinguibles por fecha) | ✅ **CERRADO** `0161ade` + `0104d32` | — |
 | 6 | El ~45% de facturas de KIM **sin # impreso** degrada a fecha **en silencio** | 🟡 **ABIERTO** | **KIMS** (leyenda fija) |
 
-⚠️ **4 y 5 son independientes.** El # de venta (5) **no arregla** el BUG A (4): una venta sin
-envío no tiene proveedor, y el matcher sólo busca `WHERE e.proveedor_id = ?` — no la ve
-aunque la factura traiga el número.
+⚠️ **4 y 5 eran independientes** y se cerraron por separado: el # de venta (5) **no arreglaba**
+el BUG A (4), porque una venta sin envío no tiene proveedor y el matcher sólo busca
+`WHERE e.proveedor_id = ?` — no la veía aunque la factura trajera el número.
+
+### El #4 (BUG A) se cerró el 2026-08-17 — ver `docs/bug-a-envio-carrito.md`
+
+Reportado por Gaby: *"este número de venta sólo viene asociado a un sku cuando la venta es de
+2 skus"*. **Se propaga el VÍNCULO del envío, no la FILA** (columna `envios_colecta.pack_id` +
+la condición `ENVIO_CUBRE_VENTA` de `services/envio_pack.py`), para que el SLA siga contando
+una vez por paquete y `metricas.py` no se toque.
+
+**Simulado contra copia de prod con el código real:** 918 ventas recuperan envío
+(1,368 → 450 sin envío) · SLA sin moverse (CAUPLAS 76.0%, KIM 75.8%) · 0 colisiones de los
+268 · 0 conceptos contados doble. Test 24/24 con 5 mutaciones en rojo · api-guardian 13/13.
+
+🔴 **Pero sólo 43 de las 918 traen bodega.** Las otras 875 aparecen ahora con el selector
+"⚠ Asignar bodega" (antes no tenían ni eso), pero **sin bodega no cruzan factura**. **No
+reportarlo como "los carritos ya quedaron resueltos".**
 
 ### El #5 se cerró en DOS mitades (2026-08-12/13) — leerlas juntas
 
@@ -93,34 +108,39 @@ explícitamente como límite de su auditoría.
 
 ---
 
-## 4. 🔴 TAREA #1 — BUG A: propagar el envío del carrito
+## 4. ✅ BUG A — el envío del carrito (CERRADO 2026-08-17)
 
-**Es lo de mayor impacto que queda y NO depende de terceros.**
+> ⭐ **El detalle completo está en `docs/bug-a-envio-carrito.md`.** Aquí queda el resumen.
 
-### Qué pasa
+### Qué pasaba
 ML crea **UN solo shipment por carrito** y lo cuelga de **UNA sola** de las N órdenes del
-pack. Las demás ventas quedan **sin envío → sin proveedor → invisibles para el matcher**.
+pack. Las demás ventas quedaban **sin envío → sin proveedor → invisibles para el matcher**,
+y en la pestaña Ventas salían como *"Sin envío"* **sin selector de bodega**, así que Gaby no
+podía ni corregirlas a mano.
 
-### Magnitud (medida en prod)
-- 776 packs multi-venta = 1,670 ventas; **1,042 de ellas sin envío**.
-- **776 de 776 packs** siguen el patrón, sin una sola excepción.
+### Magnitud (medida en prod al cerrarlo)
+- **796 packs multi-venta = 1,714 ventas; 918 de ellas sin envío.**
+- De los 1,073 pares que comparten pack, **1,073 comparten depósito y 0 difieren** → un
+  carrito nunca trae dos proveedores, que es lo que hace correcto compartir el envío.
 
-### El caso que lo reportó (Gaby)
-| order.id | pack_id | SKU | envío | factura |
-|---|---|---|---|---|
-| 2000017706291186 | 2000014310099713 | `CAU11608` (Figo) | 1 | 1 |
-| 2000017706296700 | 2000014310099713 | `CAU19535` (Jeep) | **0** | **0** |
-
-### Decisión de negocio YA TOMADA por Gaby
+### Cómo se resolvió, respetando la decisión de Gaby
 > *"como 1 retraso porque en general me cuenta toda la venta como 1 retrasada"*
 
-→ **Propagar el envío a las N ventas del pack** (para que el matcher las vea), pero **contar
-el SLA una sola vez por envío**, NO por venta. Sin la segunda parte, un carrito de 6 que
-llega tarde pesaría 6 veces en el SLA del proveedor.
+**Se propaga el VÍNCULO, no la FILA:** columna `envios_colecta.pack_id` + la condición
+compartida `ENVIO_CUBRE_VENTA` (`services/envio_pack.py`), que acepta el cruce directo **o**
+el mismo paquete. Así `envios_colecta` conserva **una fila por envío real**, el SLA sigue
+contando una vez por paquete y **`metricas.py` (blindado, `935c998`) no se tocó** más que
+para pasar `COUNT(*)` → `COUNT(DISTINCT fc.id)` en la métrica de errores, que el JOIN nuevo
+habría inflado al doble.
 
-⚠️ **Toca `routers/metricas.py`, que está blindado (commit `935c998`). Releer sus 3 trampas
-antes de modificarlo** — en particular que el filtro de FULL es
-`IS NULL OR != 'fulfillment'`, nunca `= 'cross_docking'`.
+**Verificado simulando contra copia de prod con el código real:** 918 ventas recuperan envío ·
+SLA idéntico (58,333 filas de envío; CAUPLAS 76.0%, KIM 75.8%) · **0 colisiones** de los 268
+(con el OR prohibido habrían sido **262**) · 0 conceptos contados doble. Test 24/24 con
+**5 mutaciones en rojo** · **api-guardian APROBADO 13/13**.
+
+🔴 **Lo que NO cerró:** sólo **43** de las 918 traen bodega. 732 son COLECTA sin bodega y
+136 son FULL. Las de COLECTA ahora muestran el selector "⚠ Asignar bodega" y el recruce
+retroactivo cierra el cruce en cuanto Gaby la asigna — pero **sin bodega no cruzan factura**.
 
 ---
 
