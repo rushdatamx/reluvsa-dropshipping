@@ -17,8 +17,10 @@ Estrategia (en orden, el primero que acierta gana):
    el proveedor NO factura el SKU-kit sino sus componentes reales. Cruzamos el código del
    concepto contra los componentes del kit, primero por texto (exacto/substring, tolera
    sufijos -K) y luego por ID interno normalizado — el Excel de kits trae 'CAU11370' donde
-   la factura dice '11370 M2650963'. Si el componente vive en varios kits, desempata la
-   descripción contra el título de la venta.
+   la factura dice '11370 M2650963'. Si el componente vive en varios kits, desempata el
+   PEDIDO (`M######`) y, si no alcanza, la descripción contra el título de la venta.
+   ⭐ A diferencia de los pasos 1, 2 y 4, este paso admite VARIOS conceptos por venta:
+   una venta-kit necesita uno por componente. Ver `_match_por_kit`.
 4. Fuzzy por descripción contra el título de la venta (>= 0.6 = aceptamos con confidence).
 """
 import re
@@ -269,9 +271,196 @@ def _afinidad_titulo(descripcion: str, titulo: str) -> int:
     return len(_terminos_distintivos(descripcion) & _terminos_distintivos(titulo))
 
 
+# Folio de pedido que CAUPLAS imprime junto a la pieza ('13351  M2653711'). Agrupa los
+# conceptos que se surtieron juntos; ver `_piezas_del_pedido` y `_venta_del_pedido`.
+#
+# 🔴 El `(?<![A-Z])` NO es cosmético (hallazgo del api-guardian, 2026-08-17). Sin él la
+# regex muerde el PREFIJO DE BODEGA pegado al número y la pieza desaparece:
+#   'CAU11370'  -> vería el folio 'U11370'  -> con el ancla queda {'11370'} ✅
+# Verificado: no rompe a CAUPLAS en ninguno de sus 6 formatos reales ('13351  M2653711',
+# '13351M2653711', '13351-M2653711'...), porque su folio siempre viene precedido de
+# dígito o espacio, nunca de letra.
+#
+# ⚠️ EL ANCLA NO SALVA A TODOS. Cuando la letra abre el código no hay nada delante que
+# anclar, así que sigue leyéndose como folio y la pieza queda VACÍA:
+#   'P2172292'  -> set()   (esquema real de ARGENPARTS)
+#   'M2650963'  -> set()
+# 🔴 A ésos los protege el FALLBACK POR TEXTO de `_componente_ya_cubierto`, NO esta
+# regex. No borrar ese fallback creyendo que el ancla ya cubre ARGENPARTS: la mutación
+# que lo quita apila las 3 facturas de una misma pieza en UNA venta (caso 11 del test).
+_PATRON_PEDIDO = re.compile(r"(?<![A-Z])[A-Z]\d{5,}")
+
+
+def _tokens_pieza(codigo: str) -> set:
+    """Sólo los tokens que identifican la PIEZA, sin el folio de pedido.
+
+    🔴 No sirve `_tokens_codigo` a secas: su regex numérica también captura los dígitos
+    del folio de pedido ('13351  M2653711' -> {'13351', '2653711', 'M2653711'}). Dos
+    componentes DISTINTOS del mismo pedido comparten ese '2653711', así que compararlos
+    con `_tokens_codigo` los hace parecer la misma pieza — y ése era justo el bug: el
+    segundo componente del kit de Gaby se creía ya facturado y se iba a otra venta.
+
+    'CAU7694'          -> {'7694'}
+    'CAU11370'         -> {'11370'}       (el prefijo de bodega NO es un folio)
+    '13351  M2653711'  -> {'13351'}       (NO {'13351','2653711'})
+    'P2172292'         -> set()           🔴 la letra ABRE el código: no hay nada que
+                                          anclar y se lee como folio. Es correcto que
+                                          quede vacío; de esos se encarga el fallback
+                                          por texto de `_componente_ya_cubierto`.
+    """
+    up = (codigo or "").upper()
+    pedidos = {m[1:] for m in _PATRON_PEDIDO.findall(up)}
+    return {t for t in re.findall(r"\d{3,}", up) if t not in pedidos}
+
+
+def _componente_ya_cubierto(conn, num_venta: str, codigo: str) -> bool:
+    """¿Esta venta-kit ya tiene facturado ESTE componente en concreto?
+
+    Es la guarda que permite abrir la venta-kit a varios conceptos sin que se apilen.
+    Una venta de `KIT0207` (mangueras de entrada y salida) debe aceptar los DOS
+    conceptos, pero **no dos veces la de entrada**: si el proveedor factura dos veces la
+    misma pieza son dos kits vendidos, y el segundo pertenece a OTRA venta.
+
+    Compara por tokens de ID interno, la misma normalización del resto del matcher, para
+    que '13351 M2653711' y '13351 M2652120' cuenten como el mismo componente aunque
+    vengan de pedidos distintos.
+
+    🔴 SIN TOKENS SE CAE A TEXTO, NUNCA A `False` (hallazgo del api-guardian). Un código
+    sin números de >=3 dígitos ('KR-WP', 'ABC-Z') dejaría `pieza` vacío, y devolver
+    "no cubierto" ahí APAGA la guarda: los N conceptos de esa pieza se apilarían todos en
+    la misma venta con confianza 0.95 — el defecto inverso al que Gaby reportó, y con el
+    mismo final (un dato que nadie vuelve a revisar). Ante ausencia de dato, el matcher
+    se abstiene; aquí abstenerse es comparar el texto normalizado.
+    """
+    pieza = _tokens_pieza(codigo)
+    cod_txt = re.sub(r"[^A-Z0-9]", "", (codigo or "").upper())
+    for r in conn.execute(
+        "SELECT codigo_prov FROM factura_conceptos WHERE num_venta_match = ?",
+        (num_venta,),
+    ):
+        otro = r["codigo_prov"]
+        if pieza:
+            if pieza & _tokens_pieza(otro):
+                return True
+        elif cod_txt and cod_txt == re.sub(r"[^A-Z0-9]", "", (otro or "").upper()):
+            # Sin tokens comparables: el texto exacto es lo único fiable que queda.
+            return True
+    return False
+
+
+def _piezas_del_pedido(conn, codigo: str, codigos_factura=None) -> Optional[set]:
+    """Tokens de pieza de TODOS los conceptos que comparten el folio de pedido del código.
+
+    CAUPLAS imprime el pedido junto a la pieza ('13351  M2653711'). Los conceptos de un
+    mismo pedido viajan juntos, así que el conjunto de sus piezas dice qué se surtió.
+
+    🔴 `codigos_factura` NO es opcional en la práctica, es lo que hace correcto el
+    desempate en el ALTA. `routers/facturas.py` cruza cada concepto **ANTES** de
+    insertarlo, así que al procesar el primero sus hermanos todavía no están en la BD:
+    leyendo sólo de `factura_conceptos` el conjunto saldría incompleto ({'13351'} en vez
+    de {'13351','13353'}), no calzaría con ningún kit y el desempate se abstendría
+    justo cuando más falta hace. Por eso el llamador pasa los códigos del XML, que sí
+    están completos desde el primer concepto.
+
+    Se unen las dos fuentes: el XML en curso y lo ya persistido (para el recruce, donde
+    los conceptos ya existen y no hay XML a mano).
+
+    Devuelve None si el código no trae folio de pedido (otros proveedores, o CAUPLAS sin
+    él: 7 de 339 conceptos en prod). Nunca inventa: sin el dato, el llamador se abstiene.
+    """
+    m = _PATRON_PEDIDO.findall((codigo or "").upper())
+    if not m:
+        return None
+    pedido = m[0]
+    piezas = set()
+
+    def _sumar(cod: str):
+        # ⚠️ El `in` a secas casaría un folio que sea PREFIJO de otro ('M26537' dentro
+        # de 'M2653711') y contaminaría el conjunto con piezas de un pedido ajeno. Se
+        # exige que el folio aparezca como token completo.
+        if pedido in _PATRON_PEDIDO.findall((cod or "").upper()):
+            piezas.update(_tokens_pieza(cod))
+
+    for cod in (codigos_factura or []):
+        _sumar(cod)
+    for r in conn.execute(
+        "SELECT codigo_prov FROM factura_conceptos WHERE codigo_prov LIKE ?",
+        (f"%{pedido}%",),
+    ):
+        _sumar(r["codigo_prov"])
+    return piezas or None
+
+
+def _venta_del_pedido(conn, codigo: str) -> Optional[str]:
+    """La venta a la que ya se cruzaron los conceptos HERMANOS de este pedido.
+
+    ⭐ La regla que faltaba (2026-08-17). Identificar el kit no basta: hay que llevar los
+    componentes de un mismo pedido a la MISMA venta. Sin esto, los dos componentes del
+    pedido de Gaby resolvían bien a `KIT0207` pero caían en dos ventas distintas de ese
+    kit, que es exactamente lo que ella reportó.
+
+    Un pedido (`M######`) es un envío físico: lo que viaja junto ampara una sola venta.
+
+    Devuelve None si ningún hermano está cruzado todavía (el primer concepto del pedido
+    decide por los criterios normales y los demás lo siguen), o si los hermanos están
+    repartidos entre varias ventas — ahí no hay una respuesta única y no se adivina.
+    """
+    m = _PATRON_PEDIDO.findall((codigo or "").upper())
+    if not m:
+        return None
+    pedido = m[0]
+    ventas = set()
+    for r in conn.execute(
+        """SELECT codigo_prov, num_venta_match FROM factura_conceptos
+           WHERE num_venta_match IS NOT NULL AND codigo_prov LIKE ?""",
+        (f"%{pedido}%",),
+    ):
+        # Mismo criterio que `_piezas_del_pedido`: folio completo, no substring.
+        if pedido in _PATRON_PEDIDO.findall((r["codigo_prov"] or "").upper()):
+            ventas.add(r["num_venta_match"])
+    return ventas.pop() if len(ventas) == 1 else None
+
+
+def _desempatar_por_pedido(conn, codigo: str, matches: list, codigos_factura=None):
+    """Elige entre kits candidatos usando las piezas que trae el pedido de la factura.
+
+    Devuelve la candidata ganadora, o None si el pedido no identifica UN solo kit — en
+    cuyo caso el llamador sigue con el desempate por descripción.
+
+    🔴 Coincidencia EXACTA del conjunto (ver el comentario del llamador): un pedido puede
+    ser un lote mixto y con "subconjunto" calzaría contra varios kits a la vez.
+    """
+    piezas = _piezas_del_pedido(conn, codigo, codigos_factura)
+    if not piezas:
+        return None
+
+    kits = {(c["sku"] or "").strip().upper() for c in matches}
+    ganadores = set()
+    for kit in kits:
+        comps = {
+            t
+            for (cc,) in conn.execute(
+                "SELECT componente_codigo FROM kit_componentes WHERE kit_sku = ?", (kit,)
+            )
+            for t in _tokens_componente(cc)
+            if t.isdigit()
+        }
+        if comps and comps == piezas:
+            ganadores.add(kit)
+
+    if len(ganadores) != 1:
+        return None
+    kit = ganadores.pop()
+    for c in matches:
+        if (c["sku"] or "").strip().upper() == kit:
+            return c
+    return None
+
+
 def _match_por_kit(conn, proveedor_id: int, codigo: str,
                    descripcion: str = "",
-                   fecha_factura: Optional[str] = None) -> Optional[dict]:
+                   fecha_factura: Optional[str] = None,
+                   codigos_factura=None) -> Optional[dict]:
     """Cruza el código del concepto contra los COMPONENTES de un kit.
 
     Una venta-kit tiene un SKU sintético ('KIT0337') que el proveedor nunca factura:
@@ -291,9 +480,51 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     desempata por **descripción** contra el título de la venta, que es justo el dato que
     distingue 'VW VENTO' de 'HYUNDAI GRAND i10'. Si ni así hay un ganador claro se
     devuelve None: ante la duda NO se cruza (ver el comentario del final de la función).
+
+    ⭐ UNA VENTA-KIT ADMITE VARIOS CONCEPTOS (2026-08-17, reporte de Gaby)
+    ---------------------------------------------------------------------
+    Gaby: *"de esta factura se vinculó a 2 ventas con el mismo sku pero sólo debería
+    vincularse a la venta con terminación 9104"*. Tenía razón, y el bug era más grande
+    de lo que se veía.
+
+    Los otros 4 pasos excluyen con `fc.id IS NULL` a cualquier venta que YA tenga un
+    concepto cruzado. Para una venta normal es correcto —una pieza, una factura—, pero
+    **una venta-kit necesita N conceptos, uno por componente**. Con la exclusión, el
+    primer componente ocupaba la venta y **los demás se iban a OTRAS ventas del mismo
+    kit**, que quedaban marcadas "✓ Facturado" con una sola pieza.
+
+    Medido en prod antes del arreglo: de las 141 ventas-kit facturadas, **130 estaban
+    incompletas** (CAUPLAS 115 de 115, KIM 15 de 26) — había ventas de `KIT03561` con
+    **1 de sus 8 piezas**. Y 89 de los 95 conceptos huérfanos de CAUPLAS eran
+    componentes de kit que no encontraron dónde caer: contaban como *error de
+    facturación* del proveedor sin serlo.
+
+    🔴 La guarda que sustituye a `fc.id IS NULL` NO es "cualquier concepto entra": una
+    venta-kit acepta un concepto más **sólo si ese componente todavía no está cubierto**
+    (`_componente_ya_cubierto`). Sin esa condición, N conceptos del MISMO componente
+    —que son N kits distintos vendidos— se apilarían en una sola venta.
     """
     if not codigo:
         return None
+
+    # ⭐ (0) Los conceptos de un MISMO pedido van a la MISMA venta. Si un hermano ya se
+    # cruzó, este concepto lo sigue — siempre que la venta sea del proveedor, contenga
+    # este componente y no lo tenga cubierto ya. Es lo que impide que las 2 mangueras de
+    # un kit acaben en 2 ventas distintas, que es lo que reportó Gaby.
+    hermana = _venta_del_pedido(conn, codigo)
+    if hermana and not _componente_ya_cubierto(conn, hermana, codigo):
+        cod_tokens_h = _tokens_codigo(codigo)
+        for f in conn.execute(
+            f"""SELECT kc.componente_codigo
+               FROM ventas_ml v
+               JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
+               JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
+               WHERE v.num_venta = ? AND e.proveedor_id = ?""",
+            (hermana, proveedor_id),
+        ):
+            if _componente_cruza(_tokens_componente(f["componente_codigo"]), cod_tokens_h):
+                return {"num_venta": hermana,
+                        "method": "kit_componente", "confidence": 0.95}
 
     # (a) Cruce por texto — barato y el más específico; se resuelve en SQL.
     #     ⚠️ El componente debe medir >= 4 caracteres para entrar por substring. Sin esa
@@ -301,39 +532,42 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     #     contenga ('409  M2650963'), y en prod ese código vive en 21 kits distintos.
     f_sql, f_par = _filtro_fecha(fecha_factura)
     o_sql, o_par = _orden_candidatas(fecha_factura)
-    row = conn.execute(
+    # ⚠️ Ya NO se excluye con `fc.id IS NULL`: una venta-kit admite un concepto por cada
+    # componente (ver el docstring). El filtro pasa a Python, donde se puede preguntar
+    # por el COMPONENTE concreto y no sólo por "¿tiene alguna factura?".
+    candidatas_txt = conn.execute(
         f"""SELECT v.num_venta
            FROM ventas_ml v
            JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
-           LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
-             AND fc.id IS NULL
              AND ( kc.componente_codigo = ?
                    OR ( LENGTH(TRIM(kc.componente_codigo)) >= 4
                         AND ( ? LIKE '%' || kc.componente_codigo || '%'
                               OR kc.componente_codigo LIKE '%' || ? || '%' ) ) )
              {f_sql}
            {o_sql}
-           LIMIT 1""",
+           LIMIT 50""",
         (proveedor_id, codigo, codigo, codigo, *f_par, *o_par),
-    ).fetchone()
-    if row:
-        return {"num_venta": row["num_venta"], "method": "kit_componente", "confidence": 0.95}
+    ).fetchall()
+    for cand in candidatas_txt:
+        if not _componente_ya_cubierto(conn, cand["num_venta"], codigo):
+            return {"num_venta": cand["num_venta"],
+                    "method": "kit_componente", "confidence": 0.95}
 
     # (b) Cruce por ID interno normalizado.
     cod_tokens = _tokens_codigo(codigo)
     if not cod_tokens:
         return None
 
+    # Igual que en (a): la venta-kit ya no se excluye por tener factura; lo que se exige
+    # es que ESTE componente no esté cubierto todavía (se filtra abajo).
     candidatos = conn.execute(
         f"""SELECT v.num_venta, v.titulo, v.sku, kc.componente_codigo
            FROM ventas_ml v
            JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
-           LEFT JOIN factura_conceptos fc ON fc.num_venta_match = v.num_venta
            WHERE e.proveedor_id = ?
-             AND fc.id IS NULL
              {f_sql}
            {o_sql}
            LIMIT 2000""",
@@ -348,6 +582,11 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
         if c["num_venta"] in vistos:
             continue
         if _componente_cruza(_tokens_componente(c["componente_codigo"]), cod_tokens):
+            # 🔴 La venta-kit puede recibir varios conceptos, pero NO dos veces el mismo
+            # componente: eso serían dos kits vendidos y el segundo es de otra venta.
+            if _componente_ya_cubierto(conn, c["num_venta"], codigo):
+                vistos.add(c["num_venta"])
+                continue
             vistos.add(c["num_venta"])
             matches.append(c)
 
@@ -362,6 +601,27 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     #   - Kits distintos ('KIT-PLAT' vs 'KIT-CLIO'): aquí sí se puede cruzar la factura al
     #     producto equivocado, y hace falta que la descripción lo decida.
     kits_distintos = {(c["sku"] or "").strip().upper() for c in matches}
+
+    # ⭐ DESEMPATE POR PEDIDO (2026-08-17). Cuando los kits candidatos comparten vehículo
+    # la descripción NO los distingue: el caso de Gaby enfrentaba `KIT0207` contra
+    # `KIT03555` y ambos dicen "Spark/Beat 1.2", así que el margen quedaba en 0 y no se
+    # cruzaba nada.
+    #
+    # Lo que sí los distingue es **qué piezas trae el pedido**. CAUPLAS agrupa los
+    # conceptos de un mismo pedido con su folio (`M######`), y ese conjunto identifica al
+    # kit: la factura de Gaby traía {13351, 13353} — exactamente los 2 componentes de
+    # `KIT0207`, mientras que `KIT03555` tiene 8 y sólo se facturaron 2.
+    #
+    # 🔴 Se exige coincidencia EXACTA del conjunto, no que el pedido contenga las piezas:
+    # un pedido es a menudo un LOTE MIXTO (medido en prod: `M2649748` trae piezas de 2
+    # kits distintos MÁS 2 piezas sueltas). Con "subconjunto" ese lote calzaría contra
+    # cualquiera de sus kits y volveríamos a adivinar. Si el conjunto no calza exacto con
+    # UN solo kit, este desempate se abstiene y decide la descripción.
+    if len(kits_distintos) > 1:
+        elegido_pedido = _desempatar_por_pedido(conn, codigo, matches, codigos_factura)
+        if elegido_pedido is not None:
+            return {"num_venta": elegido_pedido["num_venta"],
+                    "method": "kit_componente", "confidence": 0.95}
 
     if len(matches) == 1 or len(kits_distintos) == 1:
         # El kit es el correcto; sólo falta a cuál de sus ventas aplicar la factura.
@@ -503,7 +763,8 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
 
         # 3) Match por componente de kit (la venta-kit factura sus componentes, no el SKU-kit).
         #    La descripción va como desempate cuando el componente vive en varios kits.
-        por_kit = _match_por_kit(conn, proveedor_id, codigo, descripcion, fecha_factura)
+        por_kit = _match_por_kit(conn, proveedor_id, codigo, descripcion, fecha_factura,
+                                 codigos_factura=(factura or {}).get("codigos"))
         if por_kit:
             return por_kit
 
