@@ -591,7 +591,40 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🟡 **LO ÚLTIMO (2026-08-17, commit `18e0ed4`, EJECUTADO en prod): CAUPLAS — la factura ya
+> 🟡 **LO ÚLTIMO (2026-08-18, commit `9511fa6`, DESPLEGADO): una venta-kit recibe TODOS sus
+> componentes.** Reportado por Gaby: *"de esta factura se vinculó a 2 ventas con el mismo
+> sku pero sólo debería vincularse a la venta con terminación 9104"*.
+>
+> **Era estructural, no de CAUPLAS:** los pasos del matcher excluyen con `fc.id IS NULL` a
+> las ventas que ya tienen un concepto — correcto para una venta normal, pero **una
+> venta-kit necesita uno por componente**. Medido en prod: **de 141 ventas-kit facturadas,
+> 130 estaban incompletas** (CAUPLAS 115 de 115, con `KIT03561` a 1 de sus 8 piezas; KIM 15
+> de 26), y **85 de los 95 conceptos huérfanos** de CAUPLAS eran componentes de kit que
+> contaban como *error de facturación* del proveedor **sin serlo**.
+>
+> **Impacto del despliegue:** CAUPLAS huérfanos **95 → 7**, kits completos **0 → 17**;
+> **0 conceptos pierden un cruce**. Y el recruce es **más rápido** (10.55s → 5.76s).
+>
+> 🔴 **NO decirle a Gaby que "los kits ya quedaron resueltos".** El recruce automático sólo
+> rellena huérfanos, **nunca reacomoda un cruce existente** → su caso puntual **sigue
+> partido**. Falta el **paso 2**: un script de corrección (~130 ventas, ella vería
+> movimiento) que se simula y se aprueba antes de ejecutar.
+>
+> ℹ️ **Y un límite que ni el script resuelve:** ella dice que la factura va a la venta del
+> 14-ago y el motor elige la del 16-ago. Los componentes quedarán juntos, pero *cuál* de las
+> 4 ventas idénticas de `KIT0207` en 5 días le toca es un empate que los datos no deciden.
+> **Sólo lo cierra que CAUPLAS ponga el # de venta en la factura** — conviene sumarlo al
+> pedido que ya se le hizo a KIMS.
+>
+> ⭐ **LEER `docs/kit-varios-conceptos.md`** antes de tocar `_match_por_kit`: trae las **4
+> reglas** y el **bug que el api-guardian encontró en el propio arreglo** (un `return False`
+> ante ausencia de dato apagaba la guarda y apilaba N facturas en una venta — el defecto
+> INVERSO al que reportó Gaby). 🔴 **No borrar el fallback por texto de
+> `_componente_ya_cubierto` creyendo que la regex ya cubre a ARGENPARTS.**
+>
+> ---
+>
+> 🟡 **Lo anterior (2026-08-17, commit `18e0ed4`, EJECUTADO en prod): CAUPLAS — la factura ya
 > no puede ser anterior a la venta que ampara.** Reportado por Gaby: *"esta venta en la
 > pagina hizo cruce con esta fac 970096782, pero en la factura viene con la 970096819"*.
 >
@@ -1521,6 +1554,7 @@ A construir:
 | `docs/paso0-num-venta-pdf-kim.md` | Antes de tocar el paso 0 del matcher o el # de venta de KIM |
 | `docs/bug-a-envio-carrito.md` | ⭐ Antes de tocar el cruce venta↔envío o `services/envio_pack.py` |
 | `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
+| `docs/kit-varios-conceptos.md` | ⭐ Antes de tocar `_match_por_kit` / `_tokens_pieza` / `_componente_ya_cubierto` |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |

@@ -1,6 +1,7 @@
 # 📍 ESTADO DEL CRUCE FACTURA ↔ VENTA — punto de entrada
 
-> **Última actualización:** 2026-08-17 — **CAUPLAS: la factura ya no puede ser anterior a la
+> **Última actualización:** 2026-08-18 — **la venta-kit ya recibe todos sus componentes**
+> (`9511fa6`), reporte de Gaby. Lo anterior: **CAUPLAS, la factura ya no puede ser anterior a la
 > venta que ampara** (`18e0ed4`). Reporte de Gaby con verdad de campo de 22 ventas anotadas a
 > mano. El caso que reportó quedó en el folio correcto; **el resto necesita una tanda más
 > grande de anotaciones suyas** (ver #7 abajo).
@@ -31,6 +32,30 @@ causa que **no depende de nosotros**: que los proveedores pongan el # de venta e
 | 5 | Los falsos de KIM (facturas del mismo día, indistinguibles por fecha) | ✅ **CERRADO** `0161ade` + `0104d32` | — |
 | 6 | El ~45% de facturas de KIM **sin # impreso** degrada a fecha **en silencio** | 🟡 **ABIERTO** | **KIMS** (leyenda fija) |
 | 7 | **CAUPLAS**: la factura se iba a una venta **posterior a su propia emisión** | 🟡 **PARCIAL** `18e0ed4` | **Gaby** (60-80 ventas anotadas) |
+| 8 | **Una venta-kit recibía UN solo componente** (los demás se iban a otras ventas) | 🟡 **PARCIAL** `9511fa6` | paso 2: script de corrección |
+
+### El #8 se arregló el 2026-08-18 — ver `docs/kit-varios-conceptos.md`
+
+Reportado por Gaby: *"de esta factura se vinculó a 2 ventas con el mismo sku pero sólo
+debería vincularse a la venta con terminación 9104"*. **Era estructural, no de CAUPLAS:**
+los pasos del matcher excluyen con `fc.id IS NULL` a las ventas que ya tienen un concepto,
+pero una venta-kit necesita **uno por componente**.
+
+**Medido en prod: de 141 ventas-kit facturadas, 130 estaban incompletas** (CAUPLAS 115 de
+115 — había `KIT03561` con 1 de sus 8 piezas; KIM 15 de 26). Y 85 de los 95 conceptos
+huérfanos de CAUPLAS eran componentes de kit que contaban como *error de facturación* del
+proveedor **sin serlo**.
+
+🔴 **Lo que el despliegue NO cierra:** el recruce automático sólo rellena huérfanos, **nunca
+reacomoda un cruce existente** — así que el caso puntual de Gaby sigue partido. Eso es el
+**paso 2** (script de corrección, ~130 ventas, Gaby vería movimiento): se simula y se
+aprueban los números antes de ejecutar.
+
+ℹ️ **Y un límite que ni el script resuelve:** ella dice que la factura va a la venta del
+14-ago y el motor elige la del 16-ago. Los componentes quedarán juntos, pero *cuál* de las
+4 ventas idénticas de `KIT0207` en 5 días le toca es un empate que los datos no deciden.
+**Sólo lo cierra que CAUPLAS ponga el # de venta en la factura**, igual que se le pidió a
+KIM (fila 6).
 
 ### El #7 (CAUPLAS) se arregló a medias el 2026-08-17 — ver `docs/cauplas-factura-anterior-a-la-venta.md`
 
@@ -95,6 +120,8 @@ propósito** — ver la regla en el doc de detalle. **No son un bug.**
 | `docs/limpieza-cruces-falsos-persistidos.md` | La limpieza de los 243: resultado, garantías, las 3 lecciones de la ejecución |
 | `docs/correccion-cruces-num-venta-kim.md` | El # de venta que KIM imprime en su PDF: la corrección de agosto (110 cruces) y **qué pedirle a KIMS** |
 | `docs/paso0-num-venta-pdf-kim.md` | ⭐ **LO MÁS RECIENTE.** Los ceros de más, las 228 correcciones y el **paso 0** que automatiza el cruce. Leerlo antes de tocar el matcher o el recruce |
+| `docs/cauplas-factura-anterior-a-la-venta.md` | CAUPLAS: la factura no puede ser anterior a la venta que ampara (#7) |
+| `docs/kit-varios-conceptos.md` | ⭐ **LO MÁS RECIENTE.** Una venta-kit recibe TODOS sus componentes (#8). Leerlo antes de tocar `_match_por_kit` |
 | `CLAUDE.md` §3 y §8 | Reglas de negocio y las 3 reglas de diseño del cruce por # de venta |
 
 Tests que fijan lo ya arreglado (correrlos antes de commitear cualquier cambio al matcher):
