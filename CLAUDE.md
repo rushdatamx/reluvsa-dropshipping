@@ -437,6 +437,7 @@ dropshipping-reluvsa/
 │   ├── hallazgo-cruce-factura-venta.md # las 3 hipótesis ya descartadas (no repetirlas)
 │   ├── limpieza-cruces-falsos-persistidos.md  # los 243: resultado + método reutilizable
 │   ├── correccion-cruces-num-venta-kim.md     # los 110 corregidos con el # del PDF
+│   ├── modulo2-publicaciones-masivas.md # ⭐ MÓDULO 2: las 5 reglas + lo pendiente (envío)
 │   ├── paso0-num-venta-pdf-kim.md      # el paso 0 del matcher + los ceros de más de KIM
 │   └── bug-a-envio-carrito.md          # ⭐ BUG A: el envío del carrito llega a las N ventas
 │                                       #   del pack SIN inflar el SLA. Leer antes de tocar
@@ -458,6 +459,7 @@ dropshipping-reluvsa/
 │   │   ├── incidencias.py # CRUD + PATCH resolver
 │   │   ├── metricas.py    # /api/metricas/proveedores + /resumen
 │   │   ├── uploads.py     # POST /api/uploads/ventas-ml y /colecta (admin)
+│   │   ├── publicaciones.py # ⭐ MÓDULO 2: analizar catálogo + generar plantilla ML
 │   │   └── webhooks.py    # POST /api/webhooks/mercadolibre (receptor notificaciones ML)
 │   ├── services/
 │   │   ├── parser_ventas_ml.py  # parsea 66 cols del Excel de ventas ML
@@ -470,6 +472,16 @@ dropshipping-reluvsa/
 │   │   ├── uuid_pdf.py          # extrae UUID impreso del PDF (empareja PDF↔XML en subida múltiple)
 │   │   ├── num_venta_pdf.py     # ⭐ SOLO KIM: lee el # de venta impreso en el PDF y lo
 │   │   │                        #   resuelve tolerando los ceros de más (R1/R2/R3)
+│   │   ├── aplicaciones_kg.py   # ⭐ MÓDULO 2: interpreta "Aplicaciones Principales" del
+│   │   │                        #   catálogo -> N publicaciones. 🔴 la marca SE HEREDA y
+│   │   │                        #   sin años NO se publica (el export corta a 90 chars)
+│   │   ├── perfiles_catalogo.py # ⭐ MÓDULO 2: dónde vive cada columna por proveedor.
+│   │   │                        #   Es lo ÚNICO específico de cada uno (hoy sólo KG)
+│   │   ├── precio_publicacion.py# ⭐ MÓDULO 2: 🔴 el 13% de ML se DIVIDE, no se suma.
+│   │   │                        #   ⬜ ENVIO_POR_LINEA vacío: el precio sale SIN envío
+│   │   ├── parser_catalogo.py   # ⭐ MÓDULO 2: lee el catálogo + cruza contra la col Q
+│   │   │                        #   de Publicaciones ML (⚠️ los paquetes traen '&')
+│   │   ├── generador_plantilla.py # ⭐ MÓDULO 2: escribe el .xlsx de 36 columnas de ML
 │   │   ├── envio_pack.py        # ⭐ ENVIO_CUBRE_VENTA: el envío del carrito cubre a las N
 │   │   │                        #   ventas del pack (BUG A). 🔴 pack_id contra pack_id,
 │   │   │                        #   NUNCA contra num_venta (268 números ambiguos)
@@ -514,6 +526,7 @@ dropshipping-reluvsa/
 │           ├── Incidencias.jsx
 │           ├── Metricas.jsx     # tabla de las 4 métricas por proveedor
 │           ├── Uploads.jsx      # cargar Excels de ventas ML y colecta (admin)
+│           ├── Publicaciones.jsx # ⭐ MÓDULO 2: los 3 pasos (cargar -> cruce -> generar)
 │           └── Proveedores.jsx  # listado de los 5
 ├── data/                        # SQLite local (ignorado)
 └── archivos/                    # IGNORADO en git — datos reales del cliente (PII)
@@ -1505,18 +1518,55 @@ El permiso *"Publicación y sincronización"* debe **quedarse en "Sin acceso"** 
 
 ---
 
-## 9. Módulo 2 — Publicaciones masivas (NO INICIADO)
+## 9. Módulo 2 — Publicaciones masivas (⭐ BASE FUNCIONANDO 2026-08-19)
 
-> Los pendientes P1–P4 del Módulo 1 están **todos cerrados** (historia en la bitácora).
-> Esto es lo único grande que queda además del **BUG A** (§8).
+> ⭐ **LEER `docs/modulo2-publicaciones-masivas.md` antes de tocar nada de este módulo.**
+> Trae las **5 reglas que no se pueden rediseñar** y lo que quedó pendiente.
 
-A construir:
-- Uploader de catálogos de proveedor (`LISTA PRECIOS KG.xlsx` y similares).
-- Detector de SKUs faltantes contra `Publicaciones ML` (col **Q** = `Att_SellerSKU`).
-- Editor de plantilla ML con los campos fijos por proveedor (la **fila amarilla** de
-  `PENDIENTES ACDELCO.xlsx`).
-- Export a CSV en formato Mercado Libre.
-- Archivos fuente en `archivos/publicaciones-masivas/`.
+**Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
+plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
+Módulo 1**: cero llamadas de red, así que las 4 reglas de API no aplican aquí. El único
+cambio al Módulo 1 son 2 líneas de wiring en `main.py`.
+
+**Medido contra los archivos reales del cliente:** catálogo KG **3,676 piezas** → 69 ya
+publicadas, **3,607 faltan** → **6,296 publicaciones** (×1.75).
+
+**⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de
+Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "Aplicaciones
+Principales" es una publicación; SKU, precio, descripción e imágenes se repiten idénticos y
+**lo único que cambia es el TÍTULO**.
+
+🔴 **Las 5 reglas fijadas en `backend/scripts/test_publicaciones_masivas.py` (45/45, con 4
+mutaciones que lo ponen en rojo):**
+1. **La marca y el modelo SE HEREDAN** — `V8 6.0L 2007-2009` no es un modelo llamado "V8",
+   es el mismo Avalanche con otro motor. ⚠️ Pero si el fragmento trae su **propia** marca,
+   ésta **reemplaza** a la heredada (`VW CROSSFOX` tras `ST CORDOBA` es un VW, no un Seat).
+   🔴 `_MARCAS` es una lista **cerrada**: el primer token no siempre es marca (el catálogo
+   trae códigos de pieza como `MANG`, `RAD`, `TA`). **Ante la duda, se hereda.**
+2. **Sin años NO se publica.** El export del proveedor recorta la celda a 90 caracteres y
+   deja restos (`'CA'`, `'V8'`, `'SEBRING V6 3.5L'`). Se marcan y se excluyen: **publicar
+   una pieza diciendo que sirve para menos autos de los que sirve es peor que no
+   publicarla.** Son 755 aplicaciones; la UI las reporta para pedirle a KG el archivo bueno.
+3. 🔴 **El 13% de comisión SE DIVIDE, no se suma** — ML la cobra sobre el precio FINAL, así
+   que sumarla deja la utilidad **~$15 corta por pieza**. `precio = (base + envío) / (1 −
+   comisión)`. ⬜ **Falta decírselo a Gaby: hoy publica con el método que le deja corto.**
+4. **Precio incalculable → celda VACÍA, nunca 0.0** (un 0.0 se publica como precio real).
+5. **La columna Q trae paquetes con `&`** — hay que partirla o un SKU publicado dentro de un
+   paquete cuenta como faltante.
+
+⬜ **PENDIENTE PRINCIPAL — el costo de envío** (decisión de Mario: avanzar sin él).
+`ENVIO_POR_LINEA` está vacío y el default es 0.0 → **el precio sale sin envío y queda por
+debajo del real**. Es un hueco **visible** (la UI lo advierte), no un olvido. El eje correcto
+es la **LÍNEA de producto**, no el precio ni el peso: el catálogo **no trae peso ni
+dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo** con la columna
+AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
+
+⬜ **Otros pendientes:** sólo hay perfil de **KG** (los otros 4 dan 400 con mensaje claro;
+agregar uno es escribir un perfil, no un módulo); las **imágenes van vacías** (correcto,
+confirmado por Gaby: las sube a autozur a mano); la **categoría de ML** se teclea y aplica a
+todo el archivo.
+
+**Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 
 **Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 
@@ -1555,6 +1605,7 @@ A construir:
 | `docs/bug-a-envio-carrito.md` | ⭐ Antes de tocar el cruce venta↔envío o `services/envio_pack.py` |
 | `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
 | `docs/kit-varios-conceptos.md` | ⭐ Antes de tocar `_match_por_kit` / `_tokens_pieza` / `_componente_ya_cubierto` |
+| `docs/modulo2-publicaciones-masivas.md` | ⭐ Antes de tocar CUALQUIER cosa del Módulo 2 (publicaciones masivas) |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |

@@ -118,4 +118,30 @@ export const mlSyncAuto = (payload) => api.post('/ml/sync-auto', payload);
 export const mlNotificaciones = (limit = 20) =>
   api.get('/webhooks/mercadolibre/recientes', { params: { limit } });
 
+// Módulo 2 — Publicaciones masivas (admin). Excel -> Excel, no toca la API de ML.
+export const pubProveedores = () => api.get('/publicaciones/proveedores');
+
+export const pubAnalizar = (codigoBodega, catalogo, publicacionesML) => {
+  const fd = new FormData();
+  fd.append('codigo_bodega', codigoBodega);
+  fd.append('catalogo', catalogo);
+  if (publicacionesML) fd.append('publicaciones_ml', publicacionesML);
+  return api.post('/publicaciones/analizar', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+  });
+};
+
+export const pubGenerar = (payload) => {
+  const fd = new FormData();
+  Object.entries(payload).forEach(([k, v]) => {
+    if (v !== null && v !== undefined) fd.append(k, v);
+  });
+  return api.post('/publicaciones/generar', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    responseType: 'blob',
+    timeout: 300000,
+  });
+};
+
 export default api;
