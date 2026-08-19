@@ -600,11 +600,34 @@ Convenciones:
 
 ---
 
-## 8. Estado actual (último update: 2026-08-17 — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 (`bf6b392`) + TOTAL (MXN) NETO (`fa3e3aa`) + CANCELADAS OCULTAS (`244522d`) + ALBARÁN POR PACK_ID (`3b2cf79`) + ⭐ BUG A CERRADO: el envío del carrito. **Ya NO quedan tareas grandes del Módulo 1**)
+## 8. Estado actual (último update: 2026-08-19 — ⭐ ARRANCÓ EL MÓDULO 2 (`ff830da`) — API VIVA + sync 30 min + FULL/COLECTA + kits por ID interno + FIX DE FECHA (`f699577`) + LIMPIEZA DE LOS 243 (`bf6b392`) + TOTAL (MXN) NETO (`fa3e3aa`) + CANCELADAS OCULTAS (`244522d`) + ALBARÁN POR PACK_ID (`3b2cf79`) + ⭐ BUG A CERRADO: el envío del carrito. **Ya NO quedan tareas grandes del Módulo 1**)
 
 ### 📍 PRÓXIMA SESIÓN: arrancar aquí
 
-> 🟡 **LO ÚLTIMO (2026-08-18, commit `9511fa6`, DESPLEGADO): una venta-kit recibe TODOS sus
+> 🟢 **LO ÚLTIMO (2026-08-19, commit `ff830da`, DESPLEGADO): ARRANCÓ EL MÓDULO 2 —
+> publicaciones masivas.** El catálogo del proveedor entra y sale la plantilla de 36
+> columnas lista para subir a ML. **Excel → Excel: no toca la API ni el Módulo 1** (2 líneas
+> de wiring en `main.py`).
+>
+> Medido contra los archivos reales: KG **3,676 piezas → 3,607 faltan → 6,296
+> publicaciones**. ⭐ **Una pieza genera N publicaciones** (83 filas de la plantilla de Gaby
+> salieron de 22 SKUs): sólo cambia el título.
+>
+> ⭐ **LEER `docs/modulo2-publicaciones-masivas.md`** antes de tocarlo — trae las **5 reglas**
+> (entre ellas que **el 13% de ML se DIVIDE, no se suma**, y que **la marca se hereda** entre
+> aplicaciones pero una marca propia la reemplaza).
+>
+> ⬜ **Qué falta:** el **costo de envío por línea** (decisión de Mario: avanzar sin él; hoy el
+> precio sale SIN envío, con aviso en la UI) · el catálogo de KG **sin truncar** · **decirle a
+> Gaby lo del 13%** (hoy publica con el método que le deja ~$15 corta por pieza) · los otros
+> **4 proveedores** (cada uno es un perfil de ~15 líneas).
+>
+> ⚠️ **Regla acordada:** cuando Gaby quiera otro proveedor, **primero manda el archivo tal
+> cual se lo pasan** — cada uno entrega su info distinta; el perfil se configura viéndolo.
+>
+> ---
+>
+> 🟡 **Lo anterior (2026-08-18, commit `9511fa6`, DESPLEGADO): una venta-kit recibe TODOS sus
 > componentes.** Reportado por Gaby: *"de esta factura se vinculó a 2 ventas con el mismo
 > sku pero sólo debería vincularse a la venta con terminación 9104"*.
 >

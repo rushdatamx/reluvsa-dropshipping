@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-08-19](#cierre-sesión-2026-08-19-módulo-2-publicaciones-masivas-arranca) | **Módulo 2: publicaciones masivas** | ✅ Desplegado |
 | [2026-07-31](#cierre-sesión-2026-07-31-oauth-resuelto-era-pkce-cuenta-ml-conectada) | OAuth resuelto: era PKCE | ✅ Cerrado |
 | [2026-07-31](#webhooks-de-alto-volumen-poda-de-ml_notificaciones-2026-07-31-commit-2f965a7) | Webhooks alto volumen + poda | ✅ Desplegado |
 | [2026-07-31](#cambios-pendientes-de-commit-2026-07-31-ya-commiteados-commit-996c71f) | Endpoint `/api/ml/api-log` | ✅ Commiteado |
@@ -718,6 +719,125 @@ Ver memoria [[project_estado_sesion_2026-06-08-p4]].
 - Health-checks OK: `GET /` → 200 JSON; `GET /api/proveedores` sin token → 401; preflight CORS desde el origen Vercel devuelve el `access-control-allow-origin` correcto.
 
 ---
+
+---
+
+## Cierre sesión 2026-08-19 — Módulo 2 (publicaciones masivas) ARRANCA
+
+**Commit `ff830da`, desplegado.** Primera sesión del Módulo 2, que llevaba desde el
+inicio del proyecto marcado como "NO INICIADO".
+
+> ⭐ **Las reglas vigentes viven en `docs/modulo2-publicaciones-masivas.md` y en el
+> CLAUDE.md §9.** Esto es la historia de cómo se llegó ahí.
+
+### De qué se trataba
+
+Mario lo encuadró desde el principio: *"este módulo no toca nada de la parte API, es un
+módulo solamente para crear el archivo que gaby sube a mercado libre más rápido"*. Y Gaby
+lo describió así:
+
+> *"que se unan ciertas columnas para formar un titulo, después el tema de descripción, que
+> pueda ponerse una sola descripción donde yo pueda poner mi descripción base, pero lo que
+> cambie sea el principio que es el tema de equivalencias o compatibilidades […] cargar el
+> excel por proveedor y dependiendo de los campos, me sirva para generar una plantilla lista
+> para subir a mercado libre, con el fin de no hacerlo tan manual"*
+
+### Cómo se leyeron los 3 archivos del cliente
+
+| Archivo | Qué resultó ser |
+|---|---|
+| `PENDIENTES ACDELCO.xlsx` | **El output**: la plantilla de 36 columnas de ML |
+| `LISTA PRECIOS KG.xlsx` | **El input**: 3,676 piezas de KeepOnGreen |
+| `Publicaciones - ML.xlsx` | **El cruce**: 14,946 publicaciones, col Q = SKU |
+
+⭐ **El hallazgo que definió el diseño: UNA PIEZA GENERA N PUBLICACIONES.** Las 83 filas
+de la plantilla de Gaby salieron de sólo **22 SKUs (×3.8)** — el SKU, el precio, la
+descripción y las imágenes se repiten idénticos y **lo único que cambia es el título**
+(el coche compatible). Sin ver eso, el módulo se habría diseñado 1 pieza = 1 fila y no
+habría servido.
+
+⭐ **El "amarillo" de Gaby eran 4 colores, no uno.** Ella dijo *"puse en la primera fila en
+amarillo lo que siempre va igual"*, pero el header tiene 4 rellenos distintos que resultaron
+ser su clasificación real: constantes literales (6), calculadas (13), plantilla+variable (11)
+y atributos (6). Leer el color de la celda —y no sólo el texto— dio el diseño de las columnas.
+
+### Las preguntas que se le hicieron a Gaby (y sus respuestas)
+
+Se pararon 3 huecos antes de construir, en vez de asumir:
+
+1. **Precio** → *"el costo es gran mayoreo pero eso yo lo tendría que multiplicar por 1.16
+   (iva), sumarle el costo de envío que varía entre 80-150, el costo de la publicación que
+   siempre es el 13% del precio final, y mi utilidad […] de 50%"*.
+2. **Imágenes** → *"las subo a autozur, copio el link […] pero esto seguiría siendo manual,
+   es decir, que no venga en el excel creado"*. → Van vacías, y es correcto.
+3. **Truncado** → se le pidió el catálogo completo a KG.
+
+### 🔴 El error que se detectó en la fórmula de Gaby
+
+Su descripción tiene un **problema circular**: el 13% se cobra sobre el precio FINAL, pero el
+precio final depende del 13%. Sumarlo al costo deja la utilidad corta.
+
+```
+base   = costo × (1 + iva) × (1 + utilidad)
+precio = (base + envio) / (1 - comision)      <- DIVIDE, no suma
+```
+
+Medido con `KGP-1449`: sumando da $786 (utilidad **$14 corta**), dividiendo $801 ✅.
+**~$15 por pieza sobre 3,607 publicaciones.**
+⬜ **Gaby publica HOY con el método que le deja corto — falta decírselo.**
+
+### El envío: se descartó una estimación que parecía buena
+
+Se exploró estimarlo con la columna AA `CostoEnvio` del reporte de ML (9,924 filas reales,
+correlación limpia con el precio: $59.6 → $110 por tramo). **Mario cuestionó la base y tenía
+razón**: esos datos son de llantas y sensores, y **sólo 69 de las 3,676 claves de KG están
+publicadas** — habría sido aplicarle a KG el patrón de otro catálogo.
+
+**El eje correcto es la LÍNEA de producto** (col B), que es justo como razonó Gaby
+(*"radiadores seguro es más de 120, tomas de agua 100"*). ⚠️ **El catálogo NO trae peso ni
+dimensiones**, así que no se puede derivar: tiene que darlo ella.
+
+**Decisión de Mario:** avanzar sin el envío, dejándolo marcado. Quedó como parámetro con
+default 0.0 y aviso en la UI — hueco **visible**, no olvido.
+
+### Los 2 defectos que se cazaron validando contra los datos reales
+
+Ninguno truena: los dos habrían generado un Excel que se ve bien y se sube a ML con datos
+falsos. Salieron de correr el parser contra las 3,676 piezas y **mirar la salida**.
+
+1. **La marca se hereda** (`V8 6.0L 2007-2009` es el mismo Avalanche), pero una marca propia
+   la **reemplaza**: `VW CROSSFOX` tras `ST CORDOBA` es un VW, no un Seat. La 1a versión
+   generaba `ST VW Crossfox`, una marca que se contradice sola, y `DGE DGE Atos`.
+   🔴 `_MARCAS` quedó como **lista cerrada**: el primer token **no siempre es marca** — el
+   catálogo trae códigos de pieza (`MANG` 110, `RAD` 70, `TA` 121). Ante la duda, se hereda.
+2. **El criterio de "truncada" era la longitud y quedó mal.** `SEBRING V6 3.5L` pasaba como
+   útil siendo un resto del corte. Se cambió a **la ausencia de años**, que es lo que de
+   verdad la vuelve inservible: el título de Gaby siempre los lleva. Pasó de 459 a 766
+   detectadas, con **0 falsos útiles**.
+
+### Verificación
+
+- `test_publicaciones_masivas.py` **45/45**, con **4 mutaciones** que lo ponen en rojo
+  (sumar el 13%, quitar la herencia, no marcar truncadas, devolver 0.0 en vez de None)
+- Flujo HTTP completo (`/analizar` → `/generar`) contra los 3 archivos reales
+- Build de CRA limpio · ruta protegida con `AdminOnly` + `require_admin`
+- **Cero acoplamiento con el Módulo 1** (verificado con grep): el único cambio ahí son
+  2 líneas de wiring en `main.py`
+
+⚠️ **Gotcha de entorno:** el Python del sistema (3.9.6) **no tiene `rapidfuzz`**, así que
+los tests del Módulo 1 no corren en local. Es **preexistente** (se comprobó con `git stash`)
+y no afecta a este módulo.
+
+### Lo que sigue
+
+⬜ Probarlo con Gaby (los ajustes de formato de título saldrán de ahí) · ⬜ pedirle la tabla
+de envío por línea y el catálogo de KG sin truncar · ⬜ decirle lo del 13% · ⬜ los otros 4
+proveedores (cada uno es un perfil de ~15 líneas, no un módulo nuevo).
+
+⚠️ **Regla de operación acordada con Mario:** cuando Gaby quiera publicar de otro proveedor,
+**primero manda el archivo tal cual se lo pasa el proveedor** — cada uno entrega su
+información distinta y el perfil se configura viéndolo, no adivinando.
+
 
 ## 8.bis Estado anterior (histórico, 2026-06-01 — superado por la sección 8)
 
