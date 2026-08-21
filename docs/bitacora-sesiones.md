@@ -1874,3 +1874,245 @@ El permiso *"Publicación y sincronización"* debe **quedarse en "Sin acceso"** 
 
 ---
 
+
+
+---
+
+# Detalle largo de 5 reglas de Gaby (movido del CLAUDE.md §3 el 2026-08-21)
+
+> Estos 5 bloques eran sub-secciones narrativas de la §3 del `CLAUDE.md` (albarán en
+> dos pasos, carrito/BUG A, Total MXN neto, canceladas, kits por ID interno). Se movió
+> aquí el *cómo se descubrió y se midió* cada uno — citas de Gaby, tablas de medición
+> contra prod, conteos de tests. **La REGLA vigente de cada uno se quedó en el
+> `CLAUDE.md §3` en forma compacta, con su 🔴 y su puntero a este bloque.** Nada se perdió.
+
+#### ⭐ El albarán cruza en DOS pasos: num_venta → pack_id (2026-08-12)
+
+**Reporte de Gaby:** *"otra vez me volvió a marcar igual, dice que 79 se actualizaron, 52 no
+se encontraron… yo pensé que iba a ser un tema del número de venta pero no, no es eso porque
+algunos sí está tal cual en la página"*. Tenía razón: **las 52 ventas SÍ existían**.
+
+**Causa:** Gaby captura el número que ML le muestra **en pantalla**, y ML muestra el
+**`pack_id`** cuando la venta viene de un carrito y el `order.id` cuando no. Su archivo trae
+los dos tipos **mezclados sin distintivo**. El parser sólo buscaba por `num_venta`.
+
+**Medido contra prod con su archivo real de KIMS (131 filas):**
+
+| | Cuántos | |
+|---|---|---|
+| cruzan por `num_venta` | **79** | = los "79 actualizados" que vio |
+| cruzan por `pack_id` | **52** | = los "52 no encontrados" |
+| intersección | **0** | la clasificación no tiene ambigüedad |
+| huérfanos reales | **0** | 79+52 = 131 = todas las filas |
+
+**Implementado** (`parser_albaran.py`): dos UPDATE **secuenciales** — `num_venta` primero y,
+sólo si `rowcount == 0`, `pack_id`. Simulado contra prod: **131/131, cero no encontrados.**
+
+⚠️ **4 trampas fijadas en `backend/scripts/test_albaran_pack_id.py` (23/23) — no romperlas:**
+1. 🔴 **NUNCA `WHERE num_venta = ? OR pack_id = ?` en una sola consulta**, y `num_venta`
+   SIEMPRE gana. Hay **268 números que son order.id de una venta y pack_id de OTRA**: el OR
+   escribiría el albarán en la venta equivocada, y encima en silencio. Es la misma regla ya
+   fijada para el cruce por # de venta en §8. El test lo verifica **estáticamente sobre el
+   AST** (excluyendo docstrings, que mencionan el patrón prohibido a propósito).
+2. **Un `pack_id` multi-venta escribe en TODAS sus ventas** (787 packs así en prod, de 2 a 6).
+   Decisión de Mario: el carrito es **un solo paquete físico** y su nota de entrega ampara
+   todo lo que viaja dentro. `ventas_actualizadas` puede ser > `actualizados`.
+3. **Sigue siendo sólo UPDATE**: un número inexistente NO crea venta huérfana, y una fila con
+   albarán vacío NO borra el existente (re-subida parcial).
+4. **Excel entrega los números como int/float** (`_celda_a_texto` quita el `.0`): sin eso, un
+   `2000014366425187` numérico no cruzaría contra la columna TEXT.
+
+**UI:** la tarjeta de Uploads ya no escupe JSON crudo — dice *"131 de 131 filas aplicadas —
+79 por # de venta, 52 por # de carrito"* y **lista los números que no existen** (máx. 25).
+El "52 no encontrados" anterior mandaba a Gaby a revisar ventas a ciegas. Ver
+[[project_albaran_cruce_pack_id]].
+
+#### ⭐ El carrito comparte UN envío entre sus N ventas (2026-08-17, BUG A)
+
+**Reporte de Gaby:** *"este número de venta sólo viene asociado a un sku cuando la venta es
+de 2 skus"*. Su caso: el pack `2000014490469643` traía `CAU3832` y `CAU4218`, y el portal
+sólo mostraba una fila con factura.
+
+**Causa:** ML crea **UN solo envío por carrito** y lo cuelga de **UNA sola** de las N
+órdenes. Las demás quedaban sin envío → sin proveedor → **invisibles para el matcher**
+(`WHERE e.proveedor_id = ?`) y sin selector para que Gaby las arreglara. Medido en prod:
+**796 packs multi-venta = 1,714 ventas, 918 sin envío.**
+
+**Regla:** un envío cubre una venta si está **cruzado directo** a ella *o* si **comparten
+`pack_id`**. Condición canónica en `services/envio_pack.py::ENVIO_CUBRE_VENTA`, usada por el
+listado/CSV de Ventas, los 5 pasos del matcher, el paso 0 de KIM, el detalle e incidencias.
+Es correcto porque un carrito es **un solo paquete físico de un solo proveedor**: de los
+1,073 pares que comparten pack, **1,073 comparten depósito y 0 difieren**.
+
+🔴 **Las 3 reglas que no se pueden rediseñar** (fijadas en
+`backend/scripts/test_envio_pack_carrito.py`, 24/24, con **5 mutaciones** que lo ponen en rojo):
+1. **Se propaga el VÍNCULO, no la FILA.** Duplicar filas de `envios_colecta` rompe el SLA
+   (`COUNT(*)` sobre esa tabla): un carrito de 6 tarde pesaría 6 veces. Gaby fue explícita:
+   *"como 1 retraso porque en general me cuenta toda la venta como 1 retrasada"*.
+2. **`pack_id` contra `pack_id`, NUNCA contra `num_venta`** — los mismos 268 números
+   ambiguos del albarán. Medido: 0 colisiones con el criterio correcto, **262** con el OR.
+3. **Ambos lados exigen `pack_id IS NOT NULL`** o las ~22k ventas sin pack se unen contra
+   los ~21k envíos sin pack (producto cartesiano).
+
+⚠️ **El `ORDER BY` del matcher era un EMPATE:** las hermanas comparten fecha **al segundo**
+(1,071 de 1,073 pares), así que `ORDER BY v.fecha_venta DESC LIMIT 1` podía devolver
+distinta hermana entre corridas. Ahora es `fecha_venta DESC, num_venta DESC` — no lo hace
+"más correcto", lo hace **reproducible**. Lo que separa a las hermanas es el SKU, y de eso
+ya se encargan los pasos 1-2 (**1,037 de 1,073 pares** tienen SKU distinto).
+
+**UI:** las N filas del pack muestran el mismo número, así que se agregó el badge
+**"🛒 N productos"** y la columna **"Productos del paquete"** en el CSV; el SKU de cada fila
+dice qué pieza es. 🔴 **Sólo 43 de las 918 traen bodega** — las demás aparecen con
+"⚠ Asignar bodega" pero **sin bodega no cruzan factura**. Ver `docs/bug-a-envio-carrito.md`.
+
+### ⭐ "Total (MXN)" = el neto que ML deposita (2026-08-10)
+
+**Pedido de Gaby:** *"me podría apoyar modificando en el portal para que aparezca el monto
+que se llama «Total (MXN)», ya que actualmente aparece «ingresos por productos (MXN)»"*.
+Su definición: *"es la resta de lo que paga el cliente menos lo que nos quita la plataforma
+de envío y costo de publicación"*.
+
+**El dato NO se calcula: se toma ya restado de ML.** Es `net_received_amount` de
+**`GET /collections/{payment_id}`** (el `payment_id` sale de `order.payments[].id`).
+
+🔴 **NO reconstruir la resta a mano.** Es la trampa de este cambio y por poco se cae en ella:
+**los IMPUESTOS no existen en la Orders API** — `order.taxes` viene `{"amount": null}` y
+`payments[].taxes_amount` en `0.0`. El desglose que mandó Gaby del portal de ML lo dejó ver:
+
+```
+Precio del producto   $ 1,791.97     <- total_amount (lo que ya guardábamos en `total`)
+Cargos por venta      -$   232.96    <- marketplace_fee
+Envíos                -$   161.50    <- senders[].cost de /shipments/{id}/costs
+Impuestos             -$   162.20    <- 🔴 NO ESTÁ EN LA API DE ÓRDENES
+Total                 $ 1,235.31     <- net_received_amount ✅
+```
+
+Calcularlo con los campos de la orden habría dado **$1,397.51: inflado en $162.20 en
+TODAS las filas**, y en silencio. Además, si ML agrega un cargo nuevo, el neto lo absorbe solo.
+
+⚠️ **`payments[].shipping_cost` es 0.00 y NO es el costo de envío del vendedor** (medido en
+12 órdenes: 0.00 en las 12). El que RELUVSA absorbe vive en `/shipments/{id}/costs` →
+`senders[].cost`. Sólo importa si algún día se quiere desglosar; para el Total no hace falta.
+
+**Verificado al centavo** contra las 2 ventas que aportó Gaby, con el código real sobre la
+API de prod: `2000017836986786` → 1,235.31 ✅ y `2000017836987992` → 262.48 ✅. La 2a es
+**FULL** y la 1a **cross_docking** → el campo sirve en ambas logísticas. Cobertura medida en
+16 ventas de ago/jul/may/ene, ambas logísticas y estados `paid`/`cancelled`: **16/16 poblado**
+(el `money_release_date` a 1 mes NO retrasa el dato).
+
+**Implementado:** columna `ventas_ml.total_neto` (+ migración idempotente), poblada en el
+upsert del sync; se muestra como columna **"Total (MXN)"** en la tabla Ventas y en el CSV.
+
+⚠️ **6 trampas fijadas en `backend/scripts/test_sync_ml_e2e.py` (27/27) — no romperlas:**
+1. **`total` se CONSERVA intacto** (= `total_amount`, el precio del producto). Son dos
+   columnas, no una sustitución: en el CSV salen como **"Ingresos por productos (MXN)"** y
+   **"Total (MXN)"**. Decisión de Mario: conservar el anterior como referencia.
+2. **El upsert usa `COALESCE(?, total_neto)`**: una orden cuyo pago no traiga el dato no
+   debe BORRAR un neto bueno (mismo criterio que `pack_id` y `logistic_type`).
+3. **Si ningún pago trae el dato se guarda NULL, nunca 0.0.** Un 0.0 se leería como "esta
+   venta no dejó nada", que es una afirmación falsa y peor que un vacío.
+4. **Una venta puede tener varios pagos** (mensualidades/pagos parciales) → se **suman**.
+5. **`get_opcional`, no `get`**: un pago sin collection no debe tumbar la sincronización de
+   la venta; el resto de sus datos sigue siendo válido.
+6. 🔴 **El neto va en su PROPIO `try/except`** (`sync_ml.py`, bucle de página). Estaba
+   dentro del mismo `try` que `_traer_envio` → un 403/500 de `/collections` (que
+   `get_opcional` NO absorbe, sólo absorbe el 404) **descartaba la orden entera: ni venta
+   ni envío**. Un dato de reporte tumbando el dato de negocio. Lo detectó el api-guardian.
+
+⚠️ **El test e2e pasaba 21/21 SIN ejercitar nada de esto** (segundo hallazgo del guardián):
+sus fixtures no traían `payments` y no había mock de `/collections`, así que
+`_traer_total_neto` recorría una lista vacía. **Verde por omisión, no por cobertura.** Ahora
+hay 6 casos reales (incluido multi-pago y el fallo 500), y se comprobó que el test **falla
+de verdad** al quitar el COALESCE — un assert que no falla cuando rompes el código no prueba
+nada.
+
+**Sin backfill (decisión de Mario):** sólo de aquí en adelante. Las ~58k ventas ya cargadas
+quedan con `total_neto` NULL (la UI muestra "—") y se van poblando conforme el sync las
+vuelve a tocar. ⚠️ **Si algún día se quiere el histórico, ojo:** son ~58k llamadas nuevas a
+`/collections`, y hay que **apagar la sync automática antes** (Trampa 5 del heartbeat, §8).
+En el incremental el costo es despreciable: **~3.6 ventas por corrida** (medido sobre 5,129
+ventas en 30 días) = ~4 requests extra cada 30 min.
+
+### Ventas canceladas: ocultas por default, NO borradas (2026-08-11, commit `244522d`)
+
+**Pedido de Gaby:** *"me di cuenta que también me arroja las ventas canceladas, hay forma
+de quitarlas?? pero sólo las canceladas, no las de reclamos o devoluciones, o me
+recomienda no quitarlas??, quisiera identificarlas más rápido"*.
+
+**Decisión de Mario: NO se borran del portal** — dejan de venir por default y un selector
+las recupera. Borrarlas habría destruido señal: en prod hay **4 ventas canceladas CON
+factura cruzada**, que es justo la incidencia que el portal existe para detectar (el
+proveedor facturó algo que se canceló).
+
+**Medido en prod antes de implementar** (58,687 ventas): `Entregado` 57,011 · `Pagado` 779
+· **`Cancelada` 609** · NULL 279. ⚠️ El bug documentado de `ventas_ml.estado` era **del
+parser de Excel**; el **sync por API sí lo puebla** (`ESTADO_MAP` en `sync_ml.py`:
+`cancelled` → `"Cancelada"`). Las canceladas se reparten parejo entre FULL (284) y COLECTA
+(285), ~45/mes desde jul-2025: no es un fenómeno de una sola logística.
+
+**Implementado** (`routers/ventas.py::_construir_filtros`): el parámetro `estado` pasa de
+igualdad exacta a **3 modos** — `sin_canceladas` (DEFAULT) / `solo_canceladas` / `todas`.
+Un valor desconocido conserva la **igualdad exacta** (compatibilidad con `?estado=Entregado`).
+Se agregó la columna **"Estado"** con badge en la tabla (el CSV ya la traía).
+
+⚠️ **4 trampas fijadas en `backend/scripts/test_filtro_canceladas.py` (16/16):**
+1. 🔴 **El guard es `(v.estado IS NULL OR v.estado != 'Cancelada')`, NUNCA `!=` a secas.**
+   En SQL `NULL != 'Cancelada'` evalúa a **NULL, no a true** → un `!=` suelto haría
+   DESAPARECER en silencio las **279 ventas con estado NULL** (todas de jun-2026, del Excel
+   legacy que el sync por API nunca volvió a tocar). **Medido en prod: 58,078 con el guard
+   vs 57,799 sin él.** Mismo criterio que `NO_ES_FULL` en `metricas.py`.
+2. **El default vive en el BACKEND, no sólo en el React.** Si viviera sólo en el frontend,
+   una llamada directa a la API y el **CSV** traerían canceladas y se desincronizarían de
+   lo que Gaby ve en la tabla.
+3. **Los modos se comparan en minúscula** (hallazgo del api-guardian): un `"Todas"` con
+   mayúscula caería a la rama de compatibilidad y filtraría por un estado inexistente →
+   **tabla VACÍA en vez de "todas"**, que es un fallo silencioso (parece que no hay ventas,
+   no que el filtro falló).
+4. **El label del default se llama "Sin canceladas" a propósito**: le dice a Gaby que las
+   canceladas **siguen ahí**, no que se borraron. Y `solo_canceladas` existe porque ella
+   pidió *"identificarlas más rápido"* — no basta esconderlas, tiene que poder verlas juntas.
+
+ℹ️ **Las métricas NO se tocaron.** Si el SLA de una venta cancelada debe contar contra el
+proveedor es otra decisión de negocio; mezclarla aquí habría movido números que Gaby no
+espera. **Queda pendiente de decidir con ella.**
+
+**Impacto para Gaby:** la vista pasa de 58,687 a **58,078** filas (1,174 → 1,162 páginas).
+Es ~1%: no es el antes/después que sintió con MATRIZ, pero le quita el tropiezo.
+Verificado por mutación (al quitar el guard el test falla con exit 1 en el assert correcto)
+y **api-guardian APROBADO 7/7** + 7 puntos específicos.
+
+### Kits → componentes (2026-06-19)
+- ⚠️ Algunas ventas de ML son **kits**: el SKU (ej. `KIT0337`) es un **código sintético de RELUVSA** que **NO existe en ninguna factura**. El proveedor factura los **componentes reales** del kit (ej. `KDTL-057`, `KDTL-058`). Por eso una venta-kit salía siempre **"Pendiente"** aunque su factura estuviera cargada: el matcher buscaba `KIT0337` en los conceptos y nunca cruzaba.
+- **Solución:** Gaby sube **su propio Excel** de relación kit→componentes (3 columnas: `Paquete -> Tag` = KIT, `Componente -> Tag`, `Cantidad`) por un **uploader propio** (`POST /api/uploads/kits`, 4a tarjeta en Uploads.jsx). Parser `services/parser_kits.py` → tabla puente `kit_componentes (kit_sku, componente_codigo, cantidad)`. **Carga incremental** (upsert por PK; re-subir actualiza+agrega, no borra). `kit_sku` normalizado UPPER+TRIM (el Excel trae formatos inconsistentes y espacios finales). El Excel real: 656 kits, **1847 relaciones únicas** (1853 filas con 6 pares duplicados internos que el upsert colapsa).
+- **El matcher gana un 4º paso `kit_componente`** (`services/matcher.py`, conf 0.95, tras id-interno y antes del fuzzy): cruza el código del concepto contra los componentes del kit de una venta del proveedor. El 1er componente que cruce marca la venta-kit como facturada (criterio `facturas_count>0`; sin estados "parciales"). **Un solo proveedor por kit** (decisión de Gaby): todos los componentes de un kit se facturan al mismo proveedor.
+- **Gaby ve los componentes** debajo del SKU en la tabla Ventas (gris, `KDTL-057 ×1`) y en una columna del CSV ("Componentes kit"). El campo `kit_componentes` lo arma `routers/ventas.py` con un subquery a `kit_componentes WHERE kit_sku = UPPER(TRIM(v.sku))`.
+- ⚠️ **El candado de tipo NO usa el nombre de hoja "KITS"**: el workbook de control interno de Gaby tiene 47 hojas (una llamada `KITS`) → daría falso positivo. Se detecta por el **header de la 1a hoja** (componente+cantidad+paquete/kit). Cero infra nueva en Railway (tabla creada por el SCHEMA al arrancar). Ver [[project_kits_componentes]].
+
+#### ⭐ Los kits cruzan por ID interno (2026-08-05, commit `1be1f99`) — leer antes de tocar `_match_por_kit`
+
+- **Reporte de Gaby:** *"los kits sigue sin detectarlos :( no detecta con las facturas. Si lo detecta en el desglose porque marka kit y los componentes pero al asignarle factura no"*. Traducido: la tabla Ventas SÍ muestra el kit y sus componentes (su Excel cargó bien), pero la venta seguía **"Pendiente"** aunque el XML estuviera cargado.
+- **Causa real** (diagnosticada contra la BD de prod con su ejemplo — factura CAUPLAS `970096331`, kits `KIT0216` y `KIT03554`): la cadena estaba **intacta** (ventas, envío con proveedor CAUPLAS, factura de CAUPLAS, componentes cargados). Fallaba **sólo el formato del código**:
+  ```
+  Excel de Gaby   ->  CAU11370
+  Factura CAUPLAS ->  11370  M2650963
+  ```
+  Es el **mismo desfase de esquemas que el paso 2 (`codigo_id_interno`) ya resolvía desde junio** para los SKU normales; el paso 3 comparaba **texto crudo**. En prod, **798 de 1859 componentes** usan ese formato.
+- ❌ **La hipótesis del sufijo `-K` quedó DESCARTADA** (estaba anotada como pendiente desde junio): sólo **8 de 1859** relaciones lo traen y de los 106 conceptos huérfanos **CERO** coincidían con un componente ni quitándoselo. **No volver a investigarla.** El cruce por texto se conservó igual (no cuesta nada).
+- **Resultado en prod:** 106 conceptos sin cruzar → **65**. Ventas-kit con factura: 20 → **61**. Los 41 recuperados salieron **todos con conf 0.95** y se auditaron uno por uno contra el modelo de coche de la descripción: **0 falsos positivos**.
+- ⚠️ **5 trampas fijadas en `backend/scripts/test_kit_id_interno.py` (20/20) — no romperlas:**
+  1. **`_tokens_componente` recorta el prefijo de bodega ANTES de tokenizar.** Usar `_tokens_codigo` tal cual saca un token fantasma: su regex de códigos-M (`[A-Z]\d{5,}`) se come la última letra del prefijo y devuelve `{'11370', 'U11370'}` para `CAU11370` — `U11370` no está en la factura, así que el subconjunto fallaba **siempre**. `_tokens_codigo` NO se tocó (lo comparten los pasos 1 y 2, en producción).
+  2. **Se exige SUBCONJUNTO de tokens, no intersección.** Con intersección, `VAZLO-30-257` cruzaría contra cualquier concepto que mencione un `30`.
+  3. **Se exige un token de >= 4 caracteres, también en la rama por substring del SQL.** El componente `409` vive en **21 kits distintos** en prod; sin la guarda se roba cualquier concepto que lo contenga.
+  4. 🔴 **Si el componente vive en KITS DISTINTOS y la descripción no desempata → se devuelve `None`, no se adivina.** Una versión intermedia elegía "la venta más reciente" y, medido contra prod, cruzaba `NSN PLATINA 1.6L RAD SUP` al kit de un **Clio** (comparten plataforma → comparten componentes). **Un cruce falso es PEOR que un pendiente:** el pendiente se ve y se corrige, el falso dice "ya facturado" y nadie lo vuelve a mirar.
+  5. **El desempate NO usa `CONFIDENCE_MIN_FUZZY` (0.6) ni `token_set_ratio`.** Ese umbral sirve para hallar una venta entre CIENTOS (paso 4); aquí ya sólo hay 2-3 candidatas y la pregunta es "¿cuál de éstas?". Con títulos de ML ruidosos el ratio deja márgenes de ~2 puntos aunque el ganador sea obvio (`NSN PLATINA…` daba 27.3 vs 25.0). Se cuentan **términos distintivos** (`_afinidad_titulo`, ignora "kit/mangueras/1.6"), que da 1 vs 0 — señal limpia.
+- ℹ️ **Mismo kit repetido ≠ ambigüedad.** Lo habitual en prod es que las N candidatas sean **el mismo kit vendido N veces** (`KIT0454` de Chevy, 6 ventas). Ahí el producto no está en duda: se cruza con conf 0.95 a la más reciente sin facturar. La guarda del punto 4 aplica **sólo** cuando los SKU-kit son distintos. Además, RELUVSA publica el mismo kit con títulos distintos según el coche compatible (`KIT03565` sale como Platina, Clio y Kangoo — mismo motor Renault), así que dentro de un kit único se prefiere la venta cuyo título case con la descripción.
+- **Gaby no tuvo que resubir nada:** `recruzar_conceptos_sin_match` ya corre tras subir ventas/colecta o reasignar bodega (ver [[project_cruce_retroactivo]]). Se disparó a mano una vez tras el deploy.
+
+##### Los 65 conceptos que siguen sin cruzar — ✅ es correcto, NO es bug
+| Causa | Cuántos | Por qué está bien |
+|---|---|---|
+| El proveedor facturó algo **sin venta en el portal** | 58 | Es la **señal de valor**: alimenta "errores de facturación" en Métricas, para reclamarle al proveedor. Mismo caso que los 16 de CAUPLAS de junio |
+| La venta existe pero su **envío no tiene bodega** | 6 (todos KIM) | El matcher sólo busca dentro del proveedor. **Gaby los recupera** con el selector "⚠ Asignar bodega" y el recruce los cierra solo |
+| La venta **ya tiene otra factura** cruzada | 1 | Correcto no duplicar |
+
+Reparto por mes (jun 14 · jul 17 · ago 34) = goteo normal de operación, no un lote roto.
