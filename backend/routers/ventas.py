@@ -390,9 +390,6 @@ def export_csv(
         # existe, si no el order.id). "Num venta interno" se conserva porque es la
         # llave con la que cruzan factura, albarán y envío.
         "Num venta", "Num venta interno",
-        # Cuántos productos trae el paquete. En un carrito, las N filas comparten el
-        # "Num venta" y el envío; esta columna explica por qué se repite el número.
-        "Productos del paquete",
         # "Ingresos por productos" es el precio del producto (total_amount de ML) — es
         # el nombre que ML le da en su reporte. "Total (MXN)" es el neto que RELUVSA
         # recibe ya descontados cargos, envíos e impuestos (pedido de Gaby 2026-08-10).
@@ -401,11 +398,21 @@ def export_csv(
         "Num envio", "Logistica", "Lugar indicado", "Bodega override", "Proveedor", "SLA",
         "Facturada", "Num factura",
         "Componentes kit",
+        # Cuántos productos DISTINTOS trae el paquete. En un carrito, las N filas comparten
+        # el "Num venta" (el pack_id, que es el que ML enseña) y el envío; esta columna
+        # explica por qué se repite el número.
+        #
+        # ⚠️ NO son unidades: las unidades van por fila, en su propia columna, y difieren
+        # entre hermanas. Vivía en la posición 3, pegada al "Num venta", y Gaby la leyó como
+        # la cantidad (2026-08-21: reportó "2 y 2" en un carrito donde las unidades reales
+        # eran 2 y 1 — el dato siempre estuvo bien, sólo se leyó la columna de al lado).
+        # Va al final y dice "carrito" —el mismo término del badge de la UI— justo para que
+        # no vuelva a confundirse con una cantidad de piezas.
+        "Productos en el carrito",
     ])
     for r in rows:
         w.writerow([
             r["pack_id"] or r["num_venta"], r["num_venta"],
-            r["pack_ventas"] if r["pack_ventas"] else 1,
             r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
@@ -417,6 +424,8 @@ def export_csv(
             "Si" if r["facturas_count"] > 0 else "No",
             _folios_facturas(r["facturas_raw"]),
             _componentes_kit_texto(r["kit_componentes_raw"]),
+            # Va al final, en el mismo orden que el encabezado (ver el comentario de arriba).
+            r["pack_ventas"] if r["pack_ventas"] else 1,
         ])
     buf.seek(0)
     return StreamingResponse(
