@@ -81,6 +81,20 @@ def _logistica_txt(valor):
     return _LOGISTICA_ETIQUETA.get(valor, valor)
 
 
+def _piezas_carrito(r):
+    """Piezas que van en el paquete físico, para el CSV.
+
+    En un carrito es la suma de las unidades de sus N ventas (`pack_piezas`); en una
+    venta suelta, sus propias unidades — el "paquete" es ella misma.
+
+    🔴 Devuelve celda VACÍA, nunca 0, cuando no se conocen las unidades (32 ventas en
+    prod las traen NULL): un "0 piezas" se leería como un paquete vacío en vez de como
+    un dato ausente. Mismo criterio que `total_neto` y que la columna Unidades.
+    """
+    piezas = r["pack_piezas"] if r["pack_piezas"] is not None else r["unidades"]
+    return piezas if piezas is not None else ""
+
+
 def _fecha_corta(iso):
     """Formato corto legible para el CSV ('2026-05-13 23:43' -> '13 may 2026'),
     igual que la tabla de Ventas en el frontend."""
@@ -254,6 +268,18 @@ _SELECT_VENTAS = """
            -- en el CSV se leería como un dato roto.
            MAX(1, (SELECT COUNT(*) FROM ventas_ml v2
                    WHERE v.pack_id IS NOT NULL AND v2.pack_id = v.pack_id)) as pack_ventas,
+           -- Cuántas PIEZAS van en el paquete físico = la suma de las unidades de las N
+           -- ventas del carrito. Es distinto de pack_ventas: el carrito de KIMS que reportó
+           -- Gaby trae 2 productos (pack_ventas=2) pero 3 piezas (2 birlos + 1 tuerca).
+           -- En una venta sin pack es simplemente sus propias unidades.
+           --
+           -- 🔴 Se deja NULL cuando falta el dato, NUNCA 0 (mismo criterio que total_neto):
+           -- hay 32 ventas con `unidades` NULL en prod, y un "0 piezas" en el CSV se leería
+           -- como un paquete vacío en vez de como un dato ausente. Por eso NO lleva
+           -- IFNULL/COALESCE: SUM() sobre NULL da NULL y así debe salir (en el CSV se
+           -- convierte en celda vacía, igual que Unidades).
+           (SELECT SUM(v4.unidades) FROM ventas_ml v4
+            WHERE v4.pack_id = v.pack_id AND v.pack_id IS NOT NULL) as pack_piezas,
            -- Facturas cruzadas a esta venta: cada una como 'serie|folio|codigo_bodega',
            -- separadas por coma (group_concat DISTINCT usa coma fija). DISTINCT porque una
            -- factura puede tener varios conceptos cruzando a la misma venta. Se formatea por
@@ -409,6 +435,12 @@ def export_csv(
         # Va al final y dice "carrito" —el mismo término del badge de la UI— justo para que
         # no vuelva a confundirse con una cantidad de piezas.
         "Productos en el carrito",
+        # Las PIEZAS que van en el paquete físico (pedido de Mario 2026-08-21). Es la suma de
+        # las unidades de las N ventas del carrito, y por eso difiere de la columna anterior:
+        # el pack de KIMS trae 2 productos pero 3 piezas (2 birlos + 1 tuerca). Va pegada a
+        # "Productos en el carrito" —las dos describen el paquete, no la fila— y ambas lejos
+        # del "Num venta", que es lo que causaba la confusión original.
+        "Piezas del carrito",
     ])
     for r in rows:
         w.writerow([
@@ -424,8 +456,11 @@ def export_csv(
             "Si" if r["facturas_count"] > 0 else "No",
             _folios_facturas(r["facturas_raw"]),
             _componentes_kit_texto(r["kit_componentes_raw"]),
-            # Va al final, en el mismo orden que el encabezado (ver el comentario de arriba).
+            # Van al final, en el mismo orden que el encabezado (ver los comentarios de arriba).
             r["pack_ventas"] if r["pack_ventas"] else 1,
+            # Sin pack, las piezas del "paquete" son las de la propia venta. Celda VACÍA si no
+            # se conocen las unidades (32 ventas en prod): un 0 se leería como paquete vacío.
+            _piezas_carrito(r),
         ])
     buf.seek(0)
     return StreamingResponse(
