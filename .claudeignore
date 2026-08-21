@@ -1,0 +1,14 @@
+# Dependencias y binarios — nunca se leen en tareas de código
+backend/.venv/
+frontend/node_modules/
+frontend/build/
+**/__pycache__/
+
+# Datos y BD (además ya en .gitignore)
+data/*.db
+archivos/
+prueba-junio/
+kits/
+
+# Historia larga — NO auto-cargar en búsquedas amplias; se lee bajo demanda cuando importa
+docs/bitacora-sesiones.md
