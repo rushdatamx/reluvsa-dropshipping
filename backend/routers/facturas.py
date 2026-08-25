@@ -286,12 +286,15 @@ def _registrar_factura(conn, parsed: dict, xml_path: Path, pdf_path: Optional[Pa
                                          fecha_factura=parsed.get("fecha"),
                                          factura=ctx_factura)
         conn.execute(
-            """INSERT INTO factura_conceptos (factura_id, codigo_prov, descripcion, cantidad,
+            """INSERT INTO factura_conceptos (factura_id, codigo_prov, num_venta_proveedor,
+                                              cruce_numero_estado, descripcion, cantidad,
                                               precio_unitario, importe, num_venta_match, match_method, match_confidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 factura_id,
                 c.get("codigo"),
+                c.get("num_venta_proveedor"),
+                c.get("cruce_numero_estado"),
                 c.get("descripcion"),
                 c.get("cantidad"),
                 c.get("precio_unitario"),

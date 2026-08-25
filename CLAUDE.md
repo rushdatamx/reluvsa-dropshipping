@@ -241,6 +241,14 @@ cruza a la más reciente sin facturar (la guarda 4 aplica sólo con SKU-kit dist
   2. **ID interno normalizado** (agregado 2026-06-08): cada proveedor usa su propio esquema; el código de factura no es idéntico al SKU de ML. CAUPLAS vende `CAU2692` pero factura `2692  M2626339` — se cruza por el ID interno común (`_tokens_codigo`). Sin esto CAUPLAS daba 0 matches. Ver [[project_matcher_id_interno]].
   3. **Componente de kit** (agregado 2026-06-19; **cruce por ID interno agregado 2026-08-05**): si la venta es un kit (su SKU está en `kit_componentes`), el proveedor factura los componentes, no el SKU-kit. Cruza el código del concepto contra los componentes del kit, primero por **texto** (exacto/substring, tolera sufijo `-K`) y luego por **ID interno normalizado** — el Excel trae `CAU11370` donde la factura dice `11370 M2650963`. Ante varios kits candidatos desempata la descripción, y si no hay ganador claro **NO cruza**. Ver la sección "⭐ Los kits cruzan por ID interno" arriba y [[project_kits_cruce_id_interno]].
   4. **Fuzzy** por descripción contra título de la venta (umbral 0.6).
+- ⭐ **CAUPLAS timbra el # de venta en el XML por concepto** (2026-08-25):
+  `NoIdentificacion="<código> <número ML>"`. Para CAUPLAS este número es el primer paso
+  y se busca secuencialmente por `ventas_ml.num_venta` y sólo después por `pack_id`
+  (nunca con `OR`). Exige 16 dígitos, pieza/kit compatible y venta no posterior al día
+  de factura. Un número inválido o contradictorio bloquea fecha/fuzzy y queda visible;
+  los XML legacy sin número conservan los pasos existentes. Método persistido:
+  `num_venta_proveedor_cauplas`, confianza 1.0. El histórico sólo se simula primero con
+  `scripts/backfill_num_venta_cauplas.py`; no ejecutar en producción sin aprobación.
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
 - **Cruce retroactivo (2026-06-19):** el match se calculaba **una sola vez**, al subir la factura. Si el proveedor facturaba ANTES de que existiera la venta (o antes de que la colecta asignara proveedor al envío), el concepto quedaba huérfano para siempre. Ahora `services/matcher.py::recruzar_conceptos_sin_match(conn)` reintenta TODOS los conceptos con `num_venta_match IS NULL` y se invoca tras cada evento que puede habilitar un cruce: subir **ventas** (`parser_ventas_ml`), subir **colecta** (`parser_colecta`, asigna proveedor) y **reasignar bodega** (`routers/envios.py::reasignar`). Idempotente. Verificado E2E (`backend/scripts/test_recruce_retroactivo.py`): factura subida antes que la venta → cruza al subir la venta. Ver [[project_cruce_retroactivo]].

@@ -2116,3 +2116,12 @@ y **api-guardian APROBADO 7/7** + 7 puntos específicos.
 | La venta **ya tiene otra factura** cruzada | 1 | Correcto no duplicar |
 
 Reparto por mes (jun 14 · jul 17 · ago 34) = goteo normal de operación, no un lote roto.
+# 2026-08-25 — CAUPLAS cruza por # de venta timbrado en XML
+
+- Se agregó evidencia por concepto (`num_venta_proveedor`, `cruce_numero_estado`) con
+  migración idempotente y parser exclusivo del RFC `QHO180116NW0`.
+- El paso 0 CAUPLAS resuelve `num_venta` y después `pack_id`, confirma pieza/kit y fecha,
+  admite bodega desconocida y bloquea heurísticas ante evidencia inválida o conflictiva.
+- La pestaña Facturas separa código y número declarado y marca “Número inválido”.
+- `scripts/backfill_num_venta_cauplas.py` simula por defecto; la ejecución productiva
+  queda pendiente de revisar cifras, apagar sync, respaldar SQLite y aprobar el cambio.

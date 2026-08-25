@@ -345,6 +345,7 @@ export default function Facturas() {
                           <thead>
                             <tr className="text-notion-text-secondary">
                               <th className="text-left py-1 pr-3 font-medium">Código</th>
+                              <th className="text-left py-1 pr-3 font-medium"># declarado CAUPLAS</th>
                               <th className="text-left py-1 pr-3 font-medium">Descripción</th>
                               <th className="text-right py-1 pr-3 font-medium">Importe</th>
                               <th className="text-left py-1 pr-3 font-medium"># Venta</th>
@@ -356,6 +357,14 @@ export default function Facturas() {
                             {(detalle[f.id] || []).map((c) => (
                               <tr key={c.id} className="border-t border-notion-border">
                                 <td className="py-1.5 pr-3 font-mono">{c.codigo_prov || '—'}</td>
+                                <td className="py-1.5 pr-3 font-mono">
+                                  {c.num_venta_proveedor || '—'}
+                                  {c.cruce_numero_estado === 'numero_invalido' && (
+                                    <span className="ml-2 inline-flex rounded bg-red-100 px-2 py-0.5 font-sans font-semibold text-danger">
+                                      Número inválido
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="py-1.5 pr-3 max-w-[260px] truncate" title={c.descripcion}>{c.descripcion || '—'}</td>
                                 <td className="py-1.5 pr-3 text-right">{c.importe != null ? `$${Number(c.importe).toFixed(2)}` : ''}</td>
                                 <td className="py-1.5 pr-3 font-mono">{c.num_venta_match || <span className="text-danger">sin cruce</span>}</td>
@@ -370,7 +379,7 @@ export default function Facturas() {
                               </tr>
                             ))}
                             {(detalle[f.id] || []).length === 0 && (
-                              <tr><td colSpan="6" className="py-2 text-notion-text-secondary">Cargando conceptos…</td></tr>
+                              <tr><td colSpan="7" className="py-2 text-notion-text-secondary">Cargando conceptos…</td></tr>
                             )}
                           </tbody>
                         </table>

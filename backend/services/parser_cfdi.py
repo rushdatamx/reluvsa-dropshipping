@@ -5,9 +5,27 @@ Extrae datos del comprobante, emisor, receptor, conceptos y UUID del TimbreFisca
 """
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Optional
 
 from lxml import etree
+
+RFC_CAUPLAS = "QHO180116NW0"
+
+
+def separar_no_identificacion_cauplas(valor: Optional[str]) -> dict:
+    """Separa ``<codigo> <numero ML>`` sin afectar los CFDI legacy."""
+    original = (valor or "").strip()
+    match = re.match(r"^(.*?)\s+(\d+)$", original)
+    if not match:
+        return {"codigo": original or None, "num_venta_proveedor": None,
+                "cruce_numero_estado": None}
+    codigo, numero = match.group(1).strip(), match.group(2)
+    return {
+        "codigo": codigo or None,
+        "num_venta_proveedor": numero,
+        "cruce_numero_estado": "numero_valido" if len(numero) == 16 else "numero_invalido",
+    }
 
 NS = {
     "cfdi": "http://www.sat.gob.mx/cfd/4",
@@ -60,10 +78,15 @@ def parse_cfdi_xml(path: Path) -> dict:
     uuid = _attr(timbre, "UUID")
 
     conceptos = []
+    es_cauplas = (_attr(emisor, "Rfc") or "").strip().upper() == RFC_CAUPLAS
     if conceptos_node is not None:
         for c in conceptos_node.findall("cfdi:Concepto", ns):
+            identidad = (_attr(c, "NoIdentificacion") or "").strip()
+            separada = (separar_no_identificacion_cauplas(identidad) if es_cauplas else
+                        {"codigo": identidad or None, "num_venta_proveedor": None,
+                         "cruce_numero_estado": None})
             conceptos.append({
-                "codigo": _attr(c, "NoIdentificacion"),
+                **separada,
                 "descripcion": _attr(c, "Descripcion"),
                 "cantidad": float(_attr(c, "Cantidad") or 0),
                 "precio_unitario": float(_attr(c, "ValorUnitario") or 0),

@@ -45,6 +45,8 @@ from services.num_venta_pdf import (
 FACTURAS_DIR = UPLOADS_DIR / "facturas"
 
 CONFIDENCE_MIN_FUZZY = 0.6
+CODIGO_BODEGA_CAUPLAS = "CAUPLAS"
+METODO_NUM_CAUPLAS = "num_venta_proveedor_cauplas"
 
 # ⭐ Ventana de facturación: cuántos días DESPUÉS de la venta puede emitirse su factura.
 #
@@ -712,6 +714,99 @@ def _match_por_num_impreso(conn, proveedor_id: int, factura: dict,
             "confidence": CONFIANZA_NUM_IMPRESO}
 
 
+def _pieza_cauplas_cuadra(conn, venta, codigo: str) -> bool:
+    """Confirma SKU normalizado o componente de kit para la venta declarada."""
+    sku = (venta["sku"] or "").strip()
+    limpio = (codigo or "").strip()
+    if limpio and sku and (sku == limpio or limpio in sku or sku in limpio):
+        return True
+    cod_tokens = _tokens_codigo(limpio)
+    piezas_codigo = _tokens_pieza(limpio)
+    if piezas_codigo and piezas_codigo & _tokens_pieza(sku):
+        return True
+    for row in conn.execute(
+        "SELECT componente_codigo FROM kit_componentes WHERE kit_sku = UPPER(TRIM(?))",
+        (sku,),
+    ):
+        if _componente_cruza(_tokens_componente(row["componente_codigo"]), cod_tokens):
+            return True
+    return False
+
+
+def _evidencia_otro_proveedor(conn, venta, proveedor_id: int) -> bool:
+    """Rechaza evidencia explícita ajena; la ausencia de bodega sí es admisible."""
+    ids = {r["proveedor_id"] for r in conn.execute(
+        f"""SELECT DISTINCT e.proveedor_id FROM envios_colecta e
+            JOIN ventas_ml v ON {ENVIO_CUBRE_VENTA}
+            WHERE v.num_venta = ? AND e.proveedor_id IS NOT NULL""",
+        (venta["num_venta"],),
+    )}
+    if any(pid != proveedor_id for pid in ids):
+        return True
+    deposito = (venta["deposito"] or "").strip().upper()
+    if deposito and deposito != "MATRIZ":
+        prov = conn.execute(
+            "SELECT id FROM proveedores WHERE UPPER(codigo_bodega) = ?", (deposito,)
+        ).fetchone()
+        if prov and prov["id"] != proveedor_id:
+            return True
+    return False
+
+
+def resolver_num_venta_cauplas(conn, proveedor_id: int, numero: str, codigo: str,
+                               fecha_factura: Optional[str]) -> dict:
+    """Resuelve order.id y sólo después pack_id; nunca mezcla ambas llaves."""
+    if not numero or not re.fullmatch(r"\d{16}", numero):
+        return {"estado": "numero_invalido"}
+
+    columnas = "num_venta, pack_id, sku, fecha_venta, deposito"
+    directa = conn.execute(
+        f"SELECT {columnas} FROM ventas_ml WHERE num_venta = ?", (numero,)
+    ).fetchall()
+    candidatas = directa
+    if not candidatas:
+        candidatas = conn.execute(
+            f"SELECT {columnas} FROM ventas_ml WHERE pack_id = ? ORDER BY num_venta",
+            (numero,),
+        ).fetchall()
+    if not candidatas:
+        return {"estado": "numero_no_resuelve"}
+
+    por_fecha = [v for v in candidatas if not fecha_factura or not v["fecha_venta"] or
+                 str(v["fecha_venta"])[:10] <= str(fecha_factura)[:10]]
+    if not por_fecha:
+        return {"estado": "conflicto_fecha"}
+    por_pieza = [v for v in por_fecha if _pieza_cauplas_cuadra(conn, v, codigo)]
+    if not por_pieza:
+        return {"estado": "conflicto_pieza"}
+    compatibles = [v for v in por_pieza
+                   if not _evidencia_otro_proveedor(conn, v, proveedor_id)]
+    if not compatibles:
+        return {"estado": "conflicto_proveedor"}
+    if len(compatibles) != 1:
+        return {"estado": "numero_ambiguo"}
+    return {"estado": "cruzado", "num_venta": compatibles[0]["num_venta"],
+            "method": METODO_NUM_CAUPLAS, "confidence": 1.0}
+
+
+def _match_por_num_cauplas(conn, proveedor_id: int, concepto: dict,
+                           fecha_factura: Optional[str], factura: Optional[dict]):
+    if not factura or (factura.get("codigo_bodega") or "").strip().upper() != CODIGO_BODEGA_CAUPLAS:
+        return None
+    numero = concepto.get("num_venta_proveedor")
+    estado_parser = concepto.get("cruce_numero_estado")
+    if not numero:
+        return None
+    if estado_parser == "numero_invalido" or not re.fullmatch(r"\d{16}", str(numero)):
+        concepto["cruce_numero_estado"] = "numero_invalido"
+        return "BLOQUEAR"
+    resultado = resolver_num_venta_cauplas(
+        conn, proveedor_id, str(numero), concepto.get("codigo") or "", fecha_factura
+    )
+    concepto["cruce_numero_estado"] = resultado["estado"]
+    return resultado if resultado.get("num_venta") else "BLOQUEAR"
+
+
 def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
                              fecha_factura: Optional[str] = None,
                              factura: Optional[dict] = None) -> Optional[dict]:
@@ -731,7 +826,16 @@ def match_conceptos_a_ventas(conn, proveedor_id: int, concepto: dict,
     f_sql, f_par = _filtro_fecha(fecha_factura)
     o_sql, o_par = _orden_candidatas(fecha_factura)
 
-    # 0) El # de venta impreso por el proveedor gana sobre cualquier inferencia nuestra.
+    # 0a) CAUPLAS timbra el número por concepto en el XML.
+    por_num_cauplas = _match_por_num_cauplas(
+        conn, proveedor_id, concepto, fecha_factura, factura
+    )
+    if por_num_cauplas == "BLOQUEAR":
+        return None
+    if por_num_cauplas:
+        return por_num_cauplas
+
+    # 0b) El # de venta impreso por KIM gana sobre cualquier inferencia nuestra.
     por_impreso = _match_por_num_impreso(conn, proveedor_id, factura, fecha_factura)
     if por_impreso == "CORRUPTO":
         return None
@@ -831,8 +935,16 @@ def recruzar_conceptos_sin_match(conn) -> dict:
     reglas. O sea, la evidencia del proveedor le gana a nuestra inferencia, pero jamás
     se pisa una evidencia con otra ni se degrada un cruce a algo más débil.
     """
+    columnas_fc = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(factura_conceptos)"
+    ).fetchall()}
+    sel_num = ("fc.num_venta_proveedor" if "num_venta_proveedor" in columnas_fc
+               else "NULL AS num_venta_proveedor")
+    sel_estado = ("fc.cruce_numero_estado" if "cruce_numero_estado" in columnas_fc
+                  else "NULL AS cruce_numero_estado")
     pendientes = conn.execute(
-        """SELECT fc.id, fc.codigo_prov, fc.descripcion, f.proveedor_id, f.fecha_factura
+        f"""SELECT fc.id, fc.codigo_prov, {sel_num},
+                  {sel_estado}, fc.descripcion, f.proveedor_id, f.fecha_factura
            FROM factura_conceptos fc
            JOIN facturas f ON f.id = fc.factura_id
            WHERE fc.num_venta_match IS NULL"""
@@ -848,18 +960,39 @@ def recruzar_conceptos_sin_match(conn) -> dict:
         # son posteriores a facturas viejas y por tanto no pueden ser suyas.
         match = match_conceptos_a_ventas(
             conn, c["proveedor_id"],
-            {"codigo": c["codigo_prov"], "descripcion": c["descripcion"]},
+            {"codigo": c["codigo_prov"], "descripcion": c["descripcion"],
+             "num_venta_proveedor": c["num_venta_proveedor"],
+             "cruce_numero_estado": c["cruce_numero_estado"]},
             fecha_factura=c["fecha_factura"],
             factura=_ctx_factura(conn, c["id"]),
         )
         if match:
-            conn.execute(
-                """UPDATE factura_conceptos
-                   SET num_venta_match = ?, match_method = ?, match_confidence = ?
-                   WHERE id = ?""",
-                (match["num_venta"], match["method"], match["confidence"], c["id"]),
-            )
+            if "cruce_numero_estado" in columnas_fc:
+                conn.execute(
+                    """UPDATE factura_conceptos
+                       SET num_venta_match = ?, match_method = ?, match_confidence = ?,
+                           cruce_numero_estado = ? WHERE id = ?""",
+                    (match["num_venta"], match["method"], match["confidence"],
+                     "cruzado" if match["method"] == METODO_NUM_CAUPLAS else c["cruce_numero_estado"],
+                     c["id"]),
+                )
+            else:
+                conn.execute(
+                    """UPDATE factura_conceptos
+                       SET num_venta_match = ?, match_method = ?, match_confidence = ?
+                       WHERE id = ?""",
+                    (match["num_venta"], match["method"], match["confidence"], c["id"]),
+                )
             recruzados += 1
+        elif c["num_venta_proveedor"] and "cruce_numero_estado" in columnas_fc:
+            # Persiste el diagnóstico aunque la evidencia explícita haya bloqueado.
+            estado = {"codigo": c["codigo_prov"],
+                      "num_venta_proveedor": c["num_venta_proveedor"],
+                      "cruce_numero_estado": c["cruce_numero_estado"]}
+            _match_por_num_cauplas(conn, c["proveedor_id"], estado,
+                                   c["fecha_factura"], _ctx_factura(conn, c["id"]))
+            conn.execute("UPDATE factura_conceptos SET cruce_numero_estado = ? WHERE id = ?",
+                         (estado["cruce_numero_estado"], c["id"]))
 
     corregidos = _corregir_por_num_impreso(conn)
 
@@ -886,7 +1019,10 @@ def _ctx_factura(conn, concepto_id: int) -> Optional[dict]:
         ).fetchone()
     except Exception:
         return None
-    if not f or not f["pdf_path"]:
+    if not f:
+        return None
+    # KIM necesita PDF; CAUPLAS lleva la evidencia en el propio concepto XML.
+    if not f["pdf_path"] and (f["codigo_bodega"] or "").upper() != CODIGO_BODEGA_CAUPLAS:
         return None
     codigos = [r["codigo_prov"] for r in conn.execute(
         "SELECT codigo_prov FROM factura_conceptos WHERE factura_id = ?", (f["id"],)
