@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-08-25](#2026-08-25--cauplas-cruza-por--de-venta-timbrado-en-xml) | CAUPLAS: # de venta timbrado en XML | ✅ Desplegado; backfill pendiente de aprobación |
 | [2026-08-19](#cierre-sesión-2026-08-19-módulo-2-publicaciones-masivas-arranca) | **Módulo 2: publicaciones masivas** | ✅ Desplegado |
 | [2026-07-31](#cierre-sesión-2026-07-31-oauth-resuelto-era-pkce-cuenta-ml-conectada) | OAuth resuelto: era PKCE | ✅ Cerrado |
 | [2026-07-31](#webhooks-de-alto-volumen-poda-de-ml_notificaciones-2026-07-31-commit-2f965a7) | Webhooks alto volumen + poda | ✅ Desplegado |
@@ -2118,10 +2119,65 @@ y **api-guardian APROBADO 7/7** + 7 puntos específicos.
 Reparto por mes (jun 14 · jul 17 · ago 34) = goteo normal de operación, no un lote roto.
 # 2026-08-25 — CAUPLAS cruza por # de venta timbrado en XML
 
-- Se agregó evidencia por concepto (`num_venta_proveedor`, `cruce_numero_estado`) con
-  migración idempotente y parser exclusivo del RFC `QHO180116NW0`.
-- El paso 0 CAUPLAS resuelve `num_venta` y después `pack_id`, confirma pieza/kit y fecha,
-  admite bodega desconocida y bloquea heurísticas ante evidencia inválida o conflictiva.
-- La pestaña Facturas separa código y número declarado y marca “Número inválido”.
-- `scripts/backfill_num_venta_cauplas.py` simula por defecto; la ejecución productiva
-  queda pendiente de revisar cifras, apagar sync, respaldar SQLite y aprobar el cambio.
+## Qué reportó el negocio
+
+El matcher ya identificaba correctamente la pieza, pero una misma pieza podía venderse
+varias veces. Al elegir por fecha, disponibilidad y similitud, una factura válida podía
+quedar vinculada a otra venta del mismo SKU. CAUPLAS cambió su timbrado y comenzó a poner
+en cada concepto `NoIdentificacion="<código de pieza> <número ML>"`, dando por primera vez
+una evidencia directa para escoger la venta.
+
+El XML de referencia, folio `970097327`, tenía 19 conceptos: 18 números con los 16 dígitos
+esperados y uno de 15, `200018024092132`. Ese dato inválido no debía sustituirse con una
+adivinanza; debía quedar visible para que Gaby pudiera reclamarlo a CAUPLAS.
+
+## Decisiones e implementación
+
+- El parser separa código y número sólo cuando el RFC emisor es CAUPLAS
+  (`QHO180116NW0`). Los demás proveedores no cambian.
+- Se agregaron `factura_conceptos.num_venta_proveedor` y
+  `factura_conceptos.cruce_numero_estado` mediante migración idempotente.
+- El nuevo paso 0 es por concepto y busca primero `ventas_ml.num_venta`; únicamente si
+  no existe busca `pack_id`. Nunca combina ambas llaves con `OR`, porque hay números que
+  son `order.id` de una venta y `pack_id` de otra.
+- Para aceptar el cruce exige 16 dígitos, pieza/SKU o componente de kit compatible y que
+  la venta no sea posterior al día de la factura. También rechaza evidencia explícita de
+  otro proveedor.
+- La falta de bodega no bloquea número+piezas+fecha. El matcher no asigna ni modifica
+  bodega, envío, proveedor o SLA.
+- Número inválido, inexistente, ambiguo o contradictorio deja el concepto pendiente y
+  bloquea código, fecha y fuzzy. Un XML legacy sin número conserva el matcher anterior.
+- Un cruce válido se guarda como `num_venta_proveedor_cauplas`, confianza `1.0`.
+- La vista Facturas muestra código y número declarado por separado, con badge rojo
+  “Número inválido”.
+
+## Backfill y límite de esta entrega
+
+Se creó `scripts/backfill_num_venta_cauplas.py`, idempotente y en simulación por defecto.
+Lee exclusivamente XML almacenados y SQLite, clasifica ya correctos, corregibles,
+inválidos, ambiguos, conflictos y conceptos sin número, y reporta cada movimiento sin
+escribir. La opción `--ejecutar` existe, pero **no se usó en producción**.
+
+Antes de una ejecución productiva sigue siendo obligatorio: revisar las cifras y una
+muestra concreta, apagar temporalmente la sync automática, respaldar SQLite, ejecutar el
+backfill aprobado, verificar conteos e integridad y reactivar la sync.
+
+## Verificación, auditoría y despliegue
+
+- Se cubrieron parser, venta exacta, `pack_id`, colisión `order.id`/`pack_id`, SKU
+  normalizado, kits con varios componentes en una venta, ambigüedad, fecha futura,
+  bodega desconocida, proveedor incompatible y comportamiento legacy.
+- El backfill se ejecutó dos veces sobre una BD desechable; la segunda no propuso
+  correcciones.
+- Pasaron las 21 suites del backend, el build del frontend,
+  `test_ml_client_solo_lectura.py` y `test_sync_ml_e2e.py`.
+- El primer dictamen del `api-guardian` fue RECHAZADO: detectó que un SKU vacío podía
+  validar por substring y que un sufijo explícito de menos de 15 dígitos podía caer como
+  legacy. Ambos casos se corrigieron y quedaron fijados con pruebas de SKU `NULL` y
+  números de 14, 15, 16 y 17 dígitos.
+- Dictamen final independiente: **APROBADO**. Cero llamadas nuevas a ML, cero clientes
+  HTTP, cero secretos y ningún cambio en `ml_client.py`, `sync_ml.py`, OAuth o webhooks.
+- Commit `a97aa4a` enviado a `main`. Railway confirmó despliegue `SUCCESS`. Desde ese
+  despliegue las facturas nuevas de CAUPLAS usan la regla; el histórico sigue intacto.
+
+Referencia técnica canónica: `docs/cruce-cauplas-num-venta-xml.md`.

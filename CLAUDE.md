@@ -249,6 +249,8 @@ cruza a la más reciente sin facturar (la guarda 4 aplica sólo con SKU-kit dist
   los XML legacy sin número conservan los pasos existentes. Método persistido:
   `num_venta_proveedor_cauplas`, confianza 1.0. El histórico sólo se simula primero con
   `scripts/backfill_num_venta_cauplas.py`; no ejecutar en producción sin aprobación.
+  🔴 Antes de tocar parser, matcher o backfill, leer
+  `docs/cruce-cauplas-num-venta-xml.md` completo.
 - ⚠️ El matcher solo busca candidatas `WHERE e.proveedor_id = X`, así que **un envío sin proveedor asignado (col J = MATRIZ / vacío) impide el match** aunque la factura sea correcta → Gaby debe reasignar la bodega (selector en `Ventas.jsx`).
 - Confidence < 0.5 cuenta como **error de facturación** en métricas.
 - **Cruce retroactivo (2026-06-19):** el match se calculaba **una sola vez**, al subir la factura. Si el proveedor facturaba ANTES de que existiera la venta (o antes de que la colecta asignara proveedor al envío), el concepto quedaba huérfano para siempre. Ahora `services/matcher.py::recruzar_conceptos_sin_match(conn)` reintenta TODOS los conceptos con `num_venta_match IS NULL` y se invoca tras cada evento que puede habilitar un cruce: subir **ventas** (`parser_ventas_ml`), subir **colecta** (`parser_colecta`, asigna proveedor) y **reasignar bodega** (`routers/envios.py::reasignar`). Idempotente. Verificado E2E (`backend/scripts/test_recruce_retroactivo.py`): factura subida antes que la venta → cruza al subir la venta. Ver [[project_cruce_retroactivo]].
@@ -733,6 +735,7 @@ todo el archivo.
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |
+| `docs/cruce-cauplas-num-venta-xml.md` | ⭐ Regla completa del # de venta timbrado por CAUPLAS; leer antes de tocar parser/matcher/backfill |
 
 **Memorias persistentes** en
 `~/.claude/projects/-Users-jmariopgarcia-Desktop-2026-RushData-RELUVSA-dropshipping-reluvsa/memory/`:
