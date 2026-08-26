@@ -14,6 +14,7 @@ from models import UserInfo
 from routers.auth import get_current_user, require_proveedor
 from services.parser_cfdi import parse_cfdi_xml
 from services.matcher import match_conceptos_a_ventas
+from services.ocupacion_facturas import arbitrar_ocupacion
 from services.folio_factura import formatear_folio
 from services.uuid_pdf import extraer_uuid_de_pdf
 
@@ -285,16 +286,20 @@ def _registrar_factura(conn, parsed: dict, xml_path: Path, pdf_path: Optional[Pa
         match = match_conceptos_a_ventas(conn, user.proveedor_id, c,
                                          fecha_factura=parsed.get("fecha"),
                                          factura=ctx_factura)
+        arbitraje = arbitrar_ocupacion(conn, factura_id, match)
+        match = arbitraje["match"]
         conn.execute(
             """INSERT INTO factura_conceptos (factura_id, codigo_prov, num_venta_proveedor,
-                                              cruce_numero_estado, descripcion, cantidad,
+                                              cruce_numero_estado, conflicto_factura,
+                                              descripcion, cantidad,
                                               precio_unitario, importe, num_venta_match, match_method, match_confidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 factura_id,
                 c.get("codigo"),
                 c.get("num_venta_proveedor"),
                 c.get("cruce_numero_estado"),
+                arbitraje["conflicto"],
                 c.get("descripcion"),
                 c.get("cantidad"),
                 c.get("precio_unitario"),

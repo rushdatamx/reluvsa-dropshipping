@@ -85,6 +85,7 @@ class FacturaConcepto(BaseModel):
     num_venta_match: Optional[str]
     match_method: Optional[str]
     match_confidence: Optional[float]
+    conflicto_factura: Optional[str] = None
 
 
 class Factura(BaseModel):

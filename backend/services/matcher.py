@@ -38,6 +38,7 @@ from services.num_venta_pdf import (
     resolver_num_venta_impreso,
     resolver_pdf,
 )
+from services.ocupacion_facturas import arbitrar_ocupacion
 
 # Misma carpeta que usa `routers/facturas.py` (volumen persistente). Se deriva de
 # UPLOADS_DIR y no se importa del router: un service que importa de un router invierte
@@ -942,12 +943,15 @@ def recruzar_conceptos_sin_match(conn) -> dict:
                else "NULL AS num_venta_proveedor")
     sel_estado = ("fc.cruce_numero_estado" if "cruce_numero_estado" in columnas_fc
                   else "NULL AS cruce_numero_estado")
+    filtro_conflicto = ("AND COALESCE(fc.conflicto_factura, '') = ''"
+                        if "conflicto_factura" in columnas_fc else "")
     pendientes = conn.execute(
         f"""SELECT fc.id, fc.codigo_prov, {sel_num},
                   {sel_estado}, fc.descripcion, f.proveedor_id, f.fecha_factura
            FROM factura_conceptos fc
            JOIN facturas f ON f.id = fc.factura_id
-           WHERE fc.num_venta_match IS NULL"""
+           WHERE fc.num_venta_match IS NULL
+             {filtro_conflicto}"""
     ).fetchall()
 
     recruzados = 0
@@ -967,11 +971,23 @@ def recruzar_conceptos_sin_match(conn) -> dict:
             factura=_ctx_factura(conn, c["id"]),
         )
         if match:
+            arbitraje = arbitrar_ocupacion(
+                conn, _factura_id_concepto(conn, c["id"]), match, c["id"]
+            )
+            match = arbitraje["match"]
+            if not match:
+                if "conflicto_factura" in columnas_fc:
+                    conn.execute(
+                        "UPDATE factura_conceptos SET conflicto_factura = ? WHERE id = ?",
+                        (arbitraje["conflicto"], c["id"]),
+                    )
+                continue
             if "cruce_numero_estado" in columnas_fc:
+                extra = ", conflicto_factura = NULL" if "conflicto_factura" in columnas_fc else ""
                 conn.execute(
-                    """UPDATE factura_conceptos
+                    f"""UPDATE factura_conceptos
                        SET num_venta_match = ?, match_method = ?, match_confidence = ?,
-                           cruce_numero_estado = ? WHERE id = ?""",
+                           cruce_numero_estado = ?{extra} WHERE id = ?""",
                     (match["num_venta"], match["method"], match["confidence"],
                      "cruzado" if match["method"] == METODO_NUM_CAUPLAS else c["cruce_numero_estado"],
                      c["id"]),
@@ -998,6 +1014,12 @@ def recruzar_conceptos_sin_match(conn) -> dict:
 
     return {"conceptos_sin_match": len(pendientes), "conceptos_recruzados": recruzados,
             "conceptos_corregidos_por_pdf": corregidos}
+
+
+def _factura_id_concepto(conn, concepto_id: int) -> int:
+    return conn.execute(
+        "SELECT factura_id FROM factura_conceptos WHERE id = ?", (concepto_id,)
+    ).fetchone()["factura_id"]
 
 
 def _ctx_factura(conn, concepto_id: int) -> Optional[dict]:
@@ -1131,9 +1153,24 @@ def _corregir_por_num_impreso(conn) -> int:
             if c["num_venta_match"] is None:
                 continue
             cambia = c["num_venta_match"] != real
+            arbitraje = arbitrar_ocupacion(
+                conn, f["id"],
+                {"num_venta": real, "method": METODO_NUM_IMPRESO,
+                 "confidence": CONFIANZA_NUM_IMPRESO},
+                c["id"],
+            )
+            if not arbitraje["match"]:
+                if _tiene_columna_fc(conn, "conflicto_factura"):
+                    conn.execute(
+                        "UPDATE factura_conceptos SET conflicto_factura = ? WHERE id = ?",
+                        (arbitraje["conflicto"], c["id"]),
+                    )
+                continue
+            extra = (", conflicto_factura = NULL"
+                     if _tiene_columna_fc(conn, "conflicto_factura") else "")
             conn.execute(
-                """UPDATE factura_conceptos
-                   SET num_venta_match = ?, match_method = ?, match_confidence = ?
+                f"""UPDATE factura_conceptos
+                   SET num_venta_match = ?, match_method = ?, match_confidence = ?{extra}
                    WHERE id = ?""",
                 (real, METODO_NUM_IMPRESO, CONFIANZA_NUM_IMPRESO, c["id"]),
             )
@@ -1141,3 +1178,9 @@ def _corregir_por_num_impreso(conn) -> int:
                 corregidos += 1
 
     return corregidos
+
+
+def _tiene_columna_fc(conn, nombre: str) -> bool:
+    return any(r[1] == nombre for r in conn.execute(
+        "PRAGMA table_info(factura_conceptos)"
+    ).fetchall())

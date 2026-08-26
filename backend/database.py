@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS factura_conceptos (
     codigo_prov TEXT,
     num_venta_proveedor TEXT,
     cruce_numero_estado TEXT,
+    conflicto_factura TEXT,
     descripcion TEXT,
     cantidad REAL,
     precio_unitario REAL,
@@ -395,6 +396,7 @@ def init_database():
         _migrar_columna_logistic_type(cursor)
         _migrar_columna_num_venta_pdf(cursor)
         _migrar_columnas_num_venta_cauplas(cursor)
+        _migrar_ocupacion_unica_factura(cursor)
         _migrar_envio_pack_id(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
@@ -570,6 +572,39 @@ def _migrar_columnas_num_venta_cauplas(cursor):
         "CREATE INDEX IF NOT EXISTS idx_conceptos_num_venta_proveedor "
         "ON factura_conceptos(num_venta_proveedor)"
     )
+
+
+def _migrar_ocupacion_unica_factura(cursor):
+    """Añade el diagnóstico y bloquea cruces de facturas distintas a una venta."""
+    cols = {c["name"] for c in cursor.execute(
+        "PRAGMA table_info(factura_conceptos)"
+    ).fetchall()}
+    if "conflicto_factura" not in cols:
+        cursor.execute("ALTER TABLE factura_conceptos ADD COLUMN conflicto_factura TEXT")
+        print("[migracion] factura_conceptos.conflicto_factura agregada.")
+    cursor.executescript("""
+        CREATE TRIGGER IF NOT EXISTS trg_factura_venta_unica_insert
+        BEFORE INSERT ON factura_conceptos
+        WHEN NEW.num_venta_match IS NOT NULL AND EXISTS (
+            SELECT 1 FROM factura_conceptos fc
+             WHERE fc.num_venta_match = NEW.num_venta_match
+               AND fc.factura_id != NEW.factura_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'venta ocupada por otra factura');
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_factura_venta_unica_update
+        BEFORE UPDATE OF num_venta_match, factura_id ON factura_conceptos
+        WHEN NEW.num_venta_match IS NOT NULL AND EXISTS (
+            SELECT 1 FROM factura_conceptos fc
+             WHERE fc.num_venta_match = NEW.num_venta_match
+               AND fc.factura_id != NEW.factura_id
+               AND fc.id != NEW.id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'venta ocupada por otra factura');
+        END;
+    """)
 
 
 def _migrar_columna_total_neto(cursor):

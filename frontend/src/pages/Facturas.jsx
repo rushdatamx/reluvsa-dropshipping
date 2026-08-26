@@ -370,7 +370,20 @@ export default function Facturas() {
                                 <td className="py-1.5 pr-3 font-mono">{c.num_venta_match || <span className="text-danger">sin cruce</span>}</td>
                                 <td className="py-1.5 pr-3 max-w-[260px] truncate" title={c.venta_titulo}>{c.venta_titulo || '—'}</td>
                                 <td className="py-1.5">
-                                  {c.num_venta_match ? (
+                                  {c.conflicto_factura ? (
+                                    <div>
+                                      <span className="inline-flex rounded bg-red-100 px-2 py-0.5 font-semibold text-danger">
+                                        Conflicto de factura
+                                      </span>
+                                      <div className="mt-1 max-w-[260px] text-notion-text-secondary">
+                                        {{
+                                          desplazada_por_numero_explicito: 'Otra factura declaró explícitamente esta venta; este concepto quedó pendiente.',
+                                          numero_explicito_duplicado: 'Otra factura ya declaró explícitamente la misma venta; se conservó la primera.',
+                                          venta_ocupada_por_otra_factura: 'La venta ya pertenece a otra factura; este concepto quedó pendiente.',
+                                        }[c.conflicto_factura] || c.conflicto_factura}
+                                      </div>
+                                    </div>
+                                  ) : c.num_venta_match ? (
                                     <span className="text-notion-text-secondary">
                                       {c.match_method} · {c.match_confidence != null ? `${Math.round(c.match_confidence * 100)}%` : ''}
                                     </span>
