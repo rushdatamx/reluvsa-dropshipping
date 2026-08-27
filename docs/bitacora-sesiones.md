@@ -2269,3 +2269,22 @@ El contrato HTTP no cambió: `/analizar` continúa devolviendo `por_linea` y
   carga visual en producción que no pudiera ejecutarse.
 
 Referencia técnica canónica: `docs/master-kg-categorias-producto.md`.
+
+# 2026-08-27 — `Gran Mayoreo` como encabezado de costo del master KG
+
+El lector del nuevo master KG acepta `Gran Mayoreo` y `Precio` como nombres
+equivalentes de la columna opcional de costo. La detección usa la normalización
+existente de espacios, mayúsculas y acentos. Si cualquiera de los aliases está
+presente, debe ocupar la columna 18/R, inmediatamente después de `Imagen 5`; un
+alias ubicado en otra columna se rechaza de forma explícita.
+
+`Gran Mayoreo` representa el costo base sin IVA, no el precio final de Mercado
+Libre. La plantilla generada conserva el encabezado `Precio` y utiliza la fórmula
+vigente sin cambios. Si no existe ninguno de los dos encabezados, el flujo sigue
+generando precios vacíos; si un SKU contiene costos positivos diferentes, no se
+elige uno arbitrariamente y su precio también queda vacío.
+
+La regresión cubre `Gran Mayoreo`, compatibilidad con masters anteriores que usan
+`Precio`, ausencia de ambos encabezados, posición incorrecta, fórmula de precio e
+inconsistencia por SKU. Resultado: **72/72 comprobaciones aprobadas**. No se
+modificaron API, interfaz, fórmula de precio ni generador XLSX.

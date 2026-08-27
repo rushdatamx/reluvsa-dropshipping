@@ -14,6 +14,7 @@ MASTER_HEADERS = ("Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "
                   "Clave", "Especificaciones", "Características", "Guía de Compradores",
                   "OEM", "Imagen 1", "Imagen 2", "Imagen 3", "Imagen 4", "Imagen 5")
 MASTER_ANCLAS = ("Armadora", "Modelo", "Producto", "Clave", "Inicio", "Fin")
+MASTER_HEADERS_COSTO = ("Gran Mayoreo", "Precio")
 
 
 def _texto(val) -> str:
@@ -68,9 +69,10 @@ def _producto_canonico(valor) -> str:
 
 
 def _headers_master(ws):
-    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1, max_col=18))]
+    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     mapa = {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
-    return all(_normalizar(h) in mapa for h in MASTER_HEADERS), mapa, _normalizar("Precio") in mapa
+    encabezado_costo = next((h for h in MASTER_HEADERS_COSTO if _normalizar(h) in mapa), None)
+    return all(_normalizar(h) in mapa for h in MASTER_HEADERS), mapa, encabezado_costo
 
 
 def _parece_master(ws) -> bool:
@@ -99,15 +101,20 @@ def _hoja_master(wb):
 
 
 def _leer_master(ws) -> ResultadoCatalogo:
-    valido, columnas, precio_presente = _headers_master(ws)
+    valido, columnas, encabezado_costo = _headers_master(ws)
     if not valido:
         faltan = [h for h in MASTER_HEADERS if _normalizar(h) not in columnas]
         raise ValueError(
             f"La hoja «{ws.title}» parece ser el master KG, pero le faltan "
             "los encabezados requeridos: " + ", ".join(faltan)
         )
-    if precio_presente and columnas[_normalizar("Precio")] != 17:
-        raise ValueError("Precio debe ser la última columna, inmediatamente después de Imagen 5")
+    costos_presentes = [h for h in MASTER_HEADERS_COSTO if _normalizar(h) in columnas]
+    if any(columnas[_normalizar(h)] != 17 for h in costos_presentes):
+        raise ValueError(
+            "Gran Mayoreo o Precio debe ser la última columna, "
+            "inmediatamente después de Imagen 5"
+        )
+    precio_presente = encabezado_costo is not None
     grupos, errores, vistos, claves_master = {}, [], set(), set()
     filas_master = validas = duplicados = 0
 
@@ -162,7 +169,7 @@ def _leer_master(ws) -> ResultadoCatalogo:
             if not any(g["imagenes"]): g["imagenes"] = list(imagenes)
         if precio_presente:
             try:
-                costo = float(val(fila, "Precio"))
+                costo = float(val(fila, encabezado_costo))
                 if costo > 0: g["_costos"].add(costo)
             except (TypeError, ValueError): pass
 

@@ -24,9 +24,11 @@ su perfil independiente.
 - Línea base real: **29,216 filas**, **4,021 SKU utilizables** y **9 filas con años
   inválidos**. Las filas inválidas se excluyen y se muestran con fila, datos y
   motivo; las filas repetidas se deduplican.
-- `Precio` es una columna final opcional (costo sin IVA). Si falta, el análisis
-  y la descarga continúan, con precio vacío y advertencia visible. Si una Clave
-  tiene costos distintos tampoco se elige uno arbitrariamente.
+- `Gran Mayoreo` y `Precio` son encabezados equivalentes para la columna final
+  opcional de costo sin IVA. `Gran Mayoreo` no es el precio final de Mercado
+  Libre; la plantilla generada sigue usando `Precio`. Si ambos faltan, el
+  análisis y la descarga continúan, con precio vacío y advertencia visible. Si
+  una Clave tiene costos distintos tampoco se elige uno arbitrariamente.
 - Una compatibilidad de un año genera una publicación. Con dos o más genera el
   rango `Inicio/Fin` y bloques cronológicos balanceados; los bloques se
   subdividen cuando haga falta para conservar el límite de 60 caracteres.

@@ -240,9 +240,39 @@ imposible = [dict(larga[0], clave="L2", producto="Producto Extraordinariamente L
 ix, ir = generar_filas_con_reporte(imposible, cfg)
 check("si no cabe sin cortar datos se excluye con motivo", not ix and ir["exclusiones"])
 
-wbp = openpyxl.Workbook(); wsp = wbp.active; wsp.title = "BD_Catalogo"; wsp.append(headers + ["Precio"])
-wsp.append(base + [100]); wsp.append([*base[:2], "L4 2.3L", *base[3:5], 1998, 1999, *base[7:], 120])
+wbp = openpyxl.Workbook(); wsp = wbp.active; wsp.title = "BD_Catalogo"; wsp.append(headers + ["  GRAN   MAYOREO "])
+wsp.append(base + [100]); wsp.append([*base[:2], "L4 2.3L", *base[3:5], 1998, 1999, *base[7:], 100])
 tpp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tpp.close(); wbp.save(tpp.name)
+rp = leer_catalogo_detallado(tpp.name, perfil_de("KG"))
+check("Gran Mayoreo en R se lee como costo sin IVA",
+      rp.precio_presente and rp.piezas[0]["costo"] == 100.0)
+filas_precio, _ = generar_filas_con_reporte(rp.piezas, cfg_desc)
+out_precio = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out_precio.close()
+escribir_xlsx(filas_precio, cfg_desc, out_precio.name)
+wb_precio = openpyxl.load_workbook(out_precio.name, data_only=True)
+check("Gran Mayoreo genera una celda Precio no vacía con la fórmula vigente",
+      wb_precio.active.cell(2, 3).value is not None)
+
+wb_anterior = openpyxl.Workbook(); ws_anterior = wb_anterior.active; ws_anterior.append(headers + ["Precio"])
+ws_anterior.append(base + [125])
+t_anterior = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); t_anterior.close(); wb_anterior.save(t_anterior.name)
+r_anterior = leer_catalogo_detallado(t_anterior.name, perfil_de("KG"))
+check("el master anterior con Precio en R continúa funcionando",
+      r_anterior.precio_presente and r_anterior.piezas[0]["costo"] == 125.0)
+
+wb_fuera = openpyxl.Workbook(); ws_fuera = wb_fuera.active
+ws_fuera.append(["Gran Mayoreo"] + headers); ws_fuera.append([100] + base)
+t_fuera = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); t_fuera.close(); wb_fuera.save(t_fuera.name)
+try:
+    leer_catalogo_detallado(t_fuera.name, perfil_de("KG"))
+    error_fuera = ""
+except ValueError as exc:
+    error_fuera = str(exc)
+check("Gran Mayoreo fuera de R se rechaza", "inmediatamente después de Imagen 5" in error_fuera,
+      error_fuera)
+
+wsp.cell(3, 18).value = 120
+wbp.save(tpp.name)
 rp = leer_catalogo_detallado(tpp.name, perfil_de("KG"))
 check("precios distintos del SKU no se eligen arbitrariamente",
       rp.precio_presente and rp.sku_precio_inconsistente == 1 and rp.piezas[0]["costo"] is None)

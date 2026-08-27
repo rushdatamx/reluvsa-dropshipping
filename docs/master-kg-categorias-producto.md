@@ -59,8 +59,11 @@ Los 17 encabezados requeridos, definidos en
 16. `Imagen 4`
 17. `Imagen 5`
 
-`Precio` es opcional. Si aparece, debe ser la columna 18, inmediatamente después
-de `Imagen 5`. Si falta, el análisis continúa y el precio generado queda vacío.
+`Gran Mayoreo` y `Precio` son nombres equivalentes para la columna opcional de
+costo. Si uno aparece, debe ser la columna 18, inmediatamente después de
+`Imagen 5`. `Gran Mayoreo` representa el costo base sin IVA, no el precio final
+de Mercado Libre. Si ninguno aparece, el análisis continúa y el precio generado
+queda vacío. La plantilla generada conserva el encabezado `Precio`.
 
 La normalización de encabezados usa `_normalizar`: elimina espacios sobrantes,
 compara sin distinguir mayúsculas y elimina diacríticos. Por ejemplo, ` AÑO `,
@@ -145,7 +148,8 @@ No unificar ambos parsers mediante índices compartidos.
 ## 8. Casos de error deliberados
 
 - Falta cualquier encabezado requerido: HTTP 400 con la hoja y lista de faltantes.
-- `Precio` existe fuera de la posición 18: HTTP 400; no se adivina su ubicación.
+- `Gran Mayoreo` o `Precio` existe fuera de la posición 18: HTTP 400; no se
+  adivina su ubicación.
 - `Clave` vacía: fila excluida y reportada.
 - `Inicio`/`Fin` no son años enteros 1900–2100: fila excluida.
 - `Inicio > Fin`: fila excluida.
