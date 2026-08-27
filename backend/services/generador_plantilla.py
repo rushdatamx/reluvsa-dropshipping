@@ -91,6 +91,79 @@ class FilaPublicacion:
     descripcion: str
     aplicacion: str
     truncada: bool = False
+    imagenes: List[str] = field(default_factory=list)
+    fila_origen: Optional[int] = None
+
+
+# Alias aprobados para las líneas reales del master. Sólo se usan si el nombre
+# completo no cabe; modelo, cilindrada y años nunca se recortan.
+ALIAS_PRODUCTO = {
+    "banda de accesorios": "Banda Accesorios", "banda de tiempo": "Banda Tiempo",
+    "bomba de agua": "Bomba Agua", "bomba de agua auxiliar": "Bomba Agua Aux",
+    "deposito de anticongelante": "Deposito Anticongelante", "fan clutch": "Fan Clutch",
+    "kit de banda de accesorios": "Kit Banda Accesorios",
+    "kit de banda de distribucion": "Kit Banda Distribucion",
+    "kit de banda de distribucion c/bomba": "Kit Banda Distrib c/Bomba",
+    "kit de cadena de distribucion": "Kit Cadena Distribucion",
+    "manguera moldeada": "Manguera Moldeada", "motoventilador": "Motoventilador",
+    "polea de accesorios": "Polea Accesorios", "polea de distribucion": "Polea Distribucion",
+    "sensor de temperatura": "Sensor Temperatura", "tapon de deposito": "Tapon Deposito",
+    "tapon de radiador": "Tapon Radiador",
+    "tensor hidraulico de distribucion": "Tensor Hidraulico Distrib",
+    "tensor de accesorios": "Tensor Accesorios", "tensor de accesorios hd": "Tensor Accesorios HD",
+    "tensor de accesorios hidraulico": "Tensor Accesorios Hidraulico",
+    "toma de agua": "Toma Agua", "toma de agua housing": "Toma Agua Housing",
+    "toma de agua con termostato": "Toma Agua c/Termostato",
+    "tubo de enfriamiento": "Tubo Enfriamiento",
+}
+
+
+def _sin_acentos(txt):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", str(txt).lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def _cilindrada(motor):
+    m = re.search(r"(\d[.,]\d)", str(motor or ""))
+    return m.group(1).replace(",", ".") if m else ""
+
+
+def _titulo_master(producto, compat, anios) -> Optional[str]:
+    producto = " ".join(str(producto or "").split())
+    armadora = " ".join(str(compat.get("armadora") or "").split())
+    modelo = " ".join(str(compat.get("modelo") or "").split())
+    motor = _cilindrada(compat.get("motor"))
+    sufijo = " ".join(x for x in (modelo, motor, anios) if x)
+    alias = ALIAS_PRODUCTO.get(_sin_acentos(producto), producto)
+    intentos = [f"{producto} P/ {armadora} {sufijo}", f"{producto} P/ {sufijo}",
+                f"{alias} P/ {sufijo}"]
+    for titulo in intentos:
+        titulo = re.sub(r"\s+", " ", titulo).strip()
+        if len(titulo) <= MAX_TITULO: return titulo
+    return None
+
+
+def _variantes_master(producto, compat):
+    inicio, fin = compat["inicio"], compat["fin"]
+    if inicio == fin:
+        titulo = _titulo_master(producto, compat, str(inicio))
+        return ([titulo] if titulo else []), ([] if titulo else [(str(inicio), "Título excede 60 caracteres")])
+    variantes, excluidas = [], []
+    rango = f"{inicio}/{fin}"
+    titulo = _titulo_master(producto, compat, rango)
+    (variantes if titulo else excluidas).append(titulo or (rango, "Título excede 60 caracteres"))
+    anios = list(range(inicio, fin + 1)); corte = (len(anios) + 1) // 2
+
+    def agregar_bloque(bloque):
+        texto = " ".join(map(str, bloque)); t = _titulo_master(producto, compat, texto)
+        if t: variantes.append(t)
+        elif len(bloque) > 1:
+            mitad = (len(bloque) + 1) // 2
+            agregar_bloque(bloque[:mitad]); agregar_bloque(bloque[mitad:])
+        else: excluidas.append((texto, "Título excede 60 caracteres"))
+    agregar_bloque(anios[:corte]); agregar_bloque(anios[corte:])
+    return variantes, excluidas
 
 
 def _titular(nombre_pieza: str, app: Aplicacion) -> str:
@@ -146,9 +219,52 @@ def _describir(nombre_pieza: str, clave: str, apps: List[Aplicacion],
     return "\n".join(partes)
 
 
+def _describir_master(pieza, config):
+    partes = [pieza.get("producto", "")]
+    if pieza.get("oems"):
+        partes += ["", "OEM: " + ", ".join(pieza["oems"])]
+    guias = [c.get("guia") for c in pieza.get("compatibilidades", []) if c.get("guia")]
+    if guias: partes += ["", "Compatibilidades:"] + list(dict.fromkeys(guias))
+    if pieza.get("especificaciones"):
+        partes += ["", "Especificaciones:"] + pieza["especificaciones"]
+    if pieza.get("caracteristicas"):
+        partes += ["", "Características:"] + pieza["caracteristicas"]
+    if config.descripcion_base: partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
+def generar_filas_con_reporte(piezas, config):
+    filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
+    for pieza in piezas:
+        if pieza.get("formato") != "master_kg":
+            for f in generar_filas([pieza], config):
+                par = (f.sku.upper(), " ".join(_sin_acentos(f.titulo).split()))
+                if par in vistos: deduplicadas += 1
+                else: vistos.add(par); filas.append(f)
+            continue
+        precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
+        descripcion = _describir_master(pieza, config)
+        for compat in pieza.get("compatibilidades", []):
+            titulos, fuera = _variantes_master(pieza.get("producto"), compat)
+            for anios, motivo in fuera:
+                exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                    "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                    "anio": anios, "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
+            for titulo in titulos:
+                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                if par in vistos: deduplicadas += 1; continue
+                vistos.add(par)
+                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
+                    pieza.get("producto", ""), precio, descripcion, compat.get("guia", ""), False,
+                    pieza.get("imagenes", []), compat.get("fila")))
+    return filas, {"exclusiones": exclusiones, "deduplicadas": deduplicadas}
+
+
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
+    if piezas and piezas[0].get("formato") == "master_kg":
+        return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 
     for pieza in piezas:
@@ -204,6 +320,8 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         ws.cell(f, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
         ws.cell(f, idx["Marca"], config.marca)
         ws.cell(f, idx["Modelo"], fila.sku)
+        for numero, imagen in enumerate(fila.imagenes[:5], 1):
+            if imagen: ws.cell(f, idx[f"Imagen{numero}"], imagen)
 
         for nombre, valor in CONSTANTES.items():
             ws.cell(f, idx[nombre], valor)
@@ -213,7 +331,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         for b in BODEGAS:
             ws.cell(f, idx[b], config.cantidad if b == bodega else 0)
 
-        # ⬜ Imagen1..10 quedan VACÍAS: Gaby las pega tras subirlas a autozur.
+        # Imagen6..10 siempre quedan vacías. El master nuevo llena Imagen1..5.
 
     ws.freeze_panes = "A2"
     for col, ancho in (("A", 58), ("M", 60), ("L", 18)):

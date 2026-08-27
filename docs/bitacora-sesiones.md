@@ -2181,3 +2181,23 @@ backfill aprobado, verificar conteos e integridad y reactivar la sync.
   despliegue las facturas nuevas de CAUPLAS usan la regla; el histórico sigue intacto.
 
 Referencia técnica canónica: `docs/cruce-cauplas-num-venta-xml.md`.
+
+# 2026-08-27 — Publicaciones masivas acepta el nuevo master KG
+
+Se adaptó el transformador Excel → Excel a `nuevo-master-kg.xlsx`, cuya hoja
+`BD_Catalogo` trae una fila por compatibilidad. La lectura corta al terminar los
+datos reales (aunque Excel reporte 1,048,576 filas), valida años sin corregirlos,
+deduplica y consolida por Clave. Se mantuvo el parser KG legado separado.
+
+La línea base verificada fue 29,216 filas, 4,023 SKU y 9 filas inválidas. El
+archivo no contiene `Precio`, por lo que la generación continúa con celdas
+vacías y advertencia. Los títulos generan rango y bloques cronológicos, usan
+alias controlados si hace falta y nunca exceden 60 caracteres ni se cortan. OEM
+queda sólo en descripción; Imagen 1–5 se copian automáticamente.
+
+El cruce cambió de exclusión completa por SKU a pareja SKU+título, incluyendo
+paquetes separados por `&`. La pantalla muestra métricas por publicación,
+filtro por Producto y registros excluidos. Pasaron 65/65 pruebas del módulo, el
+flujo HTTP completo con el master real y el build del frontend. El archivo HTTP
+de muestra confirmó 36 columnas, precio vacío, descripción consolidada, cinco
+imágenes, stock 10 en KG y cero en las demás bodegas.

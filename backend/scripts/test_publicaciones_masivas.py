@@ -9,15 +9,20 @@ generador_plantilla.py, precio_publicacion.py o parser_catalogo.py.
     /usr/bin/python3 scripts/test_publicaciones_masivas.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services.aplicaciones_kg import parse_aplicaciones
 from services.generador_plantilla import (
-    COLUMNAS, ConfiguracionProveedor, MAX_TITULO, generar_filas,
+    COLUMNAS, ConfiguracionProveedor, MAX_TITULO, generar_filas, generar_filas_con_reporte,
+    escribir_xlsx,
 )
-from services.parser_catalogo import cruzar
+from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_detallado,
+                                      leer_publicaciones)
+from services.perfiles_catalogo import perfil_de
+import openpyxl
 from services.precio_publicacion import ParametrosPrecio, calcular_precio
 
 _ok = _fail = 0
@@ -166,6 +171,68 @@ res = cruzar(cat, {"KGP-1449", "NO625HB"})
 check("separa publicadas de faltantes", (res["ya_publicadas"], res["faltantes"]) == (2, 1))
 check("el total cuadra", res["total_catalogo"] == 3)
 check("el cruce ignora mayúsculas", cruzar([{"clave": "kgp-1449"}], {"KGP-1449"})["ya_publicadas"] == 1)
+
+print("\n=== 10. NUEVO MASTER KG: validación y consolidación ===")
+headers = ["Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "Fin", "Clave",
+           "Especificaciones", "Caracteristicas", "Guia de Compradores", "OEM"] + [f"Imagen {i}" for i in range(1, 6)]
+wb = openpyxl.Workbook(); ws = wb.active; ws.title = "BD_Catalogo"; ws.append(headers)
+base = ["ACURA", "CL", "L4 2.2L", "Bomba  de Agua", 1997, 1997, 1997, "KGP-759",
+        "Aluminio", "Impulsor", "ACURA CL L4 2.2L 1997", "19200P0A003"] + [f"img{i}" for i in range(1, 6)]
+ws.append(base); ws.append(base)
+ws.append(["ACURA", "CL", "L4 2.3L", "bomba de agua", "1998-1999", 1998, 1999, "KGP-759",
+           "Aluminio", "Impulsor", "ACURA CL L4 2.3L 1998-1999", "ALT-002"] + [f"img{i}" for i in range(1, 6)])
+ws.append(["VW", "POLO", "L4 1.6L", "Toma de Agua", "2003-2001", 2003, 2001, "BAD",
+           "", "", "VW POLO", "-"] + [""] * 5)
+tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tmp.close(); wb.save(tmp.name)
+r = leer_catalogo_detallado(tmp.name, perfil_de("KG")); p = r.piezas[0]
+check("detecta estrictamente BD_Catalogo", r.formato == "master_kg")
+check("agrupa compatibilidades por Clave", len(r.piezas) == 1 and len(p["compatibilidades"]) == 2)
+check("descarta fila exactamente duplicada", r.duplicados_descartados == 1)
+check("excluye Inicio > Fin con fila y motivo", r.compatibilidades_invalidas == 1 and r.errores[0]["fila"] == 5)
+check("normaliza Producto y consolida OEM únicos", p["producto"] == "Bomba de Agua" and p["oems"] == ["19200P0A003", "ALT-002"])
+check("sin Precio se permite y queda costo vacío", not r.precio_presente and p["costo"] is None)
+
+print("\n=== 11. VARIANTES, DESCRIPCIÓN E IMÁGENES DEL MASTER ===")
+filas_n, reporte_n = generar_filas_con_reporte(r.piezas, cfg_desc)
+check("un año genera una sola variante", sum("1997" in f.titulo for f in filas_n) == 1)
+check("dos años generan rango y dos bloques", sum(f.sku == "KGP-759" for f in filas_n) == 4, [f.titulo for f in filas_n])
+check("ningún título lleva OEM ni Clave", all("19200" not in f.titulo and "KGP-759" not in f.titulo for f in filas_n))
+check("todos los títulos respetan 60", all(len(f.titulo) <= 60 for f in filas_n))
+check("todos los OEM van en descripción", all("OEM: 19200P0A003, ALT-002" in f.descripcion for f in filas_n))
+check("Imagen 1-5 se conserva", all(f.imagenes == [f"img{i}" for i in range(1, 6)] for f in filas_n))
+
+larga = [{"clave": "L1", "linea": "Kit de Banda de Distribución c/bomba",
+          "producto": "Kit de Banda de Distribución c/bomba", "formato": "master_kg", "costo": None,
+          "oems": [], "especificaciones": [], "caracteristicas": [], "imagenes": [""]*5,
+          "compatibilidades": [{"armadora": "VOLKSWAGEN", "modelo": "CROSSFOX SPORTLINE",
+          "motor": "L4 1.6L", "inicio": 2005, "fin": 2018, "guia": "", "fila": 2}]}]
+lf, lr = generar_filas_con_reporte(larga, cfg)
+check("rango largo produce rango y bloques/subbloques", len(lf) >= 3)
+check("alias/remoción de armadora evita cortes", all(len(x.titulo) <= 60 and not x.titulo.endswith("-") for x in lf))
+imposible = [dict(larga[0], clave="L2", producto="Producto Extraordinariamente Largo Sin Alias",
+                  linea="Producto Extraordinariamente Largo Sin Alias",
+                  compatibilidades=[dict(larga[0]["compatibilidades"][0], modelo="MODELO EXTRAORDINARIAMENTE LARGO")])]
+ix, ir = generar_filas_con_reporte(imposible, cfg)
+check("si no cabe sin cortar datos se excluye con motivo", not ix and ir["exclusiones"])
+
+wbp = openpyxl.Workbook(); wsp = wbp.active; wsp.title = "BD_Catalogo"; wsp.append(headers + ["Precio"])
+wsp.append(base + [100]); wsp.append([*base[:2], "L4 2.3L", *base[3:5], 1998, 1999, *base[7:], 120])
+tpp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tpp.close(); wbp.save(tpp.name)
+rp = leer_catalogo_detallado(tpp.name, perfil_de("KG"))
+check("precios distintos del SKU no se eligen arbitrariamente",
+      rp.precio_presente and rp.sku_precio_inconsistente == 1 and rp.piezas[0]["costo"] is None)
+
+print("\n=== 12. CRUCE SKU + TÍTULO Y PLANTILLA ===")
+pub = openpyxl.Workbook(); ps = pub.active; ps.append([""] * 17)
+row = [""] * 17; row[1] = filas_n[0].titulo.upper(); row[16] = "OTRO&KGP-759"; ps.append(row)
+pt = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); pt.close(); pub.save(pt.name)
+pares = leer_publicaciones(pt.name); cv = cruzar_variantes(filas_n, pares)
+check("paquete con & asocia el título a cada SKU", ("KGP-759", filas_n[0].titulo.lower()) in pares)
+check("cruce excluye sólo SKU+título existente", len(cv["existentes"]) == 1 and len(cv["pendientes"]) == 3)
+out = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out.close(); escribir_xlsx(filas_n, cfg_desc, out.name)
+ow = openpyxl.load_workbook(out.name, data_only=True); os = ow.active
+check("xlsx copia Imagen1-5 y deja Imagen6 vacía", os.cell(2, 15).value == "img1" and os.cell(2, 19).value == "img5" and os.cell(2, 20).value is None)
+check("precio ausente queda celda vacía", os.cell(2, 3).value is None)
 
 print(f"\n{'='*54}")
 print(f"  {_ok} pasaron · {_fail} fallaron")

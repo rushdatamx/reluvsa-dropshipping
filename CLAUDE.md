@@ -500,7 +500,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual — tablero (último update: 2026-08-21)
+## 8. Estado actual — tablero (último update: 2026-08-27)
 
 > 🗺️ Esta sección es **sólo el tablero de qué está vivo hoy**. La narrativa histórica de cómo
 > se resolvió cada cosa (backfills, mediciones, hipótesis descartadas, cierres de sesión) se
@@ -512,8 +512,9 @@ Convenciones:
 - **Módulo 1 (conciliación venta↔envío↔factura): estable y en producción.** No quedan tareas
   grandes abiertas. La API de ML está viva, la sync automática corre sola cada 30 min, y la BD
   de prod ronda ~58,700 ventas / ~55,900 envíos.
-- **Módulo 2 (publicaciones masivas): base funcionando (commit `ff830da`, desplegado).** Es lo
-  que está en desarrollo activo. Ver §9 y `docs/modulo2-publicaciones-masivas.md`.
+- **Módulo 2 (publicaciones masivas): adaptado al nuevo master KG.** Acepta `BD_Catalogo`
+  (29,216 filas / 4,023 SKU), conserva el catálogo legado, cruza por SKU+título, copia cinco
+  imágenes y reporta exclusiones. Falta desplegar esta entrega. Ver §9 y el documento canónico.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 
@@ -654,16 +655,16 @@ plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni l
 Módulo 1**: cero llamadas de red, así que las 4 reglas de API no aplican aquí. El único
 cambio al Módulo 1 son 2 líneas de wiring en `main.py`.
 
-**Medido contra los archivos reales del cliente:** catálogo KG **3,676 piezas** → 69 ya
-publicadas, **3,607 faltan** → **6,296 publicaciones** (×1.75).
+**Formato vigente:** nuevo master KG `BD_Catalogo`, medido en **29,216 filas / 4,023 SKU / 9
+filas inválidas**. El catálogo anterior de 3,676 piezas sigue aceptado como formato legado.
 
 **⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de
 Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "Aplicaciones
 Principales" es una publicación; SKU, precio, descripción e imágenes se repiten idénticos y
 **lo único que cambia es el TÍTULO**.
 
-🔴 **Las 5 reglas fijadas en `backend/scripts/test_publicaciones_masivas.py` (45/45, con 4
-mutaciones que lo ponen en rojo):**
+🔴 **Las reglas están fijadas en `backend/scripts/test_publicaciones_masivas.py` (65/65; las
+45 originales más 20 del master nuevo):**
 1. **La marca y el modelo SE HEREDAN** — `V8 6.0L 2007-2009` no es un modelo llamado "V8",
    es el mismo Avalanche con otro motor. ⚠️ Pero si el fragmento trae su **propia** marca,
    ésta **reemplaza** a la heredada (`VW CROSSFOX` tras `ST CORDOBA` es un VW, no un Seat).
@@ -688,9 +689,8 @@ dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo*
 AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
 
 ⬜ **Otros pendientes:** sólo hay perfil de **KG** (los otros 4 dan 400 con mensaje claro;
-agregar uno es escribir un perfil, no un módulo); las **imágenes van vacías** (correcto,
-confirmado por Gaby: las sube a autozur a mano); la **categoría de ML** se teclea y aplica a
-todo el archivo.
+agregar uno es escribir un perfil, no un módulo); el nuevo master copia Imagen 1–5 y el legado
+las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
 
 **Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 

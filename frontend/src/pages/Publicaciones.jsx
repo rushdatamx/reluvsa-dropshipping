@@ -113,11 +113,11 @@ export default function Publicaciones() {
     setLineasSel((prev) =>
       prev.includes(linea) ? prev.filter((l) => l !== linea) : [...prev, linea]);
 
-  const piezasElegidas = analisis
+  const publicacionesElegidas = analisis
     ? (lineasSel.length
         ? analisis.por_linea.filter((l) => lineasSel.includes(l.linea))
         : analisis.por_linea
-      ).reduce((s, l) => s + l.piezas, 0)
+      ).reduce((s, l) => s + (l.publicaciones_faltantes ?? l.piezas), 0)
     : 0;
 
   return (
@@ -175,10 +175,14 @@ export default function Publicaciones() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {[
-              ['Piezas en el catálogo', analisis.total_catalogo, ''],
-              ['Ya publicadas', analisis.ya_publicadas, 'text-success'],
-              ['Faltan por publicar', analisis.faltantes, 'text-reluvsa-red font-bold'],
-              ['Publicaciones que saldrían', analisis.publicaciones_estimadas, 'text-success'],
+              ['Filas del master', analisis.filas_master ?? analisis.total_catalogo, ''],
+              ['SKU únicos', analisis.sku_unicos ?? analisis.total_catalogo, ''],
+              ['Compatibilidades válidas', analisis.compatibilidades_validas ?? analisis.total_catalogo, 'text-success'],
+              ['Compatibilidades inválidas', analisis.compatibilidades_invalidas ?? 0, 'text-reluvsa-red'],
+              ['Variantes estimadas', analisis.variantes_estimadas ?? analisis.publicaciones_estimadas, ''],
+              ['Variantes existentes', analisis.variantes_existentes ?? analisis.ya_publicadas, 'text-success'],
+              ['Variantes faltantes', analisis.variantes_faltantes ?? analisis.faltantes, 'text-reluvsa-red font-bold'],
+              ['Duplicados descartados', (analisis.duplicados_descartados ?? 0) + (analisis.variantes_deduplicadas ?? 0), ''],
             ].map(([label, valor, cls]) => (
               <div key={label} className="bg-notion-bg rounded-lg p-3">
                 <p className="text-xs text-notion-text-secondary">{label}</p>
@@ -191,6 +195,14 @@ export default function Publicaciones() {
             <div className="mb-3 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs">
               No cargaste el reporte de Publicaciones de ML, así que <strong>no se pudo cruzar</strong>:
               se está contando todo el catálogo como faltante.
+            </div>
+          )}
+
+          {analisis.precio_presente === false && (
+            <div className="mb-3 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs flex gap-2">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>El master no trae la columna <strong>Precio</strong>. La plantilla sí se puede
+                generar, pero las celdas de precio quedarán vacías para revisión manual.</span>
             </div>
           )}
 
@@ -210,17 +222,36 @@ export default function Publicaciones() {
             <span className="text-notion-text-secondary font-normal"> — ninguna seleccionada = todas</span>
           </p>
           <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto">
-            {analisis.por_linea.map(({ linea, piezas }) => (
+            {analisis.por_linea.map(({ linea, piezas, compatibilidades, publicaciones_faltantes }) => (
               <button key={linea} onClick={() => toggleLinea(linea)}
                       className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                         lineasSel.includes(linea)
                           ? 'bg-reluvsa-black text-reluvsa-yellow border-reluvsa-black'
                           : 'bg-white border-notion-border hover:bg-notion-bg'}`}>
                 {lineasSel.includes(linea) && <Check size={12} className="inline mr-1" />}
-                {linea} <span className="opacity-60">({piezas})</span>
+                {linea} <span className="opacity-60">({piezas} SKU · {compatibilidades ?? piezas} compat. · {publicaciones_faltantes ?? piezas} pub.)</span>
               </button>
             ))}
           </div>
+
+          {(analisis.errores_total > 0 || analisis.variantes_excluidas > 0) && (
+            <div className="mt-5 border border-red-200 rounded-lg overflow-hidden">
+              <div className="px-3 py-2 bg-red-50 text-red-800 text-sm font-semibold">
+                Registros excluidos ({analisis.errores_total?.toLocaleString('es-MX')})
+              </div>
+              <div className="max-h-64 overflow-auto">
+                {(analisis.errores || []).map((e, i) => (
+                  <div key={`${e.fila}-${i}`} className="px-3 py-2 border-t border-red-100 text-xs grid md:grid-cols-[70px_140px_1fr] gap-2">
+                    <span>Fila {e.fila ?? '—'}</span><span className="font-mono">{e.clave || 'Sin clave'}</span>
+                    <span>{[e.armadora, e.modelo, e.anio].filter(Boolean).join(' · ')} — <strong>{e.motivo}</strong></span>
+                  </div>
+                ))}
+              </div>
+              {analisis.errores_total > (analisis.errores || []).length && (
+                <p className="px-3 py-2 text-xs text-notion-text-secondary">Se muestran los primeros {(analisis.errores || []).length}; el total completo se conserva en la métrica.</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -282,14 +313,14 @@ export default function Publicaciones() {
           </Campo>
 
           <div className="mt-4 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
-            Las <strong>imágenes van vacías</strong>: súbelas a autozur y pega las ligas en el Excel
-            antes de subirlo a Mercado Libre.
+            <strong>Imagen 1–5 se completan automáticamente</strong> desde el nuevo master KG.
+            Imagen 6–10 permanecen vacías. En el catálogo legado se conserva el comportamiento anterior.
           </div>
 
           <button onClick={generar} disabled={generando}
                   className="mt-4 px-4 py-2 bg-reluvsa-yellow text-reluvsa-black rounded-lg text-sm font-bold hover:brightness-95 disabled:opacity-50 flex items-center gap-2">
             {generando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            {generando ? 'Generando…' : `Descargar plantilla (${piezasElegidas.toLocaleString('es-MX')} piezas)`}
+            {generando ? 'Generando…' : `Descargar plantilla (${publicacionesElegidas.toLocaleString('es-MX')} publicaciones)`}
           </button>
         </div>
       )}

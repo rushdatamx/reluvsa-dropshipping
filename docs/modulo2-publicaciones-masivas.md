@@ -9,6 +9,33 @@ y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.
 🔴 **No toca la API de ML ni ningún dato del Módulo 1** — las 4 reglas de API no
 aplican aquí porque no hay una sola llamada de red.
 
+## Actualización 2026-08-27 — nuevo master KG
+
+El formato vigente es `nuevo-master-kg.xlsx`: hoja `BD_Catalogo`, una fila por
+compatibilidad y agrupación por `Clave`. Se detecta por hoja + 17 encabezados;
+el catálogo KG anterior sigue aceptado por su perfil independiente.
+
+- Línea base real: **29,216 filas**, **4,023 SKU** y **9 filas con años
+  inválidos**. Las filas inválidas se excluyen y se muestran con fila, datos y
+  motivo; las filas repetidas se deduplican.
+- `Precio` es una columna final opcional (costo sin IVA). Si falta, el análisis
+  y la descarga continúan, con precio vacío y advertencia visible. Si una Clave
+  tiene costos distintos tampoco se elige uno arbitrariamente.
+- Una compatibilidad de un año genera una publicación. Con dos o más genera el
+  rango `Inicio/Fin` y bloques cronológicos balanceados; los bloques se
+  subdividen cuando haga falta para conservar el límite de 60 caracteres.
+- El título es `Producto P/ Armadora Modelo Cilindrada Años`. Nunca lleva OEM ni
+  Clave. Para caber, primero omite Armadora y después usa alias controlados del
+  producto; nunca corta Modelo, motor, años o palabras.
+- La descripción reúne todos los OEM, guías de compradores, especificaciones y
+  características del SKU. Imagen 1–5 se copian; Imagen 6–10 quedan vacías.
+- El cruce con Publicaciones ML es por **`Att_SellerSKU + Título`**, normalizado
+  sólo en caso, acentos y espacios. Los paquetes de Q separados por `&` asocian
+  el mismo título a cada SKU. Sólo se omite la variante que ya existe.
+- `/analizar` reporta filas, SKU, compatibilidades válidas/inválidas,
+  duplicados, precios, variantes y desglose por Producto. La UI permite filtrar
+  por Producto y muestra una sección de registros excluidos.
+
 **El pedido de Gaby (2026-08-19), textual:**
 > *"que se unan ciertas columnas para formar un titulo, después el tema de
 > descripción, que pueda ponerse una sola descripción donde yo pueda poner mi
@@ -164,13 +191,15 @@ nuevo. **No implementarlo sin datos de KG.**
 **Para conectarlo:** llenar `ENVIO_POR_LINEA` en `precio_publicacion.py`. El
 motor ya lo consume.
 
-### 5.2 Las imágenes van vacías — CORRECTO, no es un pendiente técnico
+### 5.2 Imágenes según formato
 
 Confirmado por Gaby:
 > *"las subo a autozur, copio el link que me arroja y lo pongo, pero esto
 > seguiría siendo manual, es decir, que no venga en el excel creado"*
 
-El catálogo del proveedor no trae fotos. Ella las pega tras generar el archivo.
+El catálogo legado no trae fotos y en ese formato siguen vacías. El master nuevo
+sí incluye Imagen 1–5 y el generador las copia automáticamente; Imagen 6–10
+permanece vacía.
 
 ### 5.3 Sólo hay perfil de KG
 
@@ -193,19 +222,19 @@ familias (radiadores y bombas no van en la misma categoría), habría que mapear
 
 1. **Publicaciones masivas** en el menú → elige proveedor
 2. Sube el **catálogo** y (opcional) el reporte de **Publicaciones ML**
-3. Ve el cruce: *"3,607 faltan → 6,296 publicaciones"*, y **filtra por línea**
-   para trabajar por tandas
+3. Ve variantes estimadas, existentes y faltantes, y **filtra por Producto**
 4. Ajusta marca, categoría y los % del precio
-5. **Descarga la plantilla**, pega las imágenes y la sube a ML
+5. **Descarga la plantilla**, revisa exclusiones/precios y la sube a ML
 
 ---
 
 ## 7. Verificación
 
-- `backend/scripts/test_publicaciones_masivas.py` → **45/45**
+- `backend/scripts/test_publicaciones_masivas.py` → **65/65** (conserva las 45
+  pruebas originales y suma 20 del master nuevo)
 - **4 mutaciones** lo ponen en rojo: sumar el 13%, quitar la herencia de marca,
   no marcar truncadas, devolver 0.0 en vez de None
-- Flujo HTTP completo probado contra los 3 archivos reales del cliente
+- Flujo HTTP analizar → filtrar → generar probado contra el master real
 - Build de CRA limpio
 - 🔴 Ruta protegida con `AdminOnly` + `require_admin`: **un proveedor no debe ver
   los costos de otro**
