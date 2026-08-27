@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 const FILTROS_VACIOS = {
   q: '',
   facturada: '',        // '' = todas | 'true' | 'false'
+  albaran: '',          // '' = todas | 'con_albaran' | 'sin_albaran'
   sla: '',              // '' = todas | 'a_tiempo' | 'tarde'
   cruce: '',            // '' = todas | 'con_envio' | 'sin_envio' | 'sin_proveedor'
   proveedor_id: '',     // solo admin
@@ -188,6 +189,15 @@ export default function Ventas() {
               <option value="">Todas</option>
               <option value="true">Facturadas</option>
               <option value="false">Sin factura</option>
+            </select>
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Albarán</label>
+            <select value={filtros.albaran} onChange={(e) => set('albaran', e.target.value)}
+              className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black">
+              <option value="">Todas</option>
+              <option value="con_albaran">Con albarán</option>
+              <option value="sin_albaran">Sin albarán</option>
             </select>
           </div>
           <div className="min-w-[140px]">

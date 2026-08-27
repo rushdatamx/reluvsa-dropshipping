@@ -2201,3 +2201,19 @@ filtro por Producto y registros excluidos. Pasaron 65/65 pruebas del módulo, el
 flujo HTTP completo con el master real y el build del frontend. El archivo HTTP
 de muestra confirmó 36 columnas, precio vacío, descripción consolidada, cinco
 imágenes, stock 10 en KG y cero en las demás bodegas.
+
+# 2026-08-27 — Filtro de ventas por albarán
+
+Se agregó en “Ventas y cruces” el selector Albarán con los modos Todas, Con albarán y
+Sin albarán. Es opcional, combinable con los demás filtros y sólo se aplica al pulsar
+Aplicar; Limpiar vuelve a Todas.
+
+Los endpoints de listado y CSV reciben `albaran=con_albaran` o
+`albaran=sin_albaran`. La condición quedó centralizada en `_construir_filtros`, así
+tabla, contador, paginación y exportación consultan el mismo universo. `NULL`, cadena
+vacía y texto compuesto sólo por espacios cuentan como sin albarán. Los modos toleran
+mayúsculas y espacios; un valor desconocido no filtra por compatibilidad.
+
+No se modificaron el parser de albaranes, el cruce `num_venta -> pack_id`, el esquema
+ni la base de datos. La regresión cubre ambos modos, el default, filtros acumulados por
+`AND` y la paridad entre listado y CSV.

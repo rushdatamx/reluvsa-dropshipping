@@ -122,6 +122,7 @@ def _construir_filtros(
     fecha_hasta: Optional[str],
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
+    albaran: Optional[str] = None,
 ):
     """Arma la cláusula WHERE + JOINs compartida por el listado y el export.
 
@@ -145,6 +146,8 @@ def _construir_filtros(
       - "solo_canceladas": únicamente las canceladas (para revisarlas juntas).
       - "todas": sin filtro.
       - cualquier otro valor: igualdad exacta (compatibilidad con ?estado=Entregado).
+
+    `albaran` acepta "con_albaran" y "sin_albaran". Vacío o desconocido no filtra.
     """
     if user.rol == "proveedor":
         proveedor_id = user.proveedor_id
@@ -196,6 +199,12 @@ def _construir_filtros(
         where.append(existe_factura)
     elif facturada == "false":
         where.append("NOT " + existe_factura)
+
+    modo_albaran = (albaran or "").strip().lower()
+    if modo_albaran == "con_albaran":
+        where.append("v.albaran IS NOT NULL AND TRIM(v.albaran) != ''")
+    elif modo_albaran == "sin_albaran":
+        where.append("(v.albaran IS NULL OR TRIM(v.albaran) = '')")
 
     # SLA del envío: a tiempo (1) / tarde (0). Implica que haya envío cruzado.
     if sla == "a_tiempo":
@@ -332,6 +341,7 @@ def listar(
     estado: Optional[str] = None,
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
+    albaran: Optional[str] = None,
     q: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
@@ -342,7 +352,7 @@ def listar(
 
     where, params, join_factura = _construir_filtros(
         user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
-        deposito, logistica
+        deposito, logistica, albaran
     )
 
     offset = (page - 1) * limit
@@ -392,6 +402,7 @@ def export_csv(
     estado: Optional[str] = None,
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
+    albaran: Optional[str] = None,
     q: Optional[str] = None,
 ):
     """Exporta a CSV TODAS las filas que cumplen los filtros (sin paginar).
@@ -399,7 +410,7 @@ def export_csv(
     """
     where, params, join_factura = _construir_filtros(
         user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
-        deposito, logistica
+        deposito, logistica, albaran
     )
     sql = _SELECT_VENTAS.format(join_factura=join_factura, where=" AND ".join(where))
 
