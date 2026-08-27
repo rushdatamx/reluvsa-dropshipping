@@ -3,6 +3,9 @@
 > Leer antes de tocar `services/aplicaciones_kg.py`, `generador_plantilla.py`,
 > `precio_publicacion.py`, `parser_catalogo.py`, `perfiles_catalogo.py` o
 > `routers/publicaciones.py`.
+>
+> Para detección del master y el contrato `Producto` → `linea` → `por_linea`,
+> leer también `docs/master-kg-categorias-producto.md` completo.
 
 **Qué es:** un transformador **Excel → Excel**. Toma el catálogo de un proveedor
 y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.

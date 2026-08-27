@@ -2220,12 +2220,52 @@ ni la base de datos. La regresión cubre ambos modos, el default, filtros acumul
 
 # 2026-08-27 — Categorías de Producto en publicaciones masivas KG
 
-- El master KG ya no depende del nombre literal `BD_Catalogo`: se reconoce por
-  sus encabezados normalizados y conserva preferencia por el nombre canónico.
-- Un master reconocible pero incompleto devuelve un error con las columnas
-  faltantes; no cae silenciosamente al parser legado.
-- La agrupación y el filtro continúan usando internamente `por_linea`, pero el
-  valor del master proviene exclusivamente de `Producto`. La UI ahora dice
-  «Filtra por categoría de producto».
-- Verificación real: 29,216 filas, 4,021 SKU utilizables; Radiador 408, Toma de
-  Agua 384 y Bomba de Agua 351. El legado conserva sus 3,676 piezas.
+## Qué se reportó y qué encontramos
+
+En Publicaciones masivas KG aparecían modelos de vehículo como `JETTA` y `C2500`
+en los botones que debían mostrar categorías. El archivo seguía siendo el nuevo
+master, pero la hoja ya no se llamaba exactamente `BD_Catalogo`. El backend usaba
+ese nombre literal para elegir parser; al no encontrarlo, entraba al catálogo
+legado y tomaba la columna B (`Modelo`) como si fuera la línea de producto.
+
+## Nueva regla operativa — vigente
+
+🔴 **El master KG se detecta por encabezados, no por nombre de hoja.**
+`BD_Catalogo` conserva preferencia si es válida; si otra hoja contiene la
+estructura completa, se usa esa hoja. La comparación tolera mayúsculas, espacios
+y acentos. Si el archivo parece master pero le faltan columnas, debe fallar con
+un mensaje explícito y nunca caer silenciosamente al formato legado.
+
+🔴 **En el master, categoría significa exclusivamente `Producto`.** Los nombres
+internos `linea`, `por_linea` y `lineas` se conservan por compatibilidad, pero no
+autorizan tomar `Modelo`. Esta regla no incluye categorías `MLM`, envío, precios
+ni títulos.
+
+## Implementación
+
+`parser_catalogo.py` incorporó selección estructural de hoja, seis encabezados
+ancla para reconocer masters incompletos y un error con la lista de encabezados
+faltantes. La ruta válida sigue consolidando por `Clave` y asigna tanto
+`producto` como el alias interno `linea` desde la columna `Producto`.
+
+El contrato HTTP no cambió: `/analizar` continúa devolviendo `por_linea` y
+`/generar` continúa recibiendo `lineas`. En la interfaz se cambió el texto a
+«Filtra por categoría de producto». El catálogo legado permanece separado.
+
+## Verificación y despliegue
+
+- Regresión sintética: 68/68 comprobaciones, incluyendo hoja renombrada,
+  encabezados normalizados, `Producto != Modelo` y master incompleto.
+- Master real: 29,216 filas, 4,021 SKU utilizables; 408 Radiador, 384 Toma de
+  Agua y 351 Bomba de Agua.
+- Copia real con hoja renombrada: las mismas cifras y categorías.
+- Filtro Radiador: 408 SKU, 3,772 publicaciones y ninguna categoría ajena.
+- Legado real: 3,676 piezas, sin regresión.
+- Build del frontend: correcto.
+- Commit `dec7ecb` enviado a `main`.
+- Railway `dd62f253-89d2-46cc-b52f-14736fb56a91`: `SUCCESS`; backend saludable.
+- Vercel: el bundle activo contiene la etiqueta nueva.
+- No hubo navegador/sesión autenticada disponible, por lo que no se afirmó una
+  carga visual en producción que no pudiera ejecutarse.
+
+Referencia técnica canónica: `docs/master-kg-categorias-producto.md`.

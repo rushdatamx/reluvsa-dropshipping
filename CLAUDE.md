@@ -650,6 +650,8 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 
 > ⭐ **LEER `docs/modulo2-publicaciones-masivas.md` antes de tocar nada de este módulo.**
 > Trae las **5 reglas que no se pueden rediseñar** y lo que quedó pendiente.
+> Para detección del master o categorías de producto, leer además
+> **`docs/master-kg-categorias-producto.md` completo**.
 
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
 plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
@@ -665,8 +667,7 @@ Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "A
 Principales" es una publicación; SKU, precio, descripción e imágenes se repiten idénticos y
 **lo único que cambia es el TÍTULO**.
 
-🔴 **Las reglas están fijadas en `backend/scripts/test_publicaciones_masivas.py` (65/65; las
-45 originales más 20 del master nuevo):**
+🔴 **Las reglas están fijadas en `backend/scripts/test_publicaciones_masivas.py` (68/68):**
 1. **La marca y el modelo SE HEREDAN** — `V8 6.0L 2007-2009` no es un modelo llamado "V8",
    es el mismo Avalanche con otro motor. ⚠️ Pero si el fragmento trae su **propia** marca,
    ésta **reemplaza** a la heredada (`VW CROSSFOX` tras `ST CORDOBA` es un VW, no un Seat).
@@ -734,6 +735,7 @@ las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
 | `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
 | `docs/kit-varios-conceptos.md` | ⭐ Antes de tocar `_match_por_kit` / `_tokens_pieza` / `_componente_ya_cubierto` |
 | `docs/modulo2-publicaciones-masivas.md` | ⭐ Antes de tocar CUALQUIER cosa del Módulo 2 (publicaciones masivas) |
+| `docs/master-kg-categorias-producto.md` | ⭐ Antes de tocar detección del master KG, `Producto`, `por_linea` o el filtro por categoría |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |
