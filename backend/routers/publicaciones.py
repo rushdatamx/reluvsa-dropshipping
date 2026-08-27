@@ -211,7 +211,8 @@ async def generar(
             publicados = leer_skus_publicados(ruta_pub)
             piezas = cruzar(piezas, publicados)["piezas_faltantes"]
 
-        # Filtro por línea: Gaby publica por tandas (RADIADOR, BOMBA DE AGUA...).
+        # `lineas` se conserva por compatibilidad con el frontend/API, pero en el
+        # master su valor es exclusivamente Producto (RADIADOR, BOMBA DE AGUA...).
         if lineas.strip():
             try:
                 elegidas = {l.strip().upper() for l in json.loads(lineas)}

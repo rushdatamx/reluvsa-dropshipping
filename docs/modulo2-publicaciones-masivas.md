@@ -11,11 +11,14 @@ aplican aquí porque no hay una sola llamada de red.
 
 ## Actualización 2026-08-27 — nuevo master KG
 
-El formato vigente es `nuevo-master-kg.xlsx`: hoja `BD_Catalogo`, una fila por
-compatibilidad y agrupación por `Clave`. Se detecta por hoja + 17 encabezados;
-el catálogo KG anterior sigue aceptado por su perfil independiente.
+El formato vigente es `nuevo-master-kg.xlsx`: una fila por compatibilidad y
+agrupación por `Clave`. Se detecta por sus 17 encabezados normalizados, aunque
+la hoja ya no se llame `BD_Catalogo`; ese nombre conserva preferencia. Un archivo
+que parece master pero está incompleto se rechaza con los encabezados faltantes,
+en vez de interpretarse como legado. El catálogo KG anterior sigue aceptado por
+su perfil independiente.
 
-- Línea base real: **29,216 filas**, **4,023 SKU** y **9 filas con años
+- Línea base real: **29,216 filas**, **4,021 SKU utilizables** y **9 filas con años
   inválidos**. Las filas inválidas se excluyen y se muestran con fila, datos y
   motivo; las filas repetidas se deduplican.
 - `Precio` es una columna final opcional (costo sin IVA). Si falta, el análisis

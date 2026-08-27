@@ -218,7 +218,7 @@ export default function Publicaciones() {
           )}
 
           <p className="text-sm font-medium mb-2">
-            Filtra por línea para trabajar por tandas
+            Filtra por categoría de producto para trabajar por tandas
             <span className="text-notion-text-secondary font-normal"> — ninguna seleccionada = todas</span>
           </p>
           <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto">

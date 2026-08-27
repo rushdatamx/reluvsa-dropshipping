@@ -656,7 +656,8 @@ plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni l
 Módulo 1**: cero llamadas de red, así que las 4 reglas de API no aplican aquí. El único
 cambio al Módulo 1 son 2 líneas de wiring en `main.py`.
 
-**Formato vigente:** nuevo master KG `BD_Catalogo`, medido en **29,216 filas / 4,023 SKU / 9
+**Formato vigente:** nuevo master KG, detectado por encabezados aunque se renombre la hoja
+(`BD_Catalogo` conserva preferencia), medido en **29,216 filas / 4,021 SKU utilizables / 9
 filas inválidas**. El catálogo anterior de 3,676 piezas sigue aceptado como formato legado.
 
 **⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de

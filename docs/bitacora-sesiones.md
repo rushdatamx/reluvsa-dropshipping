@@ -2217,3 +2217,15 @@ mayúsculas y espacios; un valor desconocido no filtra por compatibilidad.
 No se modificaron el parser de albaranes, el cruce `num_venta -> pack_id`, el esquema
 ni la base de datos. La regresión cubre ambos modos, el default, filtros acumulados por
 `AND` y la paridad entre listado y CSV.
+
+# 2026-08-27 — Categorías de Producto en publicaciones masivas KG
+
+- El master KG ya no depende del nombre literal `BD_Catalogo`: se reconoce por
+  sus encabezados normalizados y conserva preferencia por el nombre canónico.
+- Un master reconocible pero incompleto devuelve un error con las columnas
+  faltantes; no cae silenciosamente al parser legado.
+- La agrupación y el filtro continúan usando internamente `por_linea`, pero el
+  valor del master proviene exclusivamente de `Producto`. La UI ahora dice
+  «Filtra por categoría de producto».
+- Verificación real: 29,216 filas, 4,021 SKU utilizables; Radiador 408, Toma de
+  Agua 384 y Bomba de Agua 351. El legado conserva sus 3,676 piezas.

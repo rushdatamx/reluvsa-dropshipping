@@ -13,6 +13,7 @@ MASTER_HOJA = "BD_Catalogo"
 MASTER_HEADERS = ("Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "Fin",
                   "Clave", "Especificaciones", "Características", "Guía de Compradores",
                   "OEM", "Imagen 1", "Imagen 2", "Imagen 3", "Imagen 4", "Imagen 5")
+MASTER_ANCLAS = ("Armadora", "Modelo", "Producto", "Clave", "Inicio", "Fin")
 
 
 def _texto(val) -> str:
@@ -72,12 +73,39 @@ def _headers_master(ws):
     return all(_normalizar(h) in mapa for h in MASTER_HEADERS), mapa, _normalizar("Precio") in mapa
 
 
-def _leer_master(wb) -> ResultadoCatalogo:
-    ws = wb[MASTER_HOJA]
+def _parece_master(ws) -> bool:
+    """Distingue un master incompleto de un catálogo legado.
+
+    Cuatro de las seis columnas de identidad son suficientes para no interpretar
+    accidentalmente Modelo como la línea de producto del formato anterior.
+    """
+    _, columnas, _ = _headers_master(ws)
+    return sum(_normalizar(h) in columnas for h in MASTER_ANCLAS) >= 4
+
+
+def _hoja_master(wb):
+    # El nombre canónico sigue ganando cuando existe. La estructura permite que
+    # el proveedor renombre la hoja sin cambiar el formato del archivo.
+    canonica = wb[MASTER_HOJA] if MASTER_HOJA in wb.sheetnames else None
+    if canonica is not None and _headers_master(canonica)[0]:
+        return canonica
+    completas = [ws for ws in wb.worksheets if _headers_master(ws)[0]]
+    if completas:
+        return completas[0]
+    if canonica is not None:
+        return canonica
+    incompletas = [ws for ws in wb.worksheets if _parece_master(ws)]
+    return incompletas[0] if incompletas else None
+
+
+def _leer_master(ws) -> ResultadoCatalogo:
     valido, columnas, precio_presente = _headers_master(ws)
     if not valido:
         faltan = [h for h in MASTER_HEADERS if _normalizar(h) not in columnas]
-        raise ValueError("BD_Catalogo no tiene los encabezados requeridos: " + ", ".join(faltan))
+        raise ValueError(
+            f"La hoja «{ws.title}» parece ser el master KG, pero le faltan "
+            "los encabezados requeridos: " + ", ".join(faltan)
+        )
     if precio_presente and columnas[_normalizar("Precio")] != 17:
         raise ValueError("Precio debe ser la última columna, inmediatamente después de Imagen 5")
     grupos, errores, vistos, claves_master = {}, [], set(), set()
@@ -173,7 +201,9 @@ def _leer_legado(wb, perfil):
 
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
-    try: return _leer_master(wb) if MASTER_HOJA in wb.sheetnames else _leer_legado(wb, perfil)
+    try:
+        hoja_master = _hoja_master(wb)
+        return _leer_master(hoja_master) if hoja_master is not None else _leer_legado(wb, perfil)
     finally: wb.close()
 
 

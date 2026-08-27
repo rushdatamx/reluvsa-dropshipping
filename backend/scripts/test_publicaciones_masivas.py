@@ -185,12 +185,37 @@ ws.append(["VW", "POLO", "L4 1.6L", "Toma de Agua", "2003-2001", 2003, 2001, "BA
            "", "", "VW POLO", "-"] + [""] * 5)
 tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tmp.close(); wb.save(tmp.name)
 r = leer_catalogo_detallado(tmp.name, perfil_de("KG")); p = r.piezas[0]
-check("detecta estrictamente BD_Catalogo", r.formato == "master_kg")
+check("detecta el master en BD_Catalogo", r.formato == "master_kg")
 check("agrupa compatibilidades por Clave", len(r.piezas) == 1 and len(p["compatibilidades"]) == 2)
 check("descarta fila exactamente duplicada", r.duplicados_descartados == 1)
 check("excluye Inicio > Fin con fila y motivo", r.compatibilidades_invalidas == 1 and r.errores[0]["fila"] == 5)
 check("normaliza Producto y consolida OEM únicos", p["producto"] == "Bomba de Agua" and p["oems"] == ["19200P0A003", "ALT-002"])
 check("sin Precio se permite y queda costo vacío", not r.precio_presente and p["costo"] is None)
+
+# El nombre de la hoja no define el formato. También se normalizan espacios,
+# mayúsculas y acentos de los encabezados antes de reconocer la estructura.
+ws.title = "Catálogo vigente agosto"
+ws.cell(1, 1).value = "  ARMADORA "
+ws.cell(1, 4).value = " producto "
+ws.cell(1, 5).value = "ANO"
+renombrado = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); renombrado.close()
+wb.save(renombrado.name)
+rr = leer_catalogo_detallado(renombrado.name, perfil_de("KG"))
+check("detecta master por encabezados aunque la hoja cambie de nombre", rr.formato == "master_kg")
+check("la categoría sale de Producto, nunca de Modelo",
+      {x["linea"] for x in rr.piezas} == {"Bomba de Agua"})
+
+incompleto = openpyxl.Workbook(); wi = incompleto.active; wi.title = "Carga KG"
+wi.append(["Armadora", "Modelo", "Producto", "Clave", "Inicio"])
+ti = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); ti.close(); incompleto.save(ti.name)
+try:
+    leer_catalogo_detallado(ti.name, perfil_de("KG"))
+    error_incompleto = ""
+except ValueError as exc:
+    error_incompleto = str(exc)
+check("un master incompleto no cae al catálogo legado",
+      "parece ser el master KG" in error_incompleto and "Fin" in error_incompleto,
+      error_incompleto)
 
 print("\n=== 11. VARIANTES, DESCRIPCIÓN E IMÁGENES DEL MASTER ===")
 filas_n, reporte_n = generar_filas_con_reporte(r.piezas, cfg_desc)
