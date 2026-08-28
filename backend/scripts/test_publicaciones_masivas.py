@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services.aplicaciones_kg import parse_aplicaciones
 from services.generador_plantilla import (
-    COLUMNAS, ConfiguracionProveedor, MAX_TITULO, generar_filas, generar_filas_con_reporte,
-    escribir_xlsx,
+    COLUMNAS, ConfiguracionProveedor, FilaPublicacion, MAX_TITULO, generar_filas,
+    generar_filas_con_reporte, escribir_xlsx,
 )
 from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_detallado,
                                       leer_publicaciones)
@@ -154,7 +154,19 @@ check("todas las filas de una pieza comparten descripción",
       len({x.descripcion for x in generar_filas(piezas, cfg_desc)}) == 1)
 
 print("\n=== 8. PLANTILLA: las 36 columnas de Mercado Libre ===")
-check("son exactamente 36 columnas", len(COLUMNAS) == 36, len(COLUMNAS))
+columnas_esperadas = [
+    "Titulo", "Categoria", "Precio", "Moneda(MXN,ARS,COP)", "Cantidad",
+    "Tipo Publicacion (clasica,premium)", "Condición(nuevo,usado)",
+    "Garantia(CANTIDAD [días, meses, años]_[FABRICA,VENDEDOR])",
+    "Modo Envio(me1,me2)", "Dimensiones(ALTcm,ANCHcm,LONGcm,PESOgr)",
+    "Envio Gratis(si,no)", "SKU", "Descripcion", "Tienda Oficial",
+    "Imagen1", "Imagen2", "Imagen3", "Imagen4", "Imagen5", "Imagen6",
+    "Imagen7", "Imagen8", "Imagen9", "Imagen10", "UPC", "Marca", "Talla",
+    "Color", "Modelo", "Canal(mercadolibre,mshops,ambos)",
+    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO",
+]
+check("conserva exactamente las 36 columnas y su orden esperado",
+      COLUMNAS == columnas_esperadas, COLUMNAS)
 check("no hay columnas repetidas", len(set(COLUMNAS)) == 36)
 check("el orden arranca con Titulo/Categoria/Precio",
       COLUMNAS[:3] == ["Titulo", "Categoria", "Precio"])
@@ -162,6 +174,33 @@ check("las 6 bodegas van al final",
       COLUMNAS[-6:] == ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO"])
 check("Imagen1..10 existen (van vacías, Gaby las pega)",
       all(f"Imagen{i}" in COLUMNAS for i in range(1, 11)))
+
+# "Envío Gratis" se deriva exclusivamente del precio final ya calculado. La
+# regresión escribe y vuelve a leer el Excel para fijar el valor real exportado.
+filas_umbral = [
+    FilaPublicacion("Menor", "SKU-1", "", 298.99, "", ""),
+    FilaPublicacion("Umbral", "SKU-2", "", 299.00, "", ""),
+    FilaPublicacion("Mayor", "SKU-3", "", 450.25, "", ""),
+    FilaPublicacion("Sin precio", "SKU-4", "", None, "", ""),
+]
+salida_umbral = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+salida_umbral.close()
+escribir_xlsx(filas_umbral, cfg, salida_umbral.name)
+wb_umbral = openpyxl.load_workbook(salida_umbral.name, data_only=True)
+ws_umbral = wb_umbral.active
+encabezados_umbral = [c.value for c in ws_umbral[1]]
+idx_umbral = {nombre: posicion + 1 for posicion, nombre in enumerate(encabezados_umbral)}
+check("el xlsx conserva exactamente sus 36 encabezados en orden",
+      encabezados_umbral == columnas_esperadas, encabezados_umbral)
+check("$298.99 produce Envío Gratis = No",
+      ws_umbral.cell(2, idx_umbral["Envio Gratis(si,no)"]).value == "No")
+check("$299.00 produce Envío Gratis = Si",
+      ws_umbral.cell(3, idx_umbral["Envio Gratis(si,no)"]).value == "Si")
+check("un precio superior a $299.00 produce Envío Gratis = Si",
+      ws_umbral.cell(4, idx_umbral["Envio Gratis(si,no)"]).value == "Si")
+check("precio inexistente deja vacíos Precio y Envío Gratis",
+      ws_umbral.cell(5, idx_umbral["Precio"]).value is None and
+      ws_umbral.cell(5, idx_umbral["Envio Gratis(si,no)"]).value is None)
 
 print("\n=== 9. CRUCE contra lo ya publicado ===")
 # ⚠️ La columna Q trae paquetes con '&': sin partirla, un SKU publicado dentro

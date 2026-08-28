@@ -53,6 +53,7 @@ COLUMNAS = [
 BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO"]
 
 # Las constantes que Gaby marcó en AMARILLO PURO: siempre van iguales.
+# "Envio Gratis" no pertenece aquí: se deriva del precio final de cada fila.
 CONSTANTES = {
     "Moneda(MXN,ARS,COP)": "MXN",
     "Cantidad": 10,
@@ -60,7 +61,6 @@ CONSTANTES = {
     "Condición(nuevo,usado)": "Nuevo",
     "Garantia(CANTIDAD [días, meses, años]_[FABRICA,VENDEDOR])": "2meses_vendedor",
     "Modo Envio(me1,me2)": "me2",
-    "Envio Gratis(si,no)": "Si",
     "Canal(mercadolibre,mshops,ambos)": "mercadolibre",
 }
 
@@ -316,6 +316,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         # Precio None deja la celda VACÍA (no 0): un 0 se publicaría como precio real.
         if fila.precio is not None:
             ws.cell(f, idx["Precio"], fila.precio)
+            ws.cell(f, idx["Envio Gratis(si,no)"], "Si" if fila.precio >= 299.00 else "No")
         ws.cell(f, idx["SKU"], fila.sku)
         ws.cell(f, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
         ws.cell(f, idx["Marca"], config.marca)

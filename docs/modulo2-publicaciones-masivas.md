@@ -153,6 +153,17 @@ paquete** se contaría como faltante. Medido: 14,946 publicaciones traen sólo
 **626 SKU únicos** (porque N publicaciones comparten pieza — la misma expansión
 que genera este módulo).
 
+### 3.6 “Envío Gratis” se deriva del precio final
+
+`Envio Gratis(si,no)` ya no es una constante de la plantilla. Se decide por cada
+publicación usando exclusivamente su precio final ya calculado —después de Gran
+Mayoreo, IVA, utilidad, comisión y el envío configurado—: menos de `$299.00`
+genera `No`, y desde `$299.00` inclusive genera `Si`. Si el precio no se puede
+calcular, tanto `Precio` como `Envio Gratis(si,no)` quedan vacíos.
+
+Este umbral no modifica la fórmula de precio ni resuelve el costo de envío por
+línea que continúa pendiente en §5.1.
+
 ---
 
 ## 4. La descripción: cabeza variable + cuerpo fijo
@@ -238,8 +249,8 @@ familias (radiadores y bombas no van en la misma categoría), habría que mapear
 
 ## 7. Verificación
 
-- `backend/scripts/test_publicaciones_masivas.py` → **65/65** (conserva las 45
-  pruebas originales y suma 20 del master nuevo)
+- `backend/scripts/test_publicaciones_masivas.py` → **77/77**, incluyendo el
+  umbral de Envío Gratis y la validación del Excel generado
 - **4 mutaciones** lo ponen en rojo: sumar el 13%, quitar la herencia de marca,
   no marcar truncadas, devolver 0.0 en vez de None
 - Flujo HTTP analizar → filtrar → generar probado contra el master real
