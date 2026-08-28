@@ -338,7 +338,8 @@ dropshipping-reluvsa/
 │   ├── hallazgo-cruce-factura-venta.md # las 3 hipótesis ya descartadas (no repetirlas)
 │   ├── limpieza-cruces-falsos-persistidos.md  # los 243: resultado + método reutilizable
 │   ├── correccion-cruces-num-venta-kim.md     # los 110 corregidos con el # del PDF
-│   ├── modulo2-publicaciones-masivas.md # ⭐ MÓDULO 2: las 5 reglas + lo pendiente (envío)
+│   ├── modulo2-publicaciones-masivas.md # ⭐ MÓDULO 2: reglas operativas + pendientes
+│   ├── envio-gratis-precio-final.md      # 🔴 Contrato Precio → Envío Gratis del Excel
 │   ├── paso0-num-venta-pdf-kim.md      # el paso 0 del matcher + los ceros de más de KIM
 │   └── bug-a-envio-carrito.md          # ⭐ BUG A: el envío del carrito llega a las N ventas
 │                                       #   del pack SIN inflar el SLA. Leer antes de tocar
@@ -501,7 +502,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual — tablero (último update: 2026-08-27)
+## 8. Estado actual — tablero (último update: 2026-08-28)
 
 > 🗺️ Esta sección es **sólo el tablero de qué está vivo hoy**. La narrativa histórica de cómo
 > se resolvió cada cosa (backfills, mediciones, hipótesis descartadas, cierres de sesión) se
@@ -515,7 +516,8 @@ Convenciones:
   de prod ronda ~58,700 ventas / ~55,900 envíos.
 - **Módulo 2 (publicaciones masivas): adaptado al nuevo master KG.** Acepta `BD_Catalogo`
   (29,216 filas / 4,023 SKU), conserva el catálogo legado, cruza por SKU+título, copia cinco
-  imágenes y reporta exclusiones. Falta desplegar esta entrega. Ver §9 y el documento canónico.
+  imágenes y reporta exclusiones. El Envío Gratis se deriva del precio final por publicación.
+  Desplegado en producción. Ver §9 y el documento canónico.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 
@@ -649,9 +651,11 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 ## 9. Módulo 2 — Publicaciones masivas (⭐ BASE FUNCIONANDO 2026-08-19)
 
 > ⭐ **LEER `docs/modulo2-publicaciones-masivas.md` antes de tocar nada de este módulo.**
-> Trae las **5 reglas que no se pueden rediseñar** y lo que quedó pendiente.
+> Trae las reglas que no se pueden rediseñar y lo que quedó pendiente.
 > Para detección del master o categorías de producto, leer además
 > **`docs/master-kg-categorias-producto.md` completo**.
+> Antes de tocar la escritura de `Precio`, `Envio Gratis(si,no)`, `CONSTANTES` o las 36
+> columnas, leer **`docs/envio-gratis-precio-final.md` completo**.
 
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
 plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
@@ -667,7 +671,7 @@ Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "A
 Principales" es una publicación; SKU, precio, descripción e imágenes se repiten idénticos y
 **lo único que cambia es el TÍTULO**.
 
-🔴 **Las reglas están fijadas en `backend/scripts/test_publicaciones_masivas.py` (68/68):**
+🔴 **Las reglas están fijadas en `backend/scripts/test_publicaciones_masivas.py` (77/77):**
 1. **La marca y el modelo SE HEREDAN** — `V8 6.0L 2007-2009` no es un modelo llamado "V8",
    es el mismo Avalanche con otro motor. ⚠️ Pero si el fragmento trae su **propia** marca,
    ésta **reemplaza** a la heredada (`VW CROSSFOX` tras `ST CORDOBA` es un VW, no un Seat).
@@ -683,6 +687,11 @@ Principales" es una publicación; SKU, precio, descripción e imágenes se repit
 4. **Precio incalculable → celda VACÍA, nunca 0.0** (un 0.0 se publica como precio real).
 5. **La columna Q trae paquetes con `&`** — hay que partirla o un SKU publicado dentro de un
    paquete cuenta como faltante.
+6. 🔴 **`Envio Gratis(si,no)` se deriva EXCLUSIVAMENTE de `fila.precio`**: `< $299.00` →
+   `No`; `>= $299.00` → `Si`; `None` → celda vacía, igual que `Precio`. No volverlo constante,
+   no recalcular el precio y no usar costo, línea, peso ni envío como criterio alterno. Aplica
+   al master KG vigente y al catálogo KG legado porque ambos usan `escribir_xlsx`. Detalle y
+   regresiones: `docs/envio-gratis-precio-final.md`.
 
 ⬜ **PENDIENTE PRINCIPAL — el costo de envío** (decisión de Mario: avanzar sin él).
 `ENVIO_POR_LINEA` está vacío y el default es 0.0 → **el precio sale sin envío y queda por
@@ -735,6 +744,7 @@ las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
 | `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
 | `docs/kit-varios-conceptos.md` | ⭐ Antes de tocar `_match_por_kit` / `_tokens_pieza` / `_componente_ya_cubierto` |
 | `docs/modulo2-publicaciones-masivas.md` | ⭐ Antes de tocar CUALQUIER cosa del Módulo 2 (publicaciones masivas) |
+| `docs/envio-gratis-precio-final.md` | 🔴 Antes de tocar `generador_plantilla.py`, las 36 columnas, Precio o Envío Gratis |
 | `docs/master-kg-categorias-producto.md` | ⭐ Antes de tocar detección del master KG, `Producto`, `por_linea` o el filtro por categoría |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |

@@ -6,6 +6,8 @@
 >
 > Para detección del master y el contrato `Producto` → `linea` → `por_linea`,
 > leer también `docs/master-kg-categorias-producto.md` completo.
+> Para tocar Precio, `Envio Gratis(si,no)`, las 36 columnas o `CONSTANTES`, leer
+> también `docs/envio-gratis-precio-final.md` completo.
 
 **Qué es:** un transformador **Excel → Excel**. Toma el catálogo de un proveedor
 y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.
@@ -83,7 +85,7 @@ Así la misma pieza compite por más búsquedas en ML.
 
 ---
 
-## 3. 🔴 Las 5 reglas que no se pueden rediseñar
+## 3. 🔴 Las 6 reglas que no se pueden rediseñar
 
 Fijadas en `backend/scripts/test_publicaciones_masivas.py` (**45/45**), con
 **4 mutaciones verificadas** que lo ponen en rojo.

@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-08-28](#2026-08-28--envío-gratis-según-el-precio-final) | Módulo 2: Envío Gratis según precio final | ✅ Desplegado |
 | [2026-08-25](#2026-08-25--cauplas-cruza-por--de-venta-timbrado-en-xml) | CAUPLAS: # de venta timbrado en XML | ✅ Desplegado; backfill pendiente de aprobación |
 | [2026-08-19](#cierre-sesión-2026-08-19-módulo-2-publicaciones-masivas-arranca) | **Módulo 2: publicaciones masivas** | ✅ Desplegado |
 | [2026-07-31](#cierre-sesión-2026-07-31-oauth-resuelto-era-pkce-cuenta-ml-conectada) | OAuth resuelto: era PKCE | ✅ Cerrado |
@@ -36,6 +37,38 @@
 | [2026-06-02/03](#p1-cerrado-paso-d-confirmado-end-to-end-en-producción-2026-06-03) | Deploy Railway + parsers reales | ✅ Cerrado |
 | [2026-06-01](#8bis-estado-anterior-histórico-2026-06-01-superado-por-la-sección-8) | Snapshot pre-deploy | ✅ Superado |
 | [Pasos P1–P4](#9-siguientes-pasos-orden-recomendado) | Los 4 pendientes originales | ✅ Todos cerrados |
+
+---
+
+## 2026-08-28 — Envío Gratis según el precio final
+
+**Pedido operativo:** Gaby necesitaba que la columna `Envio Gratis(si,no)` de la plantilla
+masiva dejara de salir siempre en `Si`. La decisión fijada fue un umbral continuo en
+`$299.00`: un precio menor genera `No` y un precio igual o mayor genera `Si`. Se conserva el
+texto sin acento porque así lo espera la plantilla de Mercado Libre.
+
+**Problema encontrado:** `backend/services/generador_plantilla.py` tenía el campo dentro de
+`CONSTANTES`, junto con Moneda, Condición, Garantía y Modo de Envío. Eso imponía `Si` a todas
+las publicaciones sin mirar el precio final calculado.
+
+**Modificación:** se retiró `Envio Gratis(si,no)` de `CONSTANTES` y se escribe por fila dentro
+de `escribir_xlsx`, usando exclusivamente `fila.precio`. Si `fila.precio is None`, no se
+escriben ni Precio ni Envío Gratis. No se tocó `calcular_precio`, la interfaz, los endpoints,
+ni el pendiente de `ENVIO_POR_LINEA`. Como master y catálogo legado convergen en el mismo
+escritor, la regla cubre ambos formatos sin bifurcaciones.
+
+**Por qué se usa el precio final:** `fila.precio` ya incorpora Gran Mayoreo, IVA, utilidad,
+comisión y el envío configurado. Volver a calcular o inferir desde costo/línea crearía una
+segunda fuente de verdad y podría contradecir la cifra que realmente se publica.
+
+**Regresiones:** el test genera un `.xlsx`, lo vuelve a abrir con `openpyxl` y verifica
+`298.99 → No`, `299.00 → Si`, un precio mayor → `Si`, y precio inexistente → ambas celdas
+vacías. También fija literalmente las 36 columnas y su orden. Suite completa del módulo:
+**77/77**.
+
+**Entrega:** commit `1503b55` (`Deriva envio gratis del precio final`) desplegado con estado
+`SUCCESS` en Railway el 2026-08-28. La referencia para futuros cambios vive en
+`docs/envio-gratis-precio-final.md`.
 
 ---
 
