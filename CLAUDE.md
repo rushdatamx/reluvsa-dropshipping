@@ -525,7 +525,7 @@ Convenciones:
 |---|---|---|
 | Media | **Módulo 2: costo de envío por línea** | Hoy el precio sale SIN envío (con aviso en la UI). Gaby debe dar peso/línea (~30 valores). Ver §9. |
 | Media | **Módulo 2: avisarle a Gaby lo del 13%** | ML lo cobra sobre el precio final; hoy ella publica con un método que le deja ~$15 corta por pieza. Ver §9. |
-| Media | **Módulo 2: perfiles de los otros 4 proveedores** | Sólo existe KG. Cada uno es un perfil de ~15 líneas; pedir el archivo tal cual primero. |
+| Media | **Módulo 2: perfiles de los otros 3 proveedores** | Ya existen KG y CAUPLAS. Faltan KIM, AG y VAZLO; pedir el archivo tal cual primero. |
 | Baja | Rotar la password del admin `gaby@reluvsa.com` | Higiene, pendiente desde junio. |
 | Baja | Avisar por escrito al cliente | La app de ML debe quedarse en "Sin acceso" en *Publicación y sincronización* del DevCenter. |
 | Baja | UI `/mercadolibre`: columna "Procesada" | Muestra ✅ para notificaciones **descartadas** — se lee al revés. Cambiar por la etiqueta "descartada". |
@@ -654,6 +654,8 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 > Trae las reglas que no se pueden rediseñar y lo que quedó pendiente.
 > Para detección del master o categorías de producto, leer además
 > **`docs/master-kg-categorias-producto.md` completo**.
+> Antes de tocar el master CAUPLAS, su validación, títulos, descripción, filtros o
+> métricas, leer **`docs/master-cauplas-publicaciones-masivas.md` completo**.
 > Antes de tocar la escritura de `Precio`, `Envio Gratis(si,no)`, `CONSTANTES` o las 36
 > columnas, leer **`docs/envio-gratis-precio-final.md` completo**.
 
@@ -700,9 +702,9 @@ es la **LÍNEA de producto**, no el precio ni el peso: el catálogo **no trae pe
 dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo** con la columna
 AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
 
-⬜ **Otros pendientes:** sólo hay perfil de **KG** (los otros 4 dan 400 con mensaje claro;
-agregar uno es escribir un perfil, no un módulo); el nuevo master copia Imagen 1–5 y el legado
-las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
+⬜ **Otros pendientes:** ya hay perfiles de **KG y CAUPLAS** (KIM, AG y VAZLO dan 400 con
+mensaje claro); el master KG copia Imagen 1–5, mientras CAUPLAS y el legado las dejan vacías;
+la **categoría de ML** se teclea y aplica a todo el archivo.
 
 **Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 
@@ -746,6 +748,7 @@ las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
 | `docs/modulo2-publicaciones-masivas.md` | ⭐ Antes de tocar CUALQUIER cosa del Módulo 2 (publicaciones masivas) |
 | `docs/envio-gratis-precio-final.md` | 🔴 Antes de tocar `generador_plantilla.py`, las 36 columnas, Precio o Envío Gratis |
 | `docs/master-kg-categorias-producto.md` | ⭐ Antes de tocar detección del master KG, `Producto`, `por_linea` o el filtro por categoría |
+| `docs/master-cauplas-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master CAUPLAS en Publicaciones Masivas |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |

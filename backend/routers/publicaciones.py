@@ -80,6 +80,17 @@ def _leer_o_400(ruta, perfil):
                     f"{perfil.codigo_bodega}? Esperamos la clave en la columna "
                     f"{chr(65 + perfil.col_clave)}."),
         )
+    formato_esperado = {"CAUPLAS": "master_cauplas"}.get(perfil.codigo_bodega)
+    if formato_esperado and resultado.formato != formato_esperado:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Este archivo no corresponde al master de {perfil.codigo_bodega}.",
+        )
+    if resultado.formato == "master_cauplas" and perfil.codigo_bodega != "CAUPLAS":
+        raise HTTPException(
+            status_code=400,
+            detail="Este archivo parece ser el master de CAUPLAS; selecciona CAUPLAS como proveedor.",
+        )
     return resultado
 
 
@@ -88,6 +99,7 @@ def listar_proveedores_soportados(_=Depends(require_admin)):
     """Proveedores con perfil de catálogo listo."""
     return {
         "soportados": proveedores_soportados(),
+        "marcas": {codigo: perfil_de(codigo).marca_ml for codigo in proveedores_soportados()},
         "envio_pendiente": envio_pendiente(),
     }
 
@@ -116,7 +128,7 @@ async def analizar(
         publicados = set()
         if ruta_pub:
             try:
-                publicados = (leer_publicaciones(ruta_pub) if lectura.formato == "master_kg"
+                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas"}
                               else leer_skus_publicados(ruta_pub))
             except Exception:
                 raise HTTPException(
@@ -126,18 +138,23 @@ async def analizar(
                 )
 
         cfg = ConfiguracionProveedor(codigo_bodega=codigo_bodega)
-        if lectura.formato == "master_kg":
+        if lectura.formato in {"master_kg", "master_cauplas"}:
             candidatos, reporte = generar_filas_con_reporte(piezas, cfg)
             cruce_v = cruzar_variantes(candidatos, publicados)
             filas = cruce_v["pendientes"]
             sku_publicados = {sku for sku, _ in publicados}
             por_producto = []
-            for producto in sorted({p["linea"] for p in piezas}):
-                pp = [p for p in piezas if p["linea"] == producto]
+            productos = ({p["linea"] for p in piezas} if lectura.formato == "master_kg" else
+                         {producto for p in piezas for producto in p.get("lineas", [])})
+            for producto in sorted(productos):
+                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato == "master_kg"
+                                            else producto in p.get("lineas", []))]
                 cand = [f for f in candidatos if f.linea == producto]
                 pend = [f for f in filas if f.linea == producto]
                 por_producto.append({"linea": producto, "producto": producto, "piezas": len(pp),
-                    "compatibilidades": sum(len(p["compatibilidades"]) for p in pp),
+                    "compatibilidades": (sum(len(p["compatibilidades"]) for p in pp)
+                        if lectura.formato == "master_kg" else
+                        sum(1 for p in pp for c in p["compatibilidades"] if c.get("producto") == producto)),
                     "publicaciones": len(cand), "publicaciones_faltantes": len(pend)})
             errores = lectura.errores + reporte["exclusiones"]
             return {"proveedor": codigo_bodega, "formato": lectura.formato,
@@ -145,6 +162,7 @@ async def analizar(
                 "total_catalogo": len(piezas), "sku_unicos": lectura.sku_unicos_master or len(piezas),
                 "compatibilidades_validas": lectura.compatibilidades_validas,
                 "compatibilidades_invalidas": lectura.compatibilidades_invalidas,
+                "universales": lectura.universales,
                 "duplicados_descartados": lectura.duplicados_descartados,
                 "precio_presente": lectura.precio_presente, "sku_sin_precio": lectura.sku_sin_precio,
                 "sku_precio_inconsistente": lectura.sku_precio_inconsistente,
@@ -219,7 +237,18 @@ async def generar(
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="El filtro de líneas no es una lista válida.")
             if elegidas:
-                piezas = [p for p in piezas if (p["linea"] or "").upper() in elegidas]
+                if lectura.formato == "master_cauplas":
+                    filtradas = []
+                    for pieza in piezas:
+                        compatibilidades = [c for c in pieza.get("compatibilidades", [])
+                                            if (c.get("producto") or "").upper() in elegidas]
+                        if compatibilidades:
+                            copia = dict(pieza)
+                            copia["compatibilidades"] = compatibilidades
+                            filtradas.append(copia)
+                    piezas = filtradas
+                else:
+                    piezas = [p for p in piezas if (p["linea"] or "").upper() in elegidas]
 
         if not piezas:
             raise HTTPException(
@@ -240,7 +269,7 @@ async def generar(
         )
 
         filas = generar_filas(piezas, config)
-        if ruta_pub and solo_faltantes and lectura.formato == "master_kg":
+        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas:
             raise HTTPException(

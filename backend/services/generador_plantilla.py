@@ -117,6 +117,20 @@ ALIAS_PRODUCTO = {
     "tubo de enfriamiento": "Tubo Enfriamiento",
 }
 
+# Alias exclusivos del master CAUPLAS. Son la tercera y última alternativa:
+# primero se intenta el nombre completo con armadora, luego sin armadora y sólo
+# entonces se abrevia el producto. Nunca se recorta el vehículo ni los años.
+ALIAS_PRODUCTO_CAUPLAS = {
+    "deposito de refrigerante de motor": "Depósito Refrigerante",
+    "manguera radiador": "Mang. Radiador",
+    "manguera calefaccion": "Mang. Calef.",
+    "manguera refrigeracion": "Mang. Refrig.",
+    "manguera descarga de gases": "Mang. Descarga Gases",
+    "manguera para frenos hidraulicos": "Mang. Freno Hidráulico",
+    "manguera circulacion de aire": "Mang. Circulación Aire",
+    "refrigeracion": "Refrig.",
+}
+
 
 def _sin_acentos(txt):
     import unicodedata
@@ -163,6 +177,59 @@ def _variantes_master(producto, compat):
             agregar_bloque(bloque[:mitad]); agregar_bloque(bloque[mitad:])
         else: excluidas.append((texto, "Título excede 60 caracteres"))
     agregar_bloque(anios[:corte]); agregar_bloque(anios[corte:])
+    return variantes, excluidas
+
+
+def _titulo_cauplas(producto, compat, anios) -> Optional[str]:
+    producto = " ".join(str(producto or "").split())
+    armadora = " ".join(str(compat.get("armadora") or "").split())
+    modelo = " ".join(str(compat.get("modelo") or "").split())
+    cilindrada = " ".join(str(compat.get("motor") or "").split())
+    if compat.get("universal"):
+        sufijo = "Universal"
+        intentos = [f"{producto} P/ {sufijo}"]
+    else:
+        sufijo = " ".join(x for x in (modelo, cilindrada, anios) if x)
+        intentos = [f"{producto} P/ {armadora} {sufijo}", f"{producto} P/ {sufijo}"]
+    alias = ALIAS_PRODUCTO_CAUPLAS.get(_sin_acentos(producto))
+    if alias:
+        intentos.append(f"{alias} P/ {sufijo}")
+    for titulo in intentos:
+        titulo = re.sub(r"\s+", " ", titulo).strip()
+        if len(titulo) <= MAX_TITULO:
+            return titulo
+    return None
+
+
+def _variantes_cauplas(producto, compat):
+    if compat.get("universal"):
+        titulo = _titulo_cauplas(producto, compat, "")
+        return ([titulo] if titulo else []), ([] if titulo else [("All", "Título excede 60 caracteres")])
+    inicio, fin = compat["inicio"], compat["fin"]
+    if inicio == fin:
+        titulo = _titulo_cauplas(producto, compat, str(inicio))
+        return ([titulo] if titulo else []), ([] if titulo else [(str(inicio), "Título excede 60 caracteres")])
+    variantes, excluidas = [], []
+    rango = f"{inicio}/{fin}"
+    titulo = _titulo_cauplas(producto, compat, rango)
+    (variantes if titulo else excluidas).append(titulo or (rango, "Título excede 60 caracteres"))
+    anios = list(range(inicio, fin + 1))
+    corte = (len(anios) + 1) // 2
+
+    def agregar_bloque(bloque):
+        texto = " ".join(map(str, bloque))
+        titulo_bloque = _titulo_cauplas(producto, compat, texto)
+        if titulo_bloque:
+            variantes.append(titulo_bloque)
+        elif len(bloque) > 1:
+            mitad = (len(bloque) + 1) // 2
+            agregar_bloque(bloque[:mitad])
+            agregar_bloque(bloque[mitad:])
+        else:
+            excluidas.append((texto, "Título excede 60 caracteres"))
+
+    agregar_bloque(anios[:corte])
+    agregar_bloque(anios[corte:])
     return variantes, excluidas
 
 
@@ -233,9 +300,68 @@ def _describir_master(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _describir_cauplas(pieza, config):
+    partes = ["Productos y especificaciones:"]
+    for par in pieza.get("productos_especificaciones", []):
+        producto, especificacion = par.get("producto", ""), par.get("especificacion", "")
+        partes.append(f"{producto} — {especificacion}" if especificacion else producto)
+    if pieza.get("oems"):
+        partes += ["", "OEM: " + " | ".join(pieza["oems"])]
+    equivalencias = [(marca, codigos) for marca, codigos in pieza.get("equivalencias", {}).items()
+                     if codigos]
+    if equivalencias:
+        partes += ["", "Equivalencias:"]
+        partes += [f"{marca}: {' | '.join(codigos)}" for marca, codigos in equivalencias]
+    productos = [x.get("producto", "") for x in pieza.get("productos_especificaciones", [])]
+    if any("manguera" in _sin_acentos(producto) for producto in productos):
+        medidas = [(nombre, valores) for nombre, valores in pieza.get("medidas", {}).items() if valores]
+        if medidas:
+            partes += ["", "Medidas:"]
+            partes += [f"{nombre}: {' | '.join(valores)}" for nombre, valores in medidas]
+    compatibilidades = []
+    for compat in pieza.get("compatibilidades", []):
+        if compat.get("universal"):
+            texto = "Universal"
+        else:
+            anios = (str(compat["inicio"]) if compat["inicio"] == compat["fin"]
+                     else f"{compat['inicio']}-{compat['fin']}")
+            texto = " ".join(x for x in (compat.get("armadora"), compat.get("modelo"),
+                                         compat.get("motor"), anios) if x)
+        if _sin_acentos(texto) not in {_sin_acentos(x) for x in compatibilidades}:
+            compatibilidades.append(texto)
+    if compatibilidades:
+        partes += ["", "Compatibilidades:"] + compatibilidades
+    if config.descripcion_base:
+        partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
+        if pieza.get("formato") == "master_cauplas":
+            descripcion = _describir_cauplas(pieza, config)
+            for compat in pieza.get("compatibilidades", []):
+                producto = compat.get("producto", "")
+                precio = calcular_precio(pieza.get("costo"), producto, config.params_precio)
+                titulos, fuera = _variantes_cauplas(producto, compat)
+                for anios, motivo in fuera:
+                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                        "anio": anios, "inicio": compat.get("inicio"), "fin": compat.get("fin"),
+                        "motivo": motivo})
+                for titulo in titulos:
+                    par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                    if par in vistos:
+                        deduplicadas += 1
+                        continue
+                    vistos.add(par)
+                    filas.append(FilaPublicacion(
+                        titulo, str(pieza.get("clave") or "").strip(), producto, precio,
+                        descripcion, "Universal" if compat.get("universal") else
+                        f"{compat.get('inicio')}-{compat.get('fin')}", False, [], compat.get("fila"),
+                    ))
+            continue
         if pieza.get("formato") != "master_kg":
             for f in generar_filas([pieza], config):
                 par = (f.sku.upper(), " ".join(_sin_acentos(f.titulo).split()))
@@ -263,7 +389,7 @@ def generar_filas_con_reporte(piezas, config):
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
-    if piezas and piezas[0].get("formato") == "master_kg":
+    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas"}:
         return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 

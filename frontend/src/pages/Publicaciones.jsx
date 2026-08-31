@@ -41,6 +41,7 @@ const inputCls = 'w-full px-3 py-2 border border-notion-border rounded-lg text-s
 
 export default function Publicaciones() {
   const [soportados, setSoportados] = useState([]);
+  const [marcas, setMarcas] = useState({});
   const [envioPendiente, setEnvioPendiente] = useState(false);
   const [proveedor, setProveedor] = useState('KG');
   const [catalogo, setCatalogo] = useState(null);
@@ -62,8 +63,13 @@ export default function Publicaciones() {
     pubProveedores()
       .then(({ data }) => {
         setSoportados(data.soportados || []);
+        setMarcas(data.marcas || {});
         setEnvioPendiente(!!data.envio_pendiente);
-        if (data.soportados?.length) setProveedor(data.soportados[0]);
+        if (data.soportados?.length) {
+          const inicial = data.soportados[0];
+          setProveedor(inicial);
+          setConfig((prev) => ({ ...prev, marca: data.marcas?.[inicial] || '' }));
+        }
       })
       .catch(() => {});
   }, []);
@@ -113,6 +119,13 @@ export default function Publicaciones() {
     setLineasSel((prev) =>
       prev.includes(linea) ? prev.filter((l) => l !== linea) : [...prev, linea]);
 
+  const cambiarProveedor = (codigo) => {
+    setProveedor(codigo);
+    setAnalisis(null);
+    setLineasSel([]);
+    setConfig((prev) => ({ ...prev, marca: marcas[codigo] || '' }));
+  };
+
   const publicacionesElegidas = analisis
     ? (lineasSel.length
         ? analisis.por_linea.filter((l) => lineasSel.includes(l.linea))
@@ -142,7 +155,7 @@ export default function Publicaciones() {
 
         <div className="grid md:grid-cols-3 gap-4">
           <Campo label="Proveedor" hint="Cada uno manda su información distinta">
-            <select value={proveedor} onChange={(e) => setProveedor(e.target.value)} className={inputCls}>
+            <select value={proveedor} onChange={(e) => cambiarProveedor(e.target.value)} className={inputCls}>
               {soportados.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </Campo>
@@ -179,6 +192,9 @@ export default function Publicaciones() {
               ['SKU únicos', analisis.sku_unicos ?? analisis.total_catalogo, ''],
               ['Compatibilidades válidas', analisis.compatibilidades_validas ?? analisis.total_catalogo, 'text-success'],
               ['Compatibilidades inválidas', analisis.compatibilidades_invalidas ?? 0, 'text-reluvsa-red'],
+              ...(analisis.formato === 'master_cauplas'
+                ? [['Compatibilidades universales', analisis.universales ?? 0, 'text-success']]
+                : []),
               ['Variantes estimadas', analisis.variantes_estimadas ?? analisis.publicaciones_estimadas, ''],
               ['Variantes existentes', analisis.variantes_existentes ?? analisis.ya_publicadas, 'text-success'],
               ['Variantes faltantes', analisis.variantes_faltantes ?? analisis.faltantes, 'text-reluvsa-red font-bold'],
@@ -206,6 +222,22 @@ export default function Publicaciones() {
             </div>
           )}
 
+          {analisis.sku_sin_precio > 0 && (
+            <div className="mb-3 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs flex gap-2">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span><strong>{analisis.sku_sin_precio.toLocaleString('es-MX')} SKU no tienen un costo utilizable.</strong>{' '}
+                Su Precio y Envío Gratis quedarán vacíos, nunca en cero.</span>
+            </div>
+          )}
+
+          {analisis.sku_precio_inconsistente > 0 && (
+            <div className="mb-3 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs flex gap-2">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span><strong>{analisis.sku_precio_inconsistente.toLocaleString('es-MX')} SKU traen costos distintos.</strong>{' '}
+                No se eligió uno arbitrariamente; sus precios quedarán vacíos.</span>
+            </div>
+          )}
+
           {analisis.aplicaciones_truncadas > 0 && (
             <div className="mb-3 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs flex gap-2">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
@@ -214,6 +246,13 @@ export default function Publicaciones() {
                 catálogo del proveedor (su archivo recorta la celda). Se excluyen para no publicar
                 piezas diciendo que sirven para menos autos de los que sirven. Pídele el catálogo completo.
               </span>
+            </div>
+          )}
+
+          {analisis.formato === 'master_cauplas' && (
+            <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
+              CAUPLAS consolida automáticamente equivalencias por marca, OEM y medidas para
+              mangueras. Este master no incorpora imágenes utilizables.
             </div>
           )}
 
@@ -267,7 +306,7 @@ export default function Publicaciones() {
             <Campo label="Marca" hint="Va en la columna Marca de ML">
               <input className={inputCls} value={config.marca}
                      onChange={(e) => setConfig({ ...config, marca: e.target.value })}
-                     placeholder="KeepOnGreen" />
+                     placeholder={marcas[proveedor] || 'Marca'} />
             </Campo>
             <Campo label="Categoría ML" hint="Ej. MLM163963">
               <input className={inputCls} value={config.categoria_ml}
@@ -313,8 +352,13 @@ export default function Publicaciones() {
           </Campo>
 
           <div className="mt-4 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
-            <strong>Imagen 1–5 se completan automáticamente</strong> desde el nuevo master KG.
-            Imagen 6–10 permanecen vacías. En el catálogo legado se conserva el comportamiento anterior.
+            {analisis.formato === 'master_cauplas' ? (
+              <><strong>CAUPLAS no incorpora imágenes:</strong> Imagen 1–10 permanecerán vacías.
+              La descripción sí incluirá equivalencias y, cuando sea manguera, sus medidas.</>
+            ) : (
+              <><strong>Imagen 1–5 se completan automáticamente</strong> desde el nuevo master KG.
+              Imagen 6–10 permanecen vacías. En el catálogo legado se conserva el comportamiento anterior.</>
+            )}
           </div>
 
           <button onClick={generar} disabled={generando}

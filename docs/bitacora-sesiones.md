@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-08-31](#2026-08-31--cauplas-en-publicaciones-masivas) | Módulo 2: master CAUPLAS | ✅ Implementado; despliegue iniciado con este cierre |
 | [2026-08-28](#2026-08-28--envío-gratis-según-el-precio-final) | Módulo 2: Envío Gratis según precio final | ✅ Desplegado |
 | [2026-08-25](#2026-08-25--cauplas-cruza-por--de-venta-timbrado-en-xml) | CAUPLAS: # de venta timbrado en XML | ✅ Desplegado; backfill pendiente de aprobación |
 | [2026-08-19](#cierre-sesión-2026-08-19-módulo-2-publicaciones-masivas-arranca) | **Módulo 2: publicaciones masivas** | ✅ Desplegado |
@@ -2321,3 +2322,74 @@ La regresión cubre `Gran Mayoreo`, compatibilidad con masters anteriores que us
 `Precio`, ausencia de ambos encabezados, posición incorrecta, fórmula de precio e
 inconsistencia por SKU. Resultado: **72/72 comprobaciones aprobadas**. No se
 modificaron API, interfaz, fórmula de precio ni generador XLSX.
+# 2026-08-31 — CAUPLAS en Publicaciones Masivas
+
+## El pedido y el diagnóstico
+
+El objetivo fue incorporar el catálogo de QUALITY HOSES/CAUPLAS al flujo ya estable
+de Publicaciones Masivas, conservando intacto KG. El master real confirmó la estructura
+que Gaby había descrito: producto I, especificación J, SKU N, medidas P–S,
+equivalencias U–Z, OEM AA y costo AF. La columna O no trae URLs sino nombres locales
+`.png`, así que no era seguro convertirla en imágenes de publicación.
+
+La inspección completa encontró 15,612 filas y 4,214 SKU. Había 370 filas `All` y 40
+filas cuyo texto de años en K era inválido o contradecía L–M. AB también mostraba
+inconsistencias, por lo que se confirmó como texto informativo y no como fuente de
+años. AF contiene fórmulas externas, pero el libro real conserva los valores cacheados.
+
+## Decisiones tomadas
+
+Se creó un formato `master_cauplas` detectado por encabezados normalizados y despachado
+antes de KG. No se intentó meter CAUPLAS en `aplicaciones_kg.py`: ambos proveedores
+conservan parsers independientes y convergen sólo en los contratos comunes de variantes,
+cruce y escritura de la plantilla.
+
+K valida L–M. `All` se trata como universal; cualquier otra fila sin años válidos o
+con contradicción se excluye con fila, SKU y motivo. No se consulta AB para “arreglar”
+el rango. Los SKU numéricos se convierten a texto sin `.0` y los textuales conservan
+ceros iniciales.
+
+El agrupamiento consolida todas las combinaciones I/J, OEM, equivalencias por marca,
+medidas y costos. Si los costos difieren no se elige uno arbitrariamente. Una fórmula
+sin valor cacheado produce precio vacío, nunca cero.
+
+## Títulos, descripción y salida
+
+Los títulos siguen `Producto P/ Armadora Modelo Cilindrada Años`; para caber primero
+se elimina Armadora y después se permite abreviar únicamente Producto mediante ocho
+aliases cerrados. La expansión genera rango y bloques cronológicos como KG y subdivide
+bloques largos. No se cortan modelo, cilindrada, años o palabras. Después se deduplica
+por SKU+título normalizado.
+
+La descripción compartida por SKU lista productos/especificaciones, OEM, equivalencias
+Continental/Dayco/Gates/KeepOnGreen/Meisterzats/Tepeyac, medidas no cero sólo para
+mangueras, compatibilidades validadas y finalmente el cuerpo fijo de RELUVSA.
+
+La plantilla conserva las 36 columnas. Precio y Envío Gratis reutilizan las reglas
+vigentes; las diez imágenes quedan vacías y sólo CAUPLAS recibe stock. AG, KG, KIM,
+MATRIZ y VAZLO quedan en cero.
+
+## API, interfaz y aislamiento
+
+`/api/publicaciones/proveedores` ahora expone CAUPLAS y KG con sus marcas por defecto.
+Analizar devuelve `formato: master_cauplas`, métricas existentes y el conteo de
+universales. La UI muestra textos específicos sobre imágenes, medidas, equivalencias y
+costos ausentes/contradictorios, respetando los componentes visuales existentes.
+
+No se crearon tablas ni migraciones y no se tocó el Módulo 1, Mercado Libre, OAuth,
+webhooks, ventas, facturas o matcher.
+
+## Resultado y verificación
+
+- CAUPLAS: 30/30 regresiones.
+- KG: 77/77 sin cambiar expectativas.
+- Master real: 15,612 filas, 4,214 SKU, 370 universales, 15,202 compatibilidades con
+  años y 40 exclusiones.
+- Generación real: 43,436 variantes deduplicadas; tres variantes adicionales se
+  excluyen porque no caben sin cortar datos del vehículo.
+- Flujo HTTP CAUPLAS: análisis completo y generación de una tanda Termostato.
+- Flujo HTTP KG: análisis completo y generación de 3,772 publicaciones Radiador.
+- Frontend: build de producción correcto.
+
+La regla completa para futuros cambios quedó en
+`docs/master-cauplas-publicaciones-masivas.md`.

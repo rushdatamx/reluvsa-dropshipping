@@ -30,6 +30,20 @@ class PerfilCatalogo:
 
 
 PERFILES: Dict[str, PerfilCatalogo] = {
+    # QUALITY HOSES / CAUPLAS — el master vigente se reconoce por encabezados
+    # y tiene un lector exclusivo en parser_catalogo.py. Estos índices conservan
+    # el contrato físico documentado por Gaby y sirven para mensajes de error.
+    "CAUPLAS": PerfilCatalogo(
+        codigo_bodega="CAUPLAS",
+        nombre_hoja=None,
+        fila_header=1,
+        col_clave=13,            # N  'cauplas'
+        col_linea=8,             # I  'uso'
+        col_aplicaciones=27,     # AB 'compatibilidad' (informativa; no da años)
+        col_precio_costo=31,     # AF 'Precio' (costo sin IVA)
+        anclas_header=("armadora", "modelo", "uso", "cauplas", "precio"),
+        marca_ml="CAUPLAS",
+    ),
     # KeepOnGreen — 'LISTA PRECIOS KG.xlsx', hoja 'KeepOnGreen® Ecommerce'.
     # Header en la fila 3; los datos arrancan en la 4. Medido: 3,676 piezas.
     "KG": PerfilCatalogo(

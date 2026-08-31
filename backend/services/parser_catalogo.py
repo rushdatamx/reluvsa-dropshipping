@@ -1,4 +1,8 @@
-"""Lectura de catálogos KG (master normalizado y formato legado) y cruce ML."""
+"""Lectura de catálogos de Publicaciones Masivas y cruce con ML.
+
+Los masters CAUPLAS y KG tienen lectores independientes. CAUPLAS se detecta
+primero por encabezados para que su estructura nunca caiga en el parser KG.
+"""
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -15,6 +19,19 @@ MASTER_HEADERS = ("Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "
                   "OEM", "Imagen 1", "Imagen 2", "Imagen 3", "Imagen 4", "Imagen 5")
 MASTER_ANCLAS = ("Armadora", "Modelo", "Producto", "Clave", "Inicio", "Fin")
 MASTER_HEADERS_COSTO = ("Gran Mayoreo", "Precio")
+
+CAUPLAS_HEADERS = (
+    "armadora", "modelo", "cilindrada", "uso", "especificaciones", "fecha",
+    "inicio", "fin", "cauplas", "alto", "largo", "diametro1", "diametro2",
+    "continental", "dayco", "gates", "keepongreen", "meisterzats", "tepeyac",
+    "oe", "Precio",
+)
+CAUPLAS_ANCLAS = ("armadora", "modelo", "uso", "fecha", "cauplas", "oe", "Precio")
+CAUPLAS_EQUIVALENCIAS = (
+    ("Continental", "continental"), ("Dayco", "dayco"), ("Gates", "gates"),
+    ("KeepOnGreen", "keepongreen"), ("Meisterzats", "meisterzats"),
+    ("Tepeyac", "tepeyac"),
+)
 
 
 def _texto(val) -> str:
@@ -45,6 +62,7 @@ class ResultadoCatalogo:
     sku_precio_inconsistente: int = 0
     errores: List[Dict] = field(default_factory=list)
     sku_unicos_master: int = 0
+    universales: int = 0
 
 
 def _error(fila, valores, motivo):
@@ -98,6 +116,176 @@ def _hoja_master(wb):
         return canonica
     incompletas = [ws for ws in wb.worksheets if _parece_master(ws)]
     return incompletas[0] if incompletas else None
+
+
+def _headers_cauplas(ws):
+    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    mapa = {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
+    return all(_normalizar(h) in mapa for h in CAUPLAS_HEADERS), mapa
+
+
+def _parece_cauplas(ws) -> bool:
+    _, columnas = _headers_cauplas(ws)
+    return sum(_normalizar(h) in columnas for h in CAUPLAS_ANCLAS) >= 5
+
+
+def _hoja_cauplas(wb):
+    completas = [ws for ws in wb.worksheets if _headers_cauplas(ws)[0]]
+    if completas:
+        return completas[0]
+    incompletas = [ws for ws in wb.worksheets if _parece_cauplas(ws)]
+    return incompletas[0] if incompletas else None
+
+
+def _partes_codigos(valor):
+    """Separa listas del proveedor sin inventar estructura dentro del código."""
+    return [p.strip() for p in re.split(r"\s*\|\s*", _texto(valor)) if p.strip() and p.strip() != "-"]
+
+
+def _agregar_unico(lista, valor):
+    if valor and _normalizar(valor) not in {_normalizar(x) for x in lista}:
+        lista.append(valor)
+
+
+def _error_cauplas(fila, sku, datos, motivo):
+    return {
+        "fila": fila, "clave": sku, "armadora": _texto(datos.get("armadora")),
+        "modelo": _texto(datos.get("modelo")), "anio": _texto(datos.get("fecha")),
+        "inicio": _texto(datos.get("inicio")), "fin": _texto(datos.get("fin")),
+        "motivo": motivo,
+    }
+
+
+def _validar_anios_cauplas(datos):
+    fecha = _texto(datos.get("fecha"))
+    if fecha.casefold() == "all":
+        return True, None, None, True, ""
+    inicio, fin = _anio_entero(datos.get("inicio")), _anio_entero(datos.get("fin"))
+    if inicio is None or fin is None or not (1900 <= inicio <= 2100 and 1900 <= fin <= 2100):
+        return False, inicio, fin, False, "Inicio y Fin deben ser años enteros entre 1900 y 2100"
+    if inicio > fin:
+        return False, inicio, fin, False, "Inicio es mayor que Fin"
+    anios_fecha = [int(x) for x in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", fecha)]
+    if not anios_fecha or min(anios_fecha) != inicio or max(anios_fecha) != fin:
+        return False, inicio, fin, False, "Fecha no coincide con Inicio y Fin"
+    return True, inicio, fin, False, ""
+
+
+def _leer_master_cauplas(ws) -> ResultadoCatalogo:
+    valido, columnas = _headers_cauplas(ws)
+    if not valido:
+        faltan = [h for h in CAUPLAS_HEADERS if _normalizar(h) not in columnas]
+        raise ValueError(
+            f"La hoja «{ws.title}» parece ser el master CAUPLAS, pero le faltan "
+            "los encabezados requeridos: " + ", ".join(faltan)
+        )
+
+    def val(fila, nombre):
+        i = columnas.get(_normalizar(nombre))
+        return fila[i] if i is not None and i < len(fila) else None
+
+    grupos, errores, sku_observados = {}, [], set()
+    filas_master = validas = universales = duplicados = 0
+    max_col = max(columnas.values()) + 1
+    for numero, fila in enumerate(ws.iter_rows(min_row=2, max_col=max_col, values_only=True), 2):
+        if not any(_texto(x) for x in fila):
+            continue
+        filas_master += 1
+        datos = {nombre: val(fila, encabezado) for nombre, encabezado in (
+            ("armadora", "armadora"), ("modelo", "modelo"), ("cilindrada", "cilindrada"),
+            ("producto", "uso"), ("especificacion", "especificaciones"), ("fecha", "fecha"),
+            ("inicio", "inicio"), ("fin", "fin"), ("sku", "cauplas"), ("oem", "oe"),
+        )}
+        sku = _texto(datos["sku"])
+        if sku:
+            sku_observados.add(sku.upper())
+        if not sku:
+            errores.append(_error_cauplas(numero, sku, datos, "SKU CAUPLAS vacío"))
+            continue
+        ok, inicio, fin, universal, motivo = _validar_anios_cauplas(datos)
+        if not ok:
+            errores.append(_error_cauplas(numero, sku, datos, motivo))
+            continue
+        if universal:
+            universales += 1
+        else:
+            validas += 1
+
+        producto = _producto_canonico(datos["producto"])
+        especificacion = _texto(datos["especificacion"])
+        armadora, modelo, cilindrada = (_texto(datos[x]) for x in ("armadora", "modelo", "cilindrada"))
+        g = grupos.setdefault(sku.upper(), {
+            "clave": sku, "linea": producto, "lineas": [], "producto": producto,
+            "formato": "master_cauplas", "compatibilidades": [],
+            "productos_especificaciones": [], "oems": [],
+            "equivalencias": {marca: [] for marca, _ in CAUPLAS_EQUIVALENCIAS},
+            "medidas": {"Alto": [], "Largo": [], "Diámetro 1": [], "Diámetro 2": []},
+            "imagenes": [], "_costos": set(), "filas_origen": [],
+        })
+        g["filas_origen"].append(numero)
+        _agregar_unico(g["lineas"], producto)
+        par_producto = {"producto": producto, "especificacion": especificacion}
+        firma_producto = (_normalizar(producto), _normalizar(especificacion))
+        if firma_producto not in {(_normalizar(x["producto"]), _normalizar(x["especificacion"]))
+                                  for x in g["productos_especificaciones"]}:
+            g["productos_especificaciones"].append(par_producto)
+
+        compat = {"producto": producto, "armadora": armadora, "modelo": modelo,
+                  "motor": cilindrada, "inicio": inicio, "fin": fin,
+                  "universal": universal, "fila": numero}
+        firma_compat = (_normalizar(producto), _normalizar(armadora), _normalizar(modelo),
+                        _normalizar(cilindrada), inicio, fin, universal)
+        firmas = {(_normalizar(c["producto"]), _normalizar(c["armadora"]),
+                   _normalizar(c["modelo"]), _normalizar(c["motor"]), c["inicio"],
+                   c["fin"], c["universal"]) for c in g["compatibilidades"]}
+        if firma_compat in firmas:
+            duplicados += 1
+        else:
+            g["compatibilidades"].append(compat)
+
+        for codigo in _partes_codigos(datos["oem"]):
+            _agregar_unico(g["oems"], codigo)
+        for marca, encabezado in CAUPLAS_EQUIVALENCIAS:
+            for codigo in _partes_codigos(val(fila, encabezado)):
+                _agregar_unico(g["equivalencias"][marca], codigo)
+        for etiqueta, encabezado in (("Alto", "alto"), ("Largo", "largo"),
+                                     ("Diámetro 1", "diametro1"), ("Diámetro 2", "diametro2")):
+            medida = _texto(val(fila, encabezado))
+            try:
+                es_cero = float(medida) == 0
+            except (TypeError, ValueError):
+                es_cero = False
+            if medida and not es_cero:
+                _agregar_unico(g["medidas"][etiqueta], medida)
+        try:
+            costo = float(val(fila, "Precio"))
+            if costo > 0:
+                g["_costos"].add(costo)
+        except (TypeError, ValueError):
+            pass
+
+    sin_precio = inconsistentes = 0
+    for g in grupos.values():
+        if len(g["_costos"]) == 1:
+            g["costo"] = next(iter(g["_costos"]))
+        else:
+            g["costo"] = None
+            if len(g["_costos"]) > 1:
+                inconsistentes += 1
+                errores.append(_error_cauplas(g["filas_origen"][0], g["clave"], {},
+                                               "Precios diferentes dentro del SKU"))
+            else:
+                sin_precio += 1
+        del g["_costos"]
+
+    return ResultadoCatalogo(
+        list(grupos.values()), "master_cauplas", filas_master, validas,
+        len([e for e in errores if e["motivo"] in {
+            "Inicio y Fin deben ser años enteros entre 1900 y 2100",
+            "Inicio es mayor que Fin", "Fecha no coincide con Inicio y Fin",
+        }]), duplicados, True, sin_precio, inconsistentes, errores,
+        len(sku_observados), universales,
+    )
 
 
 def _leer_master(ws) -> ResultadoCatalogo:
@@ -209,6 +397,11 @@ def _leer_legado(wb, perfil):
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     try:
+        hoja_cauplas = _hoja_cauplas(wb)
+        if hoja_cauplas is not None:
+            return _leer_master_cauplas(hoja_cauplas)
+        if perfil.codigo_bodega == "CAUPLAS":
+            raise ValueError("El archivo no tiene la estructura esperada del master CAUPLAS")
         hoja_master = _hoja_master(wb)
         return _leer_master(hoja_master) if hoja_master is not None else _leer_legado(wb, perfil)
     finally: wb.close()

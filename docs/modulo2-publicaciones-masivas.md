@@ -6,6 +6,8 @@
 >
 > Para detección del master y el contrato `Producto` → `linea` → `por_linea`,
 > leer también `docs/master-kg-categorias-producto.md` completo.
+> Para tocar el master CAUPLAS, su validación, títulos, descripción o métricas,
+> leer también `docs/master-cauplas-publicaciones-masivas.md` completo.
 > Para tocar Precio, `Envio Gratis(si,no)`, las 36 columnas o `CONSTANTES`, leer
 > también `docs/envio-gratis-precio-final.md` completo.
 
@@ -13,6 +15,13 @@
 y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.
 🔴 **No toca la API de ML ni ningún dato del Módulo 1** — las 4 reglas de API no
 aplican aquí porque no hay una sola llamada de red.
+
+## Actualización 2026-08-31 — master CAUPLAS
+
+CAUPLAS está soportado mediante el formato independiente `master_cauplas`, detectado
+por encabezados antes de KG. La regla completa —columnas, años, `All`, títulos,
+descripción, precios, imágenes, filtros, métricas y aislamiento— vive en
+`docs/master-cauplas-publicaciones-masivas.md` y debe leerse completa antes de tocarlo.
 
 ## Actualización 2026-08-27 — nuevo master KG
 
@@ -222,14 +231,20 @@ El catálogo legado no trae fotos y en ese formato siguen vacías. El master nue
 sí incluye Imagen 1–5 y el generador las copia automáticamente; Imagen 6–10
 permanece vacía.
 
-### 5.3 Sólo hay perfil de KG
+### 5.3 Hay perfiles de KG y CAUPLAS
 
-`PERFILES` en `perfiles_catalogo.py` tiene **sólo KeepOnGreen**. Los otros 4
-proveedores dan **400 con mensaje claro**, no un archivo mal armado.
+`PERFILES` en `perfiles_catalogo.py` tiene **KeepOnGreen y CAUPLAS**. KIM, AG y
+VAZLO dan **400 con mensaje claro**, no un archivo mal armado.
 
 **Agregar uno es escribir un perfil (dónde vive cada columna), no un módulo
 nuevo:** el parseo del catálogo es lo único específico por proveedor; la
 expansión, la descripción, el cruce y la generación son motor común.
+
+El master CAUPLAS se detecta por encabezados antes del detector KG y se reporta
+como `master_cauplas`. Su línea base es 15,612 filas, 4,214 SKU observados, 370
+universales, 15,202 compatibilidades con años y 40 exclusiones. Consolida I/J,
+OEM, equivalencias U–Z y medidas de mangueras; no usa la columna de nombres PNG,
+por lo que Imagen 1–10 quedan vacías.
 
 ### 5.4 La categoría de ML se escribe a mano
 
