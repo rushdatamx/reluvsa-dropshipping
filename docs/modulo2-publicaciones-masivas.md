@@ -10,11 +10,18 @@
 > leer también `docs/master-cauplas-publicaciones-masivas.md` completo.
 > Para tocar Precio, `Envio Gratis(si,no)`, las 36 columnas o `CONSTANTES`, leer
 > también `docs/envio-gratis-precio-final.md` completo.
+> Para tocar URLs, red, resolución o columnas Imagen 1–10, leer también
+> `docs/validacion-imagenes-catalogo.md` completo.
 
 **Qué es:** un transformador **Excel → Excel**. Toma el catálogo de un proveedor
 y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.
-🔴 **No toca la API de ML ni ningún dato del Módulo 1** — las 4 reglas de API no
-aplican aquí porque no hay una sola llamada de red.
+🔴 **No toca la API de ML ni ningún dato del Módulo 1**. Cuando el catálogo o el
+CSV auxiliar aporta URLs, existe una excepción controlada: las valida contra los hosts
+exactos declarados en su perfil, confirma que respondan como imagen y que ambos
+lados midan al menos 1200 px. Usa `GET` parcial, sin redirecciones ni destinos
+arbitrarios del Excel; no abre una capacidad genérica de red ni toca ML. Tiene
+un máximo de 25,000 URLs únicas y 4 minutos: una URL que no se confirma queda
+vacía, nunca sale como no verificada.
 
 ## Actualización 2026-08-31 — master CAUPLAS
 
@@ -22,6 +29,21 @@ CAUPLAS está soportado mediante el formato independiente `master_cauplas`, dete
 por encabezados antes de KG. La regla completa —columnas, años, `All`, títulos,
 descripción, precios, imágenes, filtros, métricas y aislamiento— vive en
 `docs/master-cauplas-publicaciones-masivas.md` y debe leerse completa antes de tocarlo.
+
+## Actualización 2026-09-03 — fotos CAUPLAS por CSV
+
+CAUPLAS exige además el CSV exportado de ImageKit con columnas `Name` y `URL`, tanto
+en análisis como en generación. `SKU.ext` ocupa Imagen1 y `SKU-2.ext`…`SKU-10.ext`
+sus posiciones posteriores. Primero se intenta el nombre completo contra un SKU existente;
+sólo después se interpreta el sufijo, para no romper SKU legítimos con guion numérico.
+La galería se copia a cada variante del SKU y el archivo puede llenar Imagen1–Imagen10.
+
+El CSV no crea SKU ni bloquea por una foto mala: URL repetida, más allá de la 10,
+sin match o inválida se omite y se reporta. La red sólo admite el host exacto
+`ik.imagekit.io`, HTTPS, sin redirecciones, respuesta de imagen y mínimo 1200×1200.
+KG conserva sus primeras cinco imágenes y no acepta el CSV. Contrato completo:
+`docs/master-cauplas-publicaciones-masivas.md` §11 y
+`docs/validacion-imagenes-catalogo.md`.
 
 ## Actualización 2026-08-27 — nuevo master KG
 
@@ -227,9 +249,12 @@ Confirmado por Gaby:
 > *"las subo a autozur, copio el link que me arroja y lo pongo, pero esto
 > seguiría siendo manual, es decir, que no venga en el excel creado"*
 
-El catálogo legado no trae fotos y en ese formato siguen vacías. El master nuevo
-sí incluye Imagen 1–5 y el generador las copia automáticamente; Imagen 6–10
-permanece vacía.
+El catálogo legado no trae fotos y en ese formato siguen vacías. Si un master
+aporta Imagen 1–5, el generador conserva cada posición sólo cuando la URL usa un
+dominio autorizado para ese proveedor, responde correctamente y mide al menos
+1200×1200. Se revisa una vez por URL única y no se desplazan las demás imágenes.
+Imagen 6–10 permanece vacía. La pantalla informa las válidas y cada causa de
+exclusión. Regla técnica completa: `docs/validacion-imagenes-catalogo.md`.
 
 ### 5.3 Hay perfiles de KG y CAUPLAS
 
@@ -243,8 +268,8 @@ expansión, la descripción, el cruce y la generación son motor común.
 El master CAUPLAS se detecta por encabezados antes del detector KG y se reporta
 como `master_cauplas`. Su línea base es 15,612 filas, 4,214 SKU observados, 370
 universales, 15,202 compatibilidades con años y 40 exclusiones. Consolida I/J,
-OEM, equivalencias U–Z y medidas de mangueras; no usa la columna de nombres PNG,
-por lo que Imagen 1–10 quedan vacías.
+OEM, equivalencias U–Z y medidas de mangueras. La columna PNG del master sigue
+sin usarse; las fotos provienen exclusivamente del CSV obligatorio de ImageKit.
 
 ### 5.4 La categoría de ML se escribe a mano
 
@@ -257,7 +282,8 @@ familias (radiadores y bombas no van en la misma categoría), habría que mapear
 ## 6. Cómo lo usa Gaby
 
 1. **Publicaciones masivas** en el menú → elige proveedor
-2. Sube el **catálogo** y (opcional) el reporte de **Publicaciones ML**
+2. Sube el **catálogo**, para CAUPLAS también el CSV obligatorio de ImageKit, y
+   opcionalmente el reporte de **Publicaciones ML**
 3. Ve variantes estimadas, existentes y faltantes, y **filtra por Producto**
 4. Ajusta marca, categoría y los % del precio
 5. **Descarga la plantilla**, revisa exclusiones/precios y la sube a ML

@@ -44,6 +44,7 @@ PERFILES: Dict[str, PerfilCatalogo] = {
         col_precio_costo=31,     # AF 'Precio' (costo sin IVA)
         anclas_header=("armadora", "modelo", "uso", "cauplas", "precio"),
         marca_ml="CAUPLAS",
+        dominios_imagenes=("ik.imagekit.io",),
     ),
     # KeepOnGreen — 'LISTA PRECIOS KG.xlsx', hoja 'KeepOnGreen® Ecommerce'.
     # Header en la fila 3; los datos arrancan en la 4. Medido: 3,676 piezas.

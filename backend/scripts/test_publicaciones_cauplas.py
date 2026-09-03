@@ -10,6 +10,7 @@ import openpyxl
 from services.generador_plantilla import (
     COLUMNAS, ConfiguracionProveedor, generar_filas_con_reporte, escribir_xlsx,
 )
+from services.imagenes_cauplas import asignar_imagenes_cauplas, leer_imagenes_cauplas
 from services.parser_catalogo import cruzar_variantes, leer_catalogo_detallado, leer_publicaciones
 from services.perfiles_catalogo import perfil_de, proveedores_soportados
 
@@ -65,6 +66,39 @@ print("\n=== 1. PERFIL Y DETECCIÓN ===")
 check("CAUPLAS y KG son proveedores soportados", proveedores_soportados() == ["CAUPLAS", "KG"])
 check("la marca predeterminada de CAUPLAS es editable desde CAUPLAS",
       perfil_de("CAUPLAS").marca_ml == "CAUPLAS")
+check("CAUPLAS sólo autoriza fotos de ImageKit",
+      perfil_de("CAUPLAS").dominios_imagenes == ("ik.imagekit.io",))
+
+print("\n=== 1B. CSV DE IMÁGENES CAUPLAS ===")
+csv_imagenes = """Name,URL
+2522.jpg,https://ik.imagekit.io/cauplas/2522.jpg
+2522-2.jpg,https://ik.imagekit.io/cauplas/2522-2.jpg
+2522-3.jpg,https://ik.imagekit.io/cauplas/2522-3.jpg
+7498.jpg,https://ik.imagekit.io/cauplas/7498.jpg
+7498-2.jpg,https://ik.imagekit.io/cauplas/7498-2.jpg
+SKU-2.jpg,https://ik.imagekit.io/cauplas/sku-guion.jpg
+2522-4.jpg,https://ik.imagekit.io/cauplas/2522-2.jpg
+2522-11.jpg,https://ik.imagekit.io/cauplas/fuera-de-rango.jpg
+SIN-SKU.jpg,https://ik.imagekit.io/cauplas/sin-match.jpg
+"""
+galerias, resumen = leer_imagenes_cauplas(csv_imagenes.encode(), {"2522", "7498", "SKU-2"})
+check("ordena portada y fotos posteriores por sufijo",
+      galerias["2522"][:3] == [
+          "https://ik.imagekit.io/cauplas/2522.jpg", "https://ik.imagekit.io/cauplas/2522-2.jpg",
+          "https://ik.imagekit.io/cauplas/2522-3.jpg"], galerias["2522"])
+check("7498 llena Imagen1 e Imagen2", galerias["7498"][:2] == [
+      "https://ik.imagekit.io/cauplas/7498.jpg", "https://ik.imagekit.io/cauplas/7498-2.jpg"])
+check("el SKU completo con guion numérico gana al sufijo",
+      galerias["SKU-2"][0] == "https://ik.imagekit.io/cauplas/sku-guion.jpg" and not galerias["SKU-2"][1])
+check("omite URLs repetidas, más de diez y nombres sin match",
+      resumen["urls_detectadas"] == 9 and resumen["urls_validas"] == 6 and
+      resumen["urls_omitidas"] == 3 and resumen["urls_sin_match"] == 1, resumen)
+try:
+    leer_imagenes_cauplas(b"SKU,URL\n2522,https://ik.imagekit.io/a.jpg\n", {"2522"})
+    encabezados_invalidos = False
+except ValueError:
+    encabezados_invalidos = True
+check("CSV sin encabezado Name se rechaza", encabezados_invalidos)
 
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Master renombrado"
 ws.append([f"  {h.upper()}  " if h else h for h in HEADERS])
@@ -145,12 +179,21 @@ publicados = leer_publicaciones(guardar(pub)); cruce = cruzar_variantes(filas, p
 check("cruce SKU+título reconoce paquetes separados por &", len(cruce["existentes"]) == 1)
 
 salida = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); salida.close()
+galeria_500, _ = leer_imagenes_cauplas(
+    b"Name,URL\n500.jpg,https://ik.imagekit.io/cauplas/500.jpg\n500-2.jpg,https://ik.imagekit.io/cauplas/500-2.jpg\n",
+    {"500", "NO-MANG", "INC"},
+)
+asignar_imagenes_cauplas(filas, galeria_500)
+check("las variantes del mismo SKU conservan idéntica galería",
+      len({tuple(f.imagenes) for f in filas if f.sku == "500"}) == 1)
 escribir_xlsx(filas, cfg, salida.name)
 wo = openpyxl.load_workbook(salida.name, data_only=True); so = wo.active
 encabezados = [c.value for c in so[1]]; idx = {h: i + 1 for i, h in enumerate(encabezados)}
 check("plantilla conserva exactamente 36 columnas", encabezados == COLUMNAS and len(encabezados) == 36)
-check("las diez imágenes CAUPLAS quedan vacías",
-      all(so.cell(2, idx[f"Imagen{i}"]).value is None for i in range(1, 11)))
+check("CAUPLAS escribe hasta diez imágenes y conserva posición",
+      so.cell(2, idx["Imagen1"]).value == "https://ik.imagekit.io/cauplas/500.jpg" and
+      so.cell(2, idx["Imagen2"]).value == "https://ik.imagekit.io/cauplas/500-2.jpg" and
+      so.cell(2, idx["Imagen3"]).value is None)
 check("stock queda exclusivamente en CAUPLAS",
       so.cell(2, idx["CAUPLAS"]).value == 10 and
       all(so.cell(2, idx[b]).value == 0 for b in ("AG", "KG", "KIM", "MATRIZ", "VAZLO")))

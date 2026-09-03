@@ -15,6 +15,8 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-09-03](#2026-09-03--cauplas-fotos-por-csv-de-imagekit-en-publicaciones-masivas) | CAUPLAS: fotos por CSV de ImageKit | ✅ Implementado; pendiente de este push a `main` para Vercel |
+| [2026-09-03](#2026-09-03--validación-universal-de-imágenes-en-publicaciones-masivas) | Validación universal de imágenes | ✅ Enviado a `main` (`1a1ac1b`); Vercel debe desplegarlo |
 | [2026-08-31](#2026-08-31--cauplas-en-publicaciones-masivas) | Módulo 2: master CAUPLAS | ✅ Implementado; despliegue iniciado con este cierre |
 | [2026-08-28](#2026-08-28--envío-gratis-según-el-precio-final) | Módulo 2: Envío Gratis según precio final | ✅ Desplegado |
 | [2026-08-25](#2026-08-25--cauplas-cruza-por--de-venta-timbrado-en-xml) | CAUPLAS: # de venta timbrado en XML | ✅ Desplegado; backfill pendiente de aprobación |
@@ -38,6 +40,69 @@
 | [2026-06-02/03](#p1-cerrado-paso-d-confirmado-end-to-end-en-producción-2026-06-03) | Deploy Railway + parsers reales | ✅ Cerrado |
 | [2026-06-01](#8bis-estado-anterior-histórico-2026-06-01-superado-por-la-sección-8) | Snapshot pre-deploy | ✅ Superado |
 | [Pasos P1–P4](#9-siguientes-pasos-orden-recomendado) | Los 4 pendientes originales | ✅ Todos cerrados |
+
+---
+
+## 2026-09-03 — CAUPLAS: fotos por CSV de ImageKit en Publicaciones Masivas
+
+**Pedido operativo:** CAUPLAS ya tenía su master y sus variantes correctas, pero
+la columna O sólo trae nombres `.png`, no URLs subibles a Mercado Libre. La
+operación necesitaba usar el export de ImageKit sin volver a pegar fotos a mano
+en cada publicación derivada del mismo SKU.
+
+**Decisión:** para CAUPLAS el CSV `Name,URL` es obligatorio tanto al analizar
+como al generar. `SKU.ext` es portada e `SKU-2.ext`… ocupan Imagen2…Imagen10.
+El nombre completo gana antes que el sufijo, para que un SKU real como `SKU-2`
+no se convierta por error en la segunda foto de `SKU`. Un SKU sin foto conserva
+las columnas vacías; no se inventan rutas a partir de la columna O.
+
+**Implementación:** `imagenes_cauplas.py` cruza sólo contra SKU existentes,
+deduplica, limita diez posiciones y copia la misma galería a todas las variantes.
+El análisis muestra SKU con fotos, URLs detectadas/cruzadas/omitidas, sin match y
+SKU del master sin foto. Al descargar, cada URL pasa la validación general: sólo
+`https://ik.imagekit.io`, host exacto, sin redirects, imagen comprobable y mínimo
+1200×1200. Las inválidas se vacían sin bloquear el XLSX ni desplazar posiciones.
+KG conserva íntegro su contrato de las primeras cinco imágenes.
+
+**Pruebas y seguridad:** CAUPLAS 37/37 (incluye 2522, 7498, guion numérico,
+duplicadas, más de diez y headers), KG 81/81, validación de imágenes 20/20 y
+build de frontend correctos. Auditoría `api-guardian`: **APROBADO**; no hay
+llamadas a ML, secretos ni escrituras externas.
+
+---
+
+## 2026-09-03 — Validación universal de imágenes en Publicaciones masivas
+
+**Pedido y evolución:** el nuevo master KG trae de una a cinco URLs por pieza,
+pero algunas ya no cargan o no cumplen el mínimo de Mercado Libre. El primer
+filtro sólo comprobaba disponibilidad de KG; se generalizó para que cualquier
+proveedor actual o futuro tenga la misma protección, sin convertir el Excel en
+un mecanismo para solicitar URLs arbitrarias.
+
+**Decisión:** una imagen sólo llega a la plantilla si responde por HTTPS desde
+un dominio declarado explícitamente en el `PerfilCatalogo`, su formato y tamaño
+pueden confirmarse y ambos lados miden al menos **1200 px**. La incertidumbre se
+resuelve excluyendo la imagen, no adivinando. KG declara `kgmedia.mx`; CAUPLAS
+no declara dominios porque su master actual no entrega URLs.
+
+**Implementación:** `validacion_imagenes.py` deduplica las URLs y las consulta
+en paralelo mediante `GET` con `Range` limitado a 64 KiB, nunca descarga la foto
+completa ni sigue redirecciones. Lee cabeceras de JPEG, PNG, WebP y GIF. Las
+imágenes inválidas se vacían en su posición original de Imagen 1–5; no se
+corren hacia otra columna. La respuesta de descarga y la UI desglosan válidas,
+no disponibles, resolución insuficiente, dominio no autorizado y formato no
+verificable.
+
+**Seguridad y límites:** se rechazan esquema no HTTPS, host que no sea exacto,
+subdominios, puertos alternos, credenciales y redirecciones. Se mantienen 16
+trabajadores, máximo 25,000 URLs, timeout individual de 5 s y plazo global de
+4 min. Ninguna llamada toca Mercado Libre, OAuth ni sus credenciales.
+
+**Cierre:** `backend/scripts/test_validacion_imagenes.py` (20/20), publicaciones
+masivas (81/81), CAUPLAS (30/30), guardián estático de ML y build de frontend
+pasaron. Auditoría `api-guardian`: **APROBADO**. Commit `1a1ac1b` se envió a
+`main`; los cambios locales no relacionados de documentación se dejaron fuera.
+La referencia técnica vigente es `docs/validacion-imagenes-catalogo.md`.
 
 ---
 

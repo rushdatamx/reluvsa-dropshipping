@@ -217,6 +217,12 @@ Esta regla resuelve detección, agrupación y filtrado por `Producto`. Quedan fu
 - la construcción y acortamiento de títulos;
 - cambios a publicaciones mediante la API de Mercado Libre.
 
+La limpieza de URLs de imagen es una operación separada de este alcance: durante
+la descarga se validan contra el allowlist del perfil, con HTTPS, sin seguir
+redirecciones y con mínimo 1200×1200; las fallidas se vacían. No modifica la
+detección, el agrupamiento ni las categorías de este documento. Ver
+`docs/validacion-imagenes-catalogo.md`.
+
 El Módulo 2 continúa siendo un transformador Excel → Excel y no realiza llamadas
 de red a Mercado Libre.
 

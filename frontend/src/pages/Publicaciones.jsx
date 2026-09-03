@@ -46,6 +46,7 @@ export default function Publicaciones() {
   const [proveedor, setProveedor] = useState('KG');
   const [catalogo, setCatalogo] = useState(null);
   const [publicacionesML, setPublicacionesML] = useState(null);
+  const [imagenesCauplas, setImagenesCauplas] = useState(null);
 
   const [analisis, setAnalisis] = useState(null);
   const [lineasSel, setLineasSel] = useState([]);
@@ -79,7 +80,7 @@ export default function Publicaciones() {
     if (!catalogo) return;
     setCargando(true); setError(null); setAnalisis(null); setLineasSel([]);
     try {
-      const { data } = await pubAnalizar(proveedor, catalogo, publicacionesML);
+      const { data } = await pubAnalizar(proveedor, catalogo, publicacionesML, imagenesCauplas);
       setAnalisis(data);
     } catch (err) {
       setError(err.response?.data?.detail || 'No pude analizar el catálogo.');
@@ -96,6 +97,7 @@ export default function Publicaciones() {
         codigo_bodega: proveedor,
         catalogo,
         publicaciones_ml: publicacionesML,
+        imagenes_cauplas: imagenesCauplas,
         lineas: lineasSel.length ? JSON.stringify(lineasSel) : '',
         solo_faltantes: true,
         ...config,
@@ -137,6 +139,7 @@ export default function Publicaciones() {
     setProveedor(codigo);
     setAnalisis(null);
     setLineasSel([]);
+    setImagenesCauplas(null);
     setConfig((prev) => ({ ...prev, marca: marcas[codigo] || '' }));
   };
 
@@ -183,9 +186,16 @@ export default function Publicaciones() {
             <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                    onChange={(e) => setPublicacionesML(e.target.files?.[0] || null)} />
           </Campo>
+
+          {proveedor === 'CAUPLAS' && (
+            <Campo label="Archivo de imágenes CAUPLAS (.csv)" hint="Export de ImageKit con las columnas Name y URL; obligatorio">
+              <input type="file" accept=".csv,text/csv" className="w-full text-sm mt-2"
+                     onChange={(e) => setImagenesCauplas(e.target.files?.[0] || null)} />
+            </Campo>
+          )}
         </div>
 
-        <button onClick={analizar} disabled={!catalogo || cargando}
+        <button onClick={analizar} disabled={!catalogo || (proveedor === 'CAUPLAS' && !imagenesCauplas) || cargando}
                 className="mt-4 px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
           {cargando ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
           {cargando ? 'Analizando…' : 'Analizar catálogo'}
@@ -266,7 +276,19 @@ export default function Publicaciones() {
           {analisis.formato === 'master_cauplas' && (
             <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
               CAUPLAS consolida automáticamente equivalencias por marca, OEM y medidas para
-              mangueras. Este master no incorpora imágenes utilizables.
+              mangueras. Sus imágenes se cruzan por SKU desde el CSV de ImageKit.
+            </div>
+          )}
+
+          {analisis.fotos && (
+            <div className="mb-3 p-3 bg-blue-50 text-blue-900 rounded-lg text-xs">
+              <strong>Fotos CAUPLAS:</strong> {analisis.fotos.skus_con_fotos.toLocaleString('es-MX')} SKU con fotos,
+              {' '}{analisis.fotos.urls_detectadas.toLocaleString('es-MX')} URLs detectadas y
+              {' '}{analisis.fotos.urls_validas.toLocaleString('es-MX')} cruzadas.
+              {' '}{analisis.fotos.urls_omitidas.toLocaleString('es-MX')} omitidas
+              {' '}({analisis.fotos.urls_sin_match.toLocaleString('es-MX')} sin match) y
+              {' '}{analisis.fotos.sku_master_sin_foto.toLocaleString('es-MX')} SKU del master sin foto.
+              <span className="block mt-1">Las URLs se validarán al descargar: HTTPS, ImageKit, archivo de imagen y mínimo 1200×1200.</span>
             </div>
           )}
 
@@ -367,8 +389,9 @@ export default function Publicaciones() {
 
           <div className="mt-4 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
             {analisis.formato === 'master_cauplas' ? (
-              <><strong>CAUPLAS no incorpora imágenes:</strong> Imagen 1–10 permanecerán vacías.
-              La descripción sí incluirá equivalencias y, cuando sea manguera, sus medidas.</>
+              <><strong>CAUPLAS llena Imagen 1–10 desde el CSV de ImageKit.</strong> Las URLs inválidas,
+              inaccesibles o sin cruce se omiten sin impedir la descarga. La descripción sí incluirá
+              equivalencias y, cuando sea manguera, sus medidas.</>
             ) : (
               <><strong>Imagen 1–5 se conservan desde el catálogo cuando existan</strong> y sólo pasan si el dominio está autorizado, responden y miden al menos 1200×1200.
               Imagen 6–10 permanecen vacías.</>

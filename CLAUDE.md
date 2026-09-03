@@ -514,10 +514,10 @@ Convenciones:
 - **Módulo 1 (conciliación venta↔envío↔factura): estable y en producción.** No quedan tareas
   grandes abiertas. La API de ML está viva, la sync automática corre sola cada 30 min, y la BD
   de prod ronda ~58,700 ventas / ~55,900 envíos.
-- **Módulo 2 (publicaciones masivas): adaptado al nuevo master KG.** Acepta `BD_Catalogo`
-  (29,216 filas / 4,023 SKU), conserva el catálogo legado, cruza por SKU+título, copia cinco
-  imágenes y reporta exclusiones. El Envío Gratis se deriva del precio final por publicación.
-  Desplegado en producción. Ver §9 y el documento canónico.
+- **Módulo 2 (publicaciones masivas): KG y CAUPLAS listos.** KG conserva hasta cinco fotos
+  del master; CAUPLAS exige el CSV de ImageKit (`Name`, `URL`), lo cruza por SKU y llena hasta
+  Imagen1–Imagen10. Toda URL se valida por host exacto, HTTPS, imagen y resolución mínima.
+  El Envío Gratis se deriva del precio final por publicación. Ver §9 y los documentos canónicos.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 
@@ -658,11 +658,15 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 > métricas, leer **`docs/master-cauplas-publicaciones-masivas.md` completo**.
 > Antes de tocar la escritura de `Precio`, `Envio Gratis(si,no)`, `CONSTANTES` o las 36
 > columnas, leer **`docs/envio-gratis-precio-final.md` completo**.
+> Antes de tocar imágenes de catálogo, sus URLs, la red o Imagen 1–10, leer
+> **`docs/validacion-imagenes-catalogo.md` completo**.
 
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
 plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
-Módulo 1**: cero llamadas de red, así que las 4 reglas de API no aplican aquí. El único
-cambio al Módulo 1 son 2 líneas de wiring en `main.py`.
+Módulo 1**. Excepción acotada: si un catálogo aporta URLs de imagen, se aceptan sólo desde los
+hosts exactos declarados en su perfil, con HTTPS, sin redirecciones y con resolución confirmada
+de al menos 1200×1200. Usa un GET parcial, no es un cliente HTTP genérico ni autoriza llamadas
+a ML. Ver `docs/validacion-imagenes-catalogo.md`.
 
 **Formato vigente:** nuevo master KG, detectado por encabezados aunque se renombre la hoja
 (`BD_Catalogo` conserva preferencia), medido en **29,216 filas / 4,021 SKU utilizables / 9
@@ -703,8 +707,8 @@ dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo*
 AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
 
 ⬜ **Otros pendientes:** ya hay perfiles de **KG y CAUPLAS** (KIM, AG y VAZLO dan 400 con
-mensaje claro); el master KG copia Imagen 1–5, mientras CAUPLAS y el legado las dejan vacías;
-la **categoría de ML** se teclea y aplica a todo el archivo.
+mensaje claro); KG copia Imagen 1–5 y CAUPLAS cruza su CSV obligatorio de ImageKit hasta
+Imagen 1–10; el legado las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
 
 **Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 

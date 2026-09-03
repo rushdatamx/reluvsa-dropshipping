@@ -23,9 +23,11 @@ Las reglas fijas son:
 5. `All` significa compatibilidad universal y genera `Producto P/ Universal`.
 6. Una fila con años inválidos o contradictorios se excluye y reporta; no se adivina.
 7. Un costo ausente, no cacheado o contradictorio queda en `None`, nunca en cero.
-8. Las imágenes quedan vacías: la columna O sólo contiene nombres `.png`, no URLs.
+8. La columna O se ignora porque sólo contiene nombres `.png`; las imágenes llegan
+   exclusivamente del CSV obligatorio de ImageKit y se cruzan por SKU.
 9. La plantilla conserva exactamente 36 columnas y el stock va sólo en CAUPLAS.
-10. No se crean tablas, migraciones ni llamadas de red.
+10. No se crean tablas ni migraciones. La única red permitida es la validación
+    controlada de `https://ik.imagekit.io` descrita en §11.
 
 Estas reglas están fijadas en
 `backend/scripts/test_publicaciones_cauplas.py` y conviven con las 77 regresiones
@@ -221,8 +223,22 @@ reciben el stock elegido; AG, KG, KIM, MATRIZ y VAZLO reciben cero.
 ## 11. Imágenes
 
 O contiene valores como `7656.png`, no URLs públicas aceptadas por Mercado Libre.
-No se copian. Para CAUPLAS Imagen 1–10 quedan vacías. No construir rutas ni asumir
-un CDN a partir de esos nombres.
+No se copian ni se construyen rutas a partir de ellos. CAUPLAS exige un CSV de
+ImageKit con las columnas `Name` y `URL` en ambos endpoints. El nombre se cruza
+contra los SKU consolidados en este orden:
+
+1. `SKU.ext` es Imagen1.
+2. Se intenta primero el nombre completo (`SKU-2.ext` puede ser un SKU real).
+3. Sólo si no existe se interpreta `SKU-2.ext`, `SKU-3.ext`, etc. como Imagen2,
+   Imagen3 y así sucesivamente.
+
+Se guardan hasta diez posiciones, se omiten duplicados, colisiones, posiciones
+mayores a 10 y nombres sin SKU. La misma galería se copia a todas las variantes
+del SKU. Las URL se validan después con `filtrar_imagenes`: exclusivamente HTTPS
+en el host exacto `ik.imagekit.io`, sin redirecciones, con contenido de imagen y
+resolución mínima 1200×1200. Una foto inválida o inaccesible queda vacía; no
+interrumpe la descarga ni desplaza las demás. Ver
+`docs/validacion-imagenes-catalogo.md` para los límites y defensas SSRF.
 
 ## 12. Cruce contra Publicaciones ML
 
@@ -243,16 +259,19 @@ predeterminada de cada uno.
 
 `POST /api/publicaciones/analizar` devuelve `formato: master_cauplas` y conserva los
 campos usados por KG. Añade `universales` y reporta filas, SKU, compatibilidades,
-duplicados, precios, variantes, exclusiones y desglose por producto.
+duplicados, precios, variantes, exclusiones y desglose por producto. Exige
+`imagenes_cauplas` y devuelve además `fotos` con los contadores del cruce.
 
-`POST /api/publicaciones/generar` conserva el formulario existente. La marca vacía
-usa `CAUPLAS`; el campo sigue siendo editable.
+`POST /api/publicaciones/generar` exige el mismo campo `imagenes_cauplas`. La marca
+vacía usa `CAUPLAS`; el campo sigue siendo editable. Sus headers de validación
+reportan las URLs realmente aceptadas o eliminadas.
 
 La interfaz muestra para CAUPLAS:
 
 - compatibilidades universales;
 - aviso de equivalencias y medidas;
-- aviso de que no incorpora imágenes;
+- uploader obligatorio del CSV de ImageKit y resumen de su cruce;
+- aviso de que Imagen1–Imagen10 se llenan sólo después de validar las URLs;
 - SKU sin costo o con costos contradictorios;
 - filtro por categoría de producto.
 
@@ -274,10 +293,10 @@ Desde `backend/`:
 /usr/bin/python3 scripts/test_publicaciones_masivas.py
 ```
 
-Resultados fijados al crear esta referencia:
+Resultados fijados tras el CSV de imágenes:
 
-- CAUPLAS: 30/30.
-- KG: 77/77.
+- CAUPLAS: 37/37.
+- KG: 81/81.
 
 Desde `frontend/`:
 
@@ -294,6 +313,7 @@ autenticada disponible.
 - `backend/services/perfiles_catalogo.py`: registro y marca predeterminada.
 - `backend/services/parser_catalogo.py`: detección, validación y consolidación.
 - `backend/services/generador_plantilla.py`: títulos, descripción y variantes.
+- `backend/services/imagenes_cauplas.py`: lectura, cruce y asignación del CSV.
 - `backend/routers/publicaciones.py`: API, métricas, cruce y filtro.
 - `frontend/src/pages/Publicaciones.jsx`: presentación específica por formato.
 - `backend/scripts/test_publicaciones_cauplas.py`: contrato de regresión CAUPLAS.
@@ -303,10 +323,8 @@ autenticada disponible.
 
 Quedan fuera de esta regla:
 
-- conseguir o publicar imágenes CAUPLAS;
-- escribir publicaciones mediante la API de Mercado Libre;
+- publicar imágenes o modificar publicaciones mediante la API de Mercado Libre;
 - definir categorías MLM automáticamente;
 - inventar costo de envío por producto;
 - corregir el master de origen;
 - modificar el Módulo 1.
-

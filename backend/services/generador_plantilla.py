@@ -447,7 +447,8 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         ws.cell(f, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
         ws.cell(f, idx["Marca"], config.marca)
         ws.cell(f, idx["Modelo"], fila.sku)
-        for numero, imagen in enumerate(fila.imagenes[:5], 1):
+        limite_imagenes = 10 if bodega == "CAUPLAS" else 5
+        for numero, imagen in enumerate(fila.imagenes[:limite_imagenes], 1):
             if imagen: ws.cell(f, idx[f"Imagen{numero}"], imagen)
 
         for nombre, valor in CONSTANTES.items():
@@ -458,7 +459,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         for b in BODEGAS:
             ws.cell(f, idx[b], config.cantidad if b == bodega else 0)
 
-        # Imagen6..10 siempre quedan vacías. El master nuevo llena Imagen1..5.
+        # KG conserva Imagen1..5; CAUPLAS puede usar la galería completa de 10.
 
     ws.freeze_panes = "A2"
     for col, ancho in (("A", 58), ("M", 60), ("L", 18)):

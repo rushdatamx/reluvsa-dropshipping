@@ -121,11 +121,12 @@ export const mlNotificaciones = (limit = 20) =>
 // Módulo 2 — Publicaciones masivas (admin). Excel -> Excel, no toca la API de ML.
 export const pubProveedores = () => api.get('/publicaciones/proveedores');
 
-export const pubAnalizar = (codigoBodega, catalogo, publicacionesML) => {
+export const pubAnalizar = (codigoBodega, catalogo, publicacionesML, imagenesCauplas) => {
   const fd = new FormData();
   fd.append('codigo_bodega', codigoBodega);
   fd.append('catalogo', catalogo);
   if (publicacionesML) fd.append('publicaciones_ml', publicacionesML);
+  if (imagenesCauplas) fd.append('imagenes_cauplas', imagenesCauplas);
   return api.post('/publicaciones/analizar', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000,

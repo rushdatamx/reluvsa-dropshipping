@@ -24,6 +24,7 @@ from routers.auth import require_admin
 from services.generador_plantilla import (
     ConfiguracionProveedor, escribir_xlsx, generar_filas, generar_filas_con_reporte,
 )
+from services.imagenes_cauplas import asignar_imagenes_cauplas, leer_imagenes_cauplas
 from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_detallado,
                                       leer_publicaciones, leer_skus_publicados)
 from services.perfiles_catalogo import perfil_de, proveedores_soportados
@@ -111,6 +112,7 @@ async def analizar(
     codigo_bodega: str = Form(...),
     catalogo: UploadFile = File(...),
     publicaciones_ml: UploadFile = File(None),
+    imagenes_cauplas: UploadFile = File(None),
     _=Depends(require_admin),
 ):
     """Lee el catálogo y lo cruza contra lo ya publicado.
@@ -120,12 +122,23 @@ async def analizar(
     no se pudo cruzar).
     """
     perfil = _perfil_o_400(codigo_bodega)
+    if perfil.codigo_bodega == "CAUPLAS" and not imagenes_cauplas:
+        raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
+    if perfil.codigo_bodega != "CAUPLAS" and imagenes_cauplas:
+        raise HTTPException(status_code=400, detail="El archivo de imágenes sólo aplica para CAUPLAS.")
     ruta_cat = _guardar_tmp(catalogo)
     ruta_pub = _guardar_tmp(publicaciones_ml) if publicaciones_ml else None
 
     try:
         lectura = _leer_o_400(ruta_cat, perfil)
         piezas = lectura.piezas
+        fotos_cauplas = None
+        if perfil.codigo_bodega == "CAUPLAS":
+            try:
+                fotos_cauplas, resumen_fotos = leer_imagenes_cauplas(
+                    await imagenes_cauplas.read(), (p["clave"] for p in piezas))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
 
         publicados = set()
         if ruta_pub:
@@ -174,7 +187,8 @@ async def analizar(
                 "variantes_excluidas": len(reporte["exclusiones"]), "publicaciones_estimadas": len(filas),
                 "ya_publicadas": len(cruce_v["existentes"]), "faltantes": len(filas),
                 "aplicaciones_truncadas": 0, "envio_pendiente": envio_pendiente(),
-                "errores_total": len(errores), "errores": errores[:200], "por_linea": por_producto}
+                "errores_total": len(errores), "errores": errores[:200], "por_linea": por_producto,
+                **({"fotos": resumen_fotos} if fotos_cauplas is not None else {})}
 
         resultado = cruzar(piezas, publicados)
         por_linea = Counter(p["linea"] or "(sin línea)" for p in resultado["piezas_faltantes"])
@@ -206,6 +220,7 @@ async def generar(
     codigo_bodega: str = Form(...),
     catalogo: UploadFile = File(...),
     publicaciones_ml: UploadFile = File(None),
+    imagenes_cauplas: UploadFile = File(None),
     descripcion_base: str = Form(""),
     marca: str = Form(""),
     categoria_ml: str = Form(""),
@@ -220,12 +235,24 @@ async def generar(
 ):
     """Genera el .xlsx con las 36 columnas listo para subir a Mercado Libre."""
     perfil = _perfil_o_400(codigo_bodega)
+    if perfil.codigo_bodega == "CAUPLAS" and not imagenes_cauplas:
+        raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
+    if perfil.codigo_bodega != "CAUPLAS" and imagenes_cauplas:
+        raise HTTPException(status_code=400, detail="El archivo de imágenes sólo aplica para CAUPLAS.")
     ruta_cat = _guardar_tmp(catalogo)
     ruta_pub = _guardar_tmp(publicaciones_ml) if publicaciones_ml else None
 
     try:
         lectura = _leer_o_400(ruta_cat, perfil)
         piezas = lectura.piezas
+        galerias_cauplas = None
+        resumen_fotos = None
+        if perfil.codigo_bodega == "CAUPLAS":
+            try:
+                galerias_cauplas, resumen_fotos = leer_imagenes_cauplas(
+                    await imagenes_cauplas.read(), (p["clave"] for p in piezas))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
 
         if ruta_pub and solo_faltantes and lectura.formato == "legado":
             publicados = leer_skus_publicados(ruta_pub)
@@ -271,6 +298,8 @@ async def generar(
         )
 
         filas = generar_filas(piezas, config)
+        if galerias_cauplas is not None:
+            asignar_imagenes_cauplas(filas, galerias_cauplas)
         if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas:
@@ -308,6 +337,8 @@ async def generar(
                 "X-Imagenes-Resolucion-Insuficiente": str(imagenes["resolucion_insuficiente"]),
                 "X-Imagenes-Dominio-No-Autorizado": str(imagenes["dominio_no_autorizado"]),
                 "X-Imagenes-Formato-No-Verificable": str(imagenes["formato_no_verificable"]),
+                "X-Fotos-CAUPLAS-Detectadas": str((resumen_fotos or {}).get("urls_detectadas", 0)),
+                "X-Fotos-CAUPLAS-Sin-Match": str((resumen_fotos or {}).get("urls_sin_match", 0)),
             },
         )
     finally:
