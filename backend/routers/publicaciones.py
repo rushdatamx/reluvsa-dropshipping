@@ -10,6 +10,7 @@ Flujo de 3 pasos que ve Gaby:
   2. revisa el cruce: cuántas faltan, por línea de producto
   3. POST /api/publicaciones/generar   -> descarga el .xlsx listo para ML
 """
+import asyncio
 import json
 import shutil
 import tempfile
@@ -27,6 +28,7 @@ from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_de
                                       leer_publicaciones, leer_skus_publicados)
 from services.perfiles_catalogo import perfil_de, proveedores_soportados
 from services.precio_publicacion import ParametrosPrecio, envio_pendiente
+from services.validacion_imagenes import filtrar_imagenes
 
 router = APIRouter(prefix="/api/publicaciones", tags=["publicaciones"])
 
@@ -278,6 +280,18 @@ async def generar(
                         "cortadas en el catálogo del proveedor. Pídele el archivo completo."),
             )
 
+        # Toda URL se valida contra los hosts explícitos del perfil proveedor.
+        imagenes = {"revisadas": 0, "validas": 0, "eliminadas": 0,
+                    "no_disponibles": 0, "resolucion_insuficiente": 0,
+                    "dominio_no_autorizado": 0, "formato_no_verificable": 0}
+        if any(any(isinstance(url, str) and url.strip() for url in fila.imagenes) for fila in filas):
+            try:
+                # La validación hace red y puede tardar; no bloquea el event
+                # loop que atiende a los demás usuarios del portal.
+                imagenes = await asyncio.to_thread(filtrar_imagenes, filas, perfil.dominios_imagenes)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
         fd, destino = tempfile.mkstemp(suffix=".xlsx", dir=TMP_DIR)
         Path(destino).unlink(missing_ok=True)
         escribir_xlsx(filas, config, destino)
@@ -286,6 +300,15 @@ async def generar(
             destino,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"publicaciones_{codigo_bodega.lower()}_{len(filas)}.xlsx",
+            headers={
+                "X-Imagenes-Revisadas": str(imagenes["revisadas"]),
+                "X-Imagenes-Validas": str(imagenes["validas"]),
+                "X-Imagenes-Eliminadas": str(imagenes["eliminadas"]),
+                "X-Imagenes-No-Disponibles": str(imagenes["no_disponibles"]),
+                "X-Imagenes-Resolucion-Insuficiente": str(imagenes["resolucion_insuficiente"]),
+                "X-Imagenes-Dominio-No-Autorizado": str(imagenes["dominio_no_autorizado"]),
+                "X-Imagenes-Formato-No-Verificable": str(imagenes["formato_no_verificable"]),
+            },
         )
     finally:
         ruta_cat.unlink(missing_ok=True)

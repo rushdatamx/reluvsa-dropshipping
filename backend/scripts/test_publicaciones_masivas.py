@@ -24,6 +24,7 @@ from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_de
 from services.perfiles_catalogo import perfil_de
 import openpyxl
 from services.precio_publicacion import ParametrosPrecio, calcular_precio
+from services.validacion_imagenes import filtrar_imagenes_kg
 
 _ok = _fail = 0
 
@@ -327,6 +328,37 @@ out = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out.close(); es
 ow = openpyxl.load_workbook(out.name, data_only=True); os = ow.active
 check("xlsx copia Imagen1-5 y deja Imagen6 vacía", os.cell(2, 15).value == "img1" and os.cell(2, 19).value == "img5" and os.cell(2, 20).value is None)
 check("precio ausente queda celda vacía", os.cell(2, 3).value is None)
+
+print("\n=== 13. IMÁGENES KG: sólo URLs disponibles ===")
+imagenes_prueba = [
+    FilaPublicacion("Uno", "K1", "", 1, "", "", imagenes=[
+        "https://kgmedia.mx/images/si.jpg", "https://kgmedia.mx/images/no.jpg", "", "https://kgmedia.mx/images/si.jpg",
+    ]),
+    FilaPublicacion("Dos", "K1", "", 1, "", "", imagenes=[
+        "https://kgmedia.mx/images/no.jpg", "https://kgmedia.mx/images/si.jpg",
+    ]),
+]
+consultadas = []
+def imagen_falsa(url):
+    consultadas.append(url)
+    return url.endswith("si.jpg")
+res_imagenes = filtrar_imagenes_kg(imagenes_prueba, imagen_falsa)
+check("cada URL única se revisa una sola vez", set(consultadas) == {
+    "https://kgmedia.mx/images/si.jpg", "https://kgmedia.mx/images/no.jpg"}, consultadas)
+check("las URLs caídas se vacían sin desplazar las imágenes", imagenes_prueba[0].imagenes == [
+    "https://kgmedia.mx/images/si.jpg", "", "", "https://kgmedia.mx/images/si.jpg"], imagenes_prueba[0].imagenes)
+check("el reporte cuenta URLs válidas y eliminadas", res_imagenes == {
+    "revisadas": 2, "validas": 1, "eliminadas": 1, "no_disponibles": 1,
+    "resolucion_insuficiente": 0, "dominio_no_autorizado": 0,
+    "formato_no_verificable": 0}, res_imagenes)
+try:
+    filtrar_imagenes_kg([FilaPublicacion("Límite", "K2", "", 1, "", "", imagenes=[
+        "https://kgmedia.mx/images/uno.jpg", "https://kgmedia.mx/images/dos.jpg",
+    ])], imagen_falsa, limite_urls=1)
+    limite_imagenes = False
+except ValueError:
+    limite_imagenes = True
+check("un catálogo con demasiadas URLs se rechaza antes de abrir conexiones", limite_imagenes)
 
 print(f"\n{'='*54}")
 print(f"  {_ok} pasaron · {_fail} fallaron")

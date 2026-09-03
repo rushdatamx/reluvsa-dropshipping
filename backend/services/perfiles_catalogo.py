@@ -27,6 +27,7 @@ class PerfilCatalogo:
     # Ancla para reconocer el archivo por su contenido (candado de tipo).
     anclas_header: tuple = ()
     marca_ml: str = ""          # lo que va en la columna Marca de la plantilla
+    dominios_imagenes: tuple = () # hosts exactos autorizados para imágenes
 
 
 PERFILES: Dict[str, PerfilCatalogo] = {
@@ -58,6 +59,7 @@ PERFILES: Dict[str, PerfilCatalogo] = {
         col_precio_publico=9,    # J  'Precio Sugerido PMS (incluye IVA)'
         anclas_header=("clave", "aplicaciones principales", "gran mayoreo"),
         marca_ml="KeepOnGreen",
+        dominios_imagenes=("kgmedia.mx",),
     ),
 }
 

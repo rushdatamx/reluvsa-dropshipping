@@ -52,6 +52,7 @@ export default function Publicaciones() {
   const [cargando, setCargando] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [error, setError] = useState(null);
+  const [resultadoImagenes, setResultadoImagenes] = useState(null);
 
   const [config, setConfig] = useState({
     marca: '', categoria_ml: '', cantidad: 10,
@@ -89,9 +90,9 @@ export default function Publicaciones() {
 
   const generar = async () => {
     if (!catalogo) return;
-    setGenerando(true); setError(null);
+    setGenerando(true); setError(null); setResultadoImagenes(null);
     try {
-      const { data } = await pubGenerar({
+      const respuesta = await pubGenerar({
         codigo_bodega: proveedor,
         catalogo,
         publicaciones_ml: publicacionesML,
@@ -99,12 +100,25 @@ export default function Publicaciones() {
         solo_faltantes: true,
         ...config,
       });
+      const { data } = respuesta;
       const url = URL.createObjectURL(new Blob([data]));
       const a = document.createElement('a');
       a.href = url;
       a.download = `publicaciones_${proveedor.toLowerCase()}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
+      const revisadas = Number(respuesta.headers['x-imagenes-revisadas'] || 0);
+      if (revisadas) {
+        setResultadoImagenes({
+          revisadas,
+          validas: Number(respuesta.headers['x-imagenes-validas'] || 0),
+          eliminadas: Number(respuesta.headers['x-imagenes-eliminadas'] || 0),
+          noDisponibles: Number(respuesta.headers['x-imagenes-no-disponibles'] || 0),
+          resolucionInsuficiente: Number(respuesta.headers['x-imagenes-resolucion-insuficiente'] || 0),
+          dominioNoAutorizado: Number(respuesta.headers['x-imagenes-dominio-no-autorizado'] || 0),
+          formatoNoVerificable: Number(respuesta.headers['x-imagenes-formato-no-verificable'] || 0),
+        });
+      }
     } catch (err) {
       // El error viene como Blob porque pedimos responseType blob.
       let detalle = 'No pude generar la plantilla.';
@@ -356,15 +370,23 @@ export default function Publicaciones() {
               <><strong>CAUPLAS no incorpora imágenes:</strong> Imagen 1–10 permanecerán vacías.
               La descripción sí incluirá equivalencias y, cuando sea manguera, sus medidas.</>
             ) : (
-              <><strong>Imagen 1–5 se completan automáticamente</strong> desde el nuevo master KG.
-              Imagen 6–10 permanecen vacías. En el catálogo legado se conserva el comportamiento anterior.</>
+              <><strong>Imagen 1–5 se conservan desde el catálogo cuando existan</strong> y sólo pasan si el dominio está autorizado, responden y miden al menos 1200×1200.
+              Imagen 6–10 permanecen vacías.</>
             )}
           </div>
+
+          {resultadoImagenes && (
+            <div className="mt-3 p-3 bg-green-50 text-green-800 rounded-lg text-xs">
+              Se verificaron <strong>{resultadoImagenes.revisadas.toLocaleString('es-MX')} URLs únicas</strong>:
+              {' '}<strong>{resultadoImagenes.validas.toLocaleString('es-MX')}</strong> válidas.
+              {resultadoImagenes.eliminadas > 0 && <> Se quitaron <strong>{resultadoImagenes.eliminadas.toLocaleString('es-MX')}</strong>: {resultadoImagenes.noDisponibles} no disponibles, {resultadoImagenes.resolucionInsuficiente} con resolución menor a 1200×1200, {resultadoImagenes.dominioNoAutorizado} de dominio no autorizado y {resultadoImagenes.formatoNoVerificable} de formato no verificable.</>}
+            </div>
+          )}
 
           <button onClick={generar} disabled={generando}
                   className="mt-4 px-4 py-2 bg-reluvsa-yellow text-reluvsa-black rounded-lg text-sm font-bold hover:brightness-95 disabled:opacity-50 flex items-center gap-2">
             {generando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            {generando ? 'Generando…' : `Descargar plantilla (${publicacionesElegidas.toLocaleString('es-MX')} publicaciones)`}
+            {generando ? 'Verificando imágenes y generando…' : `Descargar plantilla (${publicacionesElegidas.toLocaleString('es-MX')} publicaciones)`}
           </button>
         </div>
       )}
