@@ -15,7 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
-| [2026-09-03](#2026-09-03--cauplas-fotos-por-csv-de-imagekit-en-publicaciones-masivas) | CAUPLAS: fotos por CSV de ImageKit | ✅ Implementado; pendiente de este push a `main` para Vercel |
+| [2026-09-03](#2026-09-03--cauplas-fotos-por-csv-de-imagekit-en-publicaciones-masivas) | CAUPLAS: fotos por CSV de ImageKit | ✅ Enviado a `main` (`0045aa4`); Vercel debe desplegarlo |
 | [2026-09-03](#2026-09-03--validación-universal-de-imágenes-en-publicaciones-masivas) | Validación universal de imágenes | ✅ Enviado a `main` (`1a1ac1b`); Vercel debe desplegarlo |
 | [2026-08-31](#2026-08-31--cauplas-en-publicaciones-masivas) | Módulo 2: master CAUPLAS | ✅ Implementado; despliegue iniciado con este cierre |
 | [2026-08-28](#2026-08-28--envío-gratis-según-el-precio-final) | Módulo 2: Envío Gratis según precio final | ✅ Desplegado |
@@ -67,7 +67,8 @@ KG conserva íntegro su contrato de las primeras cinco imágenes.
 **Pruebas y seguridad:** CAUPLAS 37/37 (incluye 2522, 7498, guion numérico,
 duplicadas, más de diez y headers), KG 81/81, validación de imágenes 20/20 y
 build de frontend correctos. Auditoría `api-guardian`: **APROBADO**; no hay
-llamadas a ML, secretos ni escrituras externas.
+llamadas a ML, secretos ni escrituras externas. Commit `0045aa4` enviado a
+`main`; Vercel queda disparado por el push.
 
 ---
 
