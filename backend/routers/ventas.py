@@ -1,6 +1,7 @@
 """Listado y consulta de ventas ML (admin) y pedidos pendientes (proveedor)."""
 import csv
 import io
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -93,6 +94,22 @@ def _piezas_carrito(r):
     """
     piezas = r["pack_piezas"] if r["pack_piezas"] is not None else r["unidades"]
     return piezas if piezas is not None else ""
+
+
+def _total_sin_iva(total_neto):
+    """Importe sin IVA para el CSV, con dos decimales.
+
+    ``total_neto`` ya es el total que ML deposita; este valor es únicamente una
+    presentación derivada para la exportación. Decimal evita que la precisión
+    binaria de float cambie el redondeo de un monto monetario.
+    """
+    if total_neto is None:
+        return ""
+    return str(
+        (Decimal(str(total_neto)) / Decimal("1.16")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    )
 
 
 def _fecha_corta(iso):
@@ -431,7 +448,7 @@ def export_csv(
         # el nombre que ML le da en su reporte. "Total (MXN)" es el neto que RELUVSA
         # recibe ya descontados cargos, envíos e impuestos (pedido de Gaby 2026-08-10).
         "Albaran", "SKU", "Deposito", "Fecha venta", "Estado", "Titulo", "Unidades",
-        "Ingresos por productos (MXN)", "Total (MXN)",
+        "Ingresos por productos (MXN)", "Total (MXN)", "Total sin IVA (MXN)",
         "Num envio", "Logistica", "Lugar indicado", "Bodega override", "Proveedor", "SLA",
         "Facturada", "Num factura",
         "Componentes kit",
@@ -461,6 +478,7 @@ def export_csv(
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
             r["total"] if r["total"] is not None else "",
             r["total_neto"] if r["total_neto"] is not None else "",
+            _total_sin_iva(r["total_neto"]),
             r["num_envio"] or "", _logistica_txt(r["logistic_type"]),
             r["lugar_indicado"] or "", r["lugar_override"] or "",
             r["proveedor_nombre"] or "", _sla_txt(r["cumplio_sla"]),
