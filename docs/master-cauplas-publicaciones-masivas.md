@@ -25,7 +25,8 @@ Las reglas fijas son:
 7. Un costo ausente, no cacheado o contradictorio queda en `None`, nunca en cero.
 8. La columna O se ignora porque sólo contiene nombres `.png`; las imágenes llegan
    exclusivamente del CSV obligatorio de ImageKit y se cruzan por SKU.
-9. La plantilla conserva exactamente 36 columnas y el stock va sólo en CAUPLAS.
+9. `stock` es obligatorio en el master, se valida por SKU y la plantilla conserva
+   exactamente 36 columnas; `Cantidad` y sólo CAUPLAS reciben ese stock.
 10. No se crean tablas ni migraciones. La única red permitida es la validación
     controlada de `https://ik.imagekit.io` descrita en §11.
 
@@ -71,7 +72,8 @@ repetidos. Las columnas operativas son:
 - M, `fin`: último año.
 - N, `cauplas`: SKU del proveedor.
 - O, `imagen`: nombre de archivo PNG; se ignora deliberadamente.
-- P–S, `alto`, `largo`, `diametro1`, `diametro2`: medidas sin unidad añadida.
+- P–S, `alto`, `largo`, `diametro1`, `diametro2`: medidas que se muestran con
+  `cm` para Alto/Largo y `mm` para los diámetros cuando el valor no trae unidad.
 - U–Z: equivalencias Continental, Dayco, Gates, KeepOnGreen, Meisterzats y Tepeyac.
 - AA, `oe`: códigos OEM.
 - AB, `compatibilidad`: texto informativo; no es fuente de años.
@@ -82,7 +84,17 @@ un CAUPLAS incompleto cuando conserva al menos cinco anclas entre armadora, mode
 uso, fecha, cauplas, oe y Precio. Eso evita que un archivo parcialmente exportado
 caiga en KG o en el formato legado.
 
-## 4. Normalización y agrupamiento por SKU
+## 4. Normalización, stock y agrupamiento por SKU
+
+`stock` puede aparecer en cualquier posición del encabezado. Se normaliza igual
+que el resto de columnas y debe estar presente antes de analizar o generar. Sólo
+se aceptan enteros `>= 0`; un `10.0` numérico de Excel se interpreta como `10`.
+Vacío, texto, negativo o decimal genera una exclusión con fila, SKU y motivo.
+Si las filas repetidas de un SKU no coinciden en stock, se excluye el SKU completo
+y se reporta la fila que introduce la diferencia. El stock `0` es válido.
+
+El valor validado se guarda en el objeto consolidado y se hereda en cada variante
+de publicación. No existe fallback a `10`, `5` ni a un campo de configuración.
 
 El SKU se toma de N y pasa por `_texto`:
 
@@ -195,8 +207,9 @@ Todas las variantes de un SKU comparten la misma descripción, en este orden:
 6. Descripción base de RELUVSA.
 
 En medidas se muestran Alto, Largo, Diámetro 1 y Diámetro 2. Los ceros y vacíos se
-omiten y no se inventan unidades. Si una medida tiene varios valores, se conservan
-todos separados por `|`.
+omiten. Alto y Largo reciben `cm`; Diámetro 1 y 2 reciben `mm`, sólo cuando el
+valor no ya expresa `mm`, `cm`, `pulgada` o `pulgadas`. Si una medida tiene varios
+valores, cada uno conserva o recibe su unidad y se separan con `|`.
 
 ## 10. Precio, Envío Gratis y stock
 
@@ -218,7 +231,8 @@ futuro trae la fórmula sin caché, el costo y Precio quedan vacíos.
 - precio vacío → Envío Gratis vacío.
 
 La salida mantiene las 36 columnas canónicas. `Cantidad` y la columna CAUPLAS
-reciben el stock elegido; AG, KG, KIM, MATRIZ y VAZLO reciben cero.
+reciben el stock del SKU; AG, KG, KIM, MATRIZ y VAZLO reciben cero. Para otro
+proveedor, sólo cambia la bodega que recibe el valor; no se usa un stock global.
 
 ## 11. Imágenes
 
@@ -260,7 +274,9 @@ predeterminada de cada uno.
 `POST /api/publicaciones/analizar` devuelve `formato: master_cauplas` y conserva los
 campos usados por KG. Añade `universales` y reporta filas, SKU, compatibilidades,
 duplicados, precios, variantes, exclusiones y desglose por producto. Exige
-`imagenes_cauplas` y devuelve además `fotos` con los contadores del cruce.
+`imagenes_cauplas`, exige `stock` en el master y devuelve además `fotos` con los
+contadores del cruce. Los errores de stock usan el mismo contrato de exclusiones
+que el resto de parsers.
 
 `POST /api/publicaciones/generar` exige el mismo campo `imagenes_cauplas`. La marca
 vacía usa `CAUPLAS`; el campo sigue siendo editable. Sus headers de validación
@@ -293,10 +309,10 @@ Desde `backend/`:
 /usr/bin/python3 scripts/test_publicaciones_masivas.py
 ```
 
-Resultados fijados tras el CSV de imágenes:
+Resultados fijados tras el stock por SKU y el CSV de imágenes:
 
-- CAUPLAS: 37/37.
-- KG: 81/81.
+- CAUPLAS: 38/38.
+- KG: 86/86.
 
 Desde `frontend/`:
 

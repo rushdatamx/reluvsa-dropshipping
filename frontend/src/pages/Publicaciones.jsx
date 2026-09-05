@@ -56,7 +56,7 @@ export default function Publicaciones() {
   const [resultadoImagenes, setResultadoImagenes] = useState(null);
 
   const [config, setConfig] = useState({
-    marca: '', categoria_ml: '', cantidad: 10,
+    marca: '', categoria_ml: '',
     iva: 0.16, utilidad: 0.5, comision_ml: 0.13, envio: 0,
     descripcion_base: DESCRIPCION_BASE_DEFAULT,
   });
@@ -347,10 +347,6 @@ export default function Publicaciones() {
             <Campo label="Categoría ML" hint="Ej. MLM163963">
               <input className={inputCls} value={config.categoria_ml}
                      onChange={(e) => setConfig({ ...config, categoria_ml: e.target.value })} />
-            </Campo>
-            <Campo label="Cantidad (stock)">
-              <input type="number" className={inputCls} value={config.cantidad}
-                     onChange={(e) => setConfig({ ...config, cantidad: +e.target.value })} />
             </Campo>
           </div>
 

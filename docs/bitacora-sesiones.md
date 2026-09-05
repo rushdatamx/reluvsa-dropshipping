@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-09-05](#2026-09-05--stock-por-sku-desde-el-master) | Módulo 2: stock por SKU desde el master | ✅ Implementado y documentado |
 | [2026-09-03](#2026-09-03--cauplas-fotos-por-csv-de-imagekit-en-publicaciones-masivas) | CAUPLAS: fotos por CSV de ImageKit | ✅ Enviado a `main` (`0045aa4`); Vercel debe desplegarlo |
 | [2026-09-03](#2026-09-03--validación-universal-de-imágenes-en-publicaciones-masivas) | Validación universal de imágenes | ✅ Enviado a `main` (`1a1ac1b`); Vercel debe desplegarlo |
 | [2026-08-31](#2026-08-31--cauplas-en-publicaciones-masivas) | Módulo 2: master CAUPLAS | ✅ Implementado; despliegue iniciado con este cierre |
@@ -2459,3 +2460,45 @@ webhooks, ventas, facturas o matcher.
 
 La regla completa para futuros cambios quedó en
 `docs/master-cauplas-publicaciones-masivas.md`.
+
+# 2026-09-05 — Stock por SKU desde el master
+
+## El pedido y el diagnóstico
+
+El flujo de Publicaciones Masivas todavía tenía una cantidad global fija (10) en
+la configuración de la pantalla y en `POST /api/publicaciones/generar`. Eso hacía
+que todas las publicaciones de un proveedor compartieran inventario, aunque el
+master ya pudiera traer una existencia distinta por SKU.
+
+## Decisiones tomadas
+
+Se estableció `stock` como columna obligatoria del master para CAUPLAS, KG y
+lectores de catálogo futuros. La detección usa el encabezado normalizado sin
+depender de mayúsculas, espacios ni posición. El parser valida por SKU consolidado:
+acepta enteros no negativos y convierte `10.0` numérico de Excel a `10`; rechaza
+vacíos, texto, negativos y decimales. Stock `0` se conserva como válido. Si las
+filas repetidas del mismo SKU difieren, el SKU completo queda excluido.
+
+Cada exclusión conserva fila, clave y motivo. Se unificó el contrato de respuesta
+para que los parsers legado/futuros también devuelvan `errores_total` y `errores`,
+permitiendo que la interfaz muestre los registros descartados sin conocer el
+formato específico del proveedor.
+
+## Generación y UI
+
+El stock viaja del objeto consolidado a cada variante de publicación. En el Excel,
+`Cantidad` y la columna de bodega del proveedor reciben ese valor; las demás
+bodegas reciben `0`. Se retiró el campo «Cantidad (stock)» de `Publicaciones.jsx`
+y el parámetro `cantidad` del endpoint de generación. No existe fallback a 10, 5
+ni a otro valor manual.
+
+## Verificación
+
+- Regresión KG: **86/86**.
+- Regresión CAUPLAS: **38/38**, incluyendo encabezado ausente, vacío, texto,
+  negativo, decimal, cero, repetición consistente e inconsistente.
+- Build del frontend: correcto.
+- La documentación técnica quedó actualizada en
+  `docs/modulo2-publicaciones-masivas.md` y
+  `docs/master-cauplas-publicaciones-masivas.md`; el tablero vigente se actualizó
+  en `CLAUDE.md`.

@@ -502,7 +502,7 @@ Convenciones:
 
 ---
 
-## 8. Estado actual — tablero (último update: 2026-08-28)
+## 8. Estado actual — tablero (último update: 2026-09-05)
 
 > 🗺️ Esta sección es **sólo el tablero de qué está vivo hoy**. La narrativa histórica de cómo
 > se resolvió cada cosa (backfills, mediciones, hipótesis descartadas, cierres de sesión) se
@@ -517,7 +517,8 @@ Convenciones:
 - **Módulo 2 (publicaciones masivas): KG y CAUPLAS listos.** KG conserva hasta cinco fotos
   del master; CAUPLAS exige el CSV de ImageKit (`Name`, `URL`), lo cruza por SKU y llena hasta
   Imagen1–Imagen10. Toda URL se valida por host exacto, HTTPS, imagen y resolución mínima.
-  El Envío Gratis se deriva del precio final por publicación. Ver §9 y los documentos canónicos.
+  El Envío Gratis se deriva del precio final por publicación y el stock se toma por SKU desde
+  la columna obligatoria `stock` del master. Ver §9 y los documentos canónicos.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 
@@ -698,6 +699,11 @@ Principales" es una publicación; SKU, precio, descripción e imágenes se repit
    no recalcular el precio y no usar costo, línea, peso ni envío como criterio alterno. Aplica
    al master KG vigente y al catálogo KG legado porque ambos usan `escribir_xlsx`. Detalle y
    regresiones: `docs/envio-gratis-precio-final.md`.
+7. 🔴 **El stock viene exclusivamente del master**: `stock` es obligatorio, se valida como
+   entero `>= 0` (`10.0` numérico se acepta), se repite por todas las variantes del SKU y se
+   escribe en `Cantidad` y la bodega del proveedor. Vacío, texto, negativo, decimal o stock
+   inconsistente entre filas excluye el SKU completo y se muestra en `errores`; ya no existe
+   cantidad global en la UI ni en `/api/publicaciones/generar`.
 
 ⬜ **PENDIENTE PRINCIPAL — el costo de envío** (decisión de Mario: avanzar sin él).
 `ENVIO_POR_LINEA` está vacío y el default es 0.0 → **el precio sale sin envío y queda por

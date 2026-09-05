@@ -119,6 +119,7 @@ print("\n=== 5. EXPANSIÓN: una pieza -> N publicaciones ===")
 cfg = ConfiguracionProveedor(codigo_bodega="KG", marca="KeepOnGreen", categoria_ml="MLM163963")
 piezas = [{
     "clave": "KGP-1106", "linea": "BOMBA DE AGUA", "costo": 500.0,
+    "stock": 12,
     "aplicaciones": "GM AVALANCHE V8 5.3L 2007-2010 | V8 6.0L 2007-2009 | SILVERADO 1500 V8 4.8L 2007-2010",
 }]
 filas = generar_filas(piezas, cfg)
@@ -129,6 +130,7 @@ check("cada una tiene título DISTINTO", len({f.titulo for f in filas}) == 3)
 
 # Las truncadas no generan publicación salvo que se pidan explícitamente.
 piezas_t = [{"clave": "K1", "linea": "BOMBA DE AGUA", "costo": 100.0,
+             "stock": 12,
              "aplicaciones": "GM AVALANCHE V8 5.3L 2007-2010 | V8"}]
 check("las truncadas NO se publican por default", len(generar_filas(piezas_t, cfg)) == 1)
 check("incluir_truncadas=True sí las trae (para revisión)",
@@ -136,6 +138,7 @@ check("incluir_truncadas=True sí las trae (para revisión)",
 
 print("\n=== 6. TÍTULO: tope de 60 caracteres de Mercado Libre ===")
 largo = [{"clave": "K", "linea": "KIT BANDA DISTRIBUCION C/BOMBA", "costo": 100.0,
+          "stock": 12,
           "aplicaciones": "VOLKSWAGEN CROSSFOX SPORTLINE L4 1.6L 2005-2018"}]
 f = generar_filas(largo, cfg)[0]
 check(f"título recortado a {MAX_TITULO}", len(f.titulo) <= MAX_TITULO, f"{len(f.titulo)}: {f.titulo}")
@@ -214,15 +217,16 @@ check("el cruce ignora mayúsculas", cruzar([{"clave": "kgp-1449"}], {"KGP-1449"
 
 print("\n=== 10. NUEVO MASTER KG: validación y consolidación ===")
 headers = ["Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "Fin", "Clave",
-           "Especificaciones", "Caracteristicas", "Guia de Compradores", "OEM"] + [f"Imagen {i}" for i in range(1, 6)]
+           "Especificaciones", "Caracteristicas", "Guia de Compradores", "OEM"] + [f"Imagen {i}" for i in range(1, 6)] + [" Stock "]
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = "BD_Catalogo"; ws.append(headers)
 base = ["ACURA", "CL", "L4 2.2L", "Bomba  de Agua", 1997, 1997, 1997, "KGP-759",
-        "Aluminio", "Impulsor", "ACURA CL L4 2.2L 1997", "19200P0A003"] + [f"img{i}" for i in range(1, 6)]
+        "Aluminio", "Impulsor", "ACURA CL L4 2.2L 1997", "19200P0A003"] + [f"img{i}" for i in range(1, 6)] + [7]
 ws.append(base); ws.append(base)
 ws.append(["ACURA", "CL", "L4 2.3L", "bomba de agua", "1998-1999", 1998, 1999, "KGP-759",
-           "Aluminio", "Impulsor", "ACURA CL L4 2.3L 1998-1999", "ALT-002"] + [f"img{i}" for i in range(1, 6)])
+           "Altura: 40 | 45; Largo: 20 cm; Alto Flujo", "Diámetro: 6.9 Pulgadas | 111 mm; Ancho: 10",
+           "ACURA CL L4 2.3L 1998-1999", "ALT-002"] + [f"img{i}" for i in range(1, 6)] + [7])
 ws.append(["VW", "POLO", "L4 1.6L", "Toma de Agua", "2003-2001", 2003, 2001, "BAD",
-           "", "", "VW POLO", "-"] + [""] * 5)
+           "", "", "VW POLO", "-"] + [""] * 5 + [7])
 tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tmp.close(); wb.save(tmp.name)
 r = leer_catalogo_detallado(tmp.name, perfil_de("KG")); p = r.piezas[0]
 check("detecta el master en BD_Catalogo", r.formato == "master_kg")
@@ -231,6 +235,7 @@ check("descarta fila exactamente duplicada", r.duplicados_descartados == 1)
 check("excluye Inicio > Fin con fila y motivo", r.compatibilidades_invalidas == 1 and r.errores[0]["fila"] == 5)
 check("normaliza Producto y consolida OEM únicos", p["producto"] == "Bomba de Agua" and p["oems"] == ["19200P0A003", "ALT-002"])
 check("sin Precio se permite y queda costo vacío", not r.precio_presente and p["costo"] is None)
+check("el master KG incorpora el stock del SKU", p["stock"] == 7)
 
 # El nombre de la hoja no define el formato. También se normalizan espacios,
 # mayúsculas y acentos de los encabezados antes de reconocer la estructura.
@@ -257,6 +262,17 @@ check("un master incompleto no cae al catálogo legado",
       "parece ser el master KG" in error_incompleto and "Fin" in error_incompleto,
       error_incompleto)
 
+sin_stock = openpyxl.Workbook(); ss = sin_stock.active; ss.title = "BD_Catalogo"
+ss.append([h for h in headers if h != " Stock "])
+ss.append(base[:-1])
+t_sin_stock = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); t_sin_stock.close(); sin_stock.save(t_sin_stock.name)
+try:
+    leer_catalogo_detallado(t_sin_stock.name, perfil_de("KG"))
+    error_stock = ""
+except ValueError as exc:
+    error_stock = str(exc)
+check("master KG sin stock se rechaza antes de analizar", "stock" in error_stock.lower(), error_stock)
+
 print("\n=== 11. VARIANTES, DESCRIPCIÓN E IMÁGENES DEL MASTER ===")
 filas_n, reporte_n = generar_filas_con_reporte(r.piezas, cfg_desc)
 check("un año genera una sola variante", sum("1997" in f.titulo for f in filas_n) == 1)
@@ -265,9 +281,17 @@ check("ningún título lleva OEM ni Clave", all("19200" not in f.titulo and "KGP
 check("todos los títulos respetan 60", all(len(f.titulo) <= 60 for f in filas_n))
 check("todos los OEM van en descripción", all("OEM: 19200P0A003, ALT-002" in f.descripcion for f in filas_n))
 check("Imagen 1-5 se conserva", all(f.imagenes == [f"img{i}" for i in range(1, 6)] for f in filas_n))
+descripcion_master = filas_n[0].descripcion
+check("normaliza cada medida variable sin unidad",
+      "Altura: 40 cm | 45 cm" in descripcion_master and "Ancho: 10 cm" in descripcion_master,
+      descripcion_master)
+check("conserva unidades existentes y texto que no es medida",
+      "Largo: 20 cm" in descripcion_master and "Diámetro: 6.9 Pulgadas | 111 mm" in descripcion_master and
+      "Alto Flujo" in descripcion_master, descripcion_master)
 
 larga = [{"clave": "L1", "linea": "Kit de Banda de Distribución c/bomba",
           "producto": "Kit de Banda de Distribución c/bomba", "formato": "master_kg", "costo": None,
+          "stock": 12,
           "oems": [], "especificaciones": [], "caracteristicas": [], "imagenes": [""]*5,
           "compatibilidades": [{"armadora": "VOLKSWAGEN", "modelo": "CROSSFOX SPORTLINE",
           "motor": "L4 1.6L", "inicio": 2005, "fin": 2018, "guia": "", "fila": 2}]}]
@@ -311,7 +335,7 @@ except ValueError as exc:
 check("Gran Mayoreo fuera de R se rechaza", "inmediatamente después de Imagen 5" in error_fuera,
       error_fuera)
 
-wsp.cell(3, 18).value = 120
+wsp.cell(3, 19).value = 120
 wbp.save(tpp.name)
 rp = leer_catalogo_detallado(tpp.name, perfil_de("KG"))
 check("precios distintos del SKU no se eligen arbitrariamente",
@@ -328,6 +352,9 @@ out = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out.close(); es
 ow = openpyxl.load_workbook(out.name, data_only=True); os = ow.active
 check("xlsx copia Imagen1-5 y deja Imagen6 vacía", os.cell(2, 15).value == "img1" and os.cell(2, 19).value == "img5" and os.cell(2, 20).value is None)
 check("precio ausente queda celda vacía", os.cell(2, 3).value is None)
+idx_salida = {celda.value: celda.column for celda in os[1]}
+check("Cantidad y KG usan el stock de cada SKU", os.cell(2, idx_salida["Cantidad"]).value == 7 and
+      os.cell(2, idx_salida["KG"]).value == 7 and os.cell(2, idx_salida["CAUPLAS"]).value == 0)
 
 print("\n=== 13. IMÁGENES KG: sólo URLs disponibles ===")
 imagenes_prueba = [

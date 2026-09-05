@@ -19,6 +19,7 @@ MASTER_HEADERS = ("Armadora", "Modelo", "Motor", "Producto", "Año", "Inicio", "
                   "OEM", "Imagen 1", "Imagen 2", "Imagen 3", "Imagen 4", "Imagen 5")
 MASTER_ANCLAS = ("Armadora", "Modelo", "Producto", "Clave", "Inicio", "Fin")
 MASTER_HEADERS_COSTO = ("Gran Mayoreo", "Precio")
+STOCK_HEADER = "stock"
 
 CAUPLAS_HEADERS = (
     "armadora", "modelo", "cilindrada", "uso", "especificaciones", "fecha",
@@ -70,6 +71,52 @@ def _error(fila, valores, motivo):
             "armadora": _texto(valores.get("armadora")), "modelo": _texto(valores.get("modelo")),
             "anio": _texto(valores.get("anio")), "inicio": _texto(valores.get("inicio")),
             "fin": _texto(valores.get("fin")), "motivo": motivo}
+
+
+def _stock_entero(valor):
+    """Valida el inventario que llega desde Excel sin convertir decimales.
+
+    openpyxl entrega 10.0 como ``float``; ése sí representa el entero 10.
+    En cambio 10.5, texto y celdas vacías no pueden convertirse en inventario.
+    """
+    if valor is None or (isinstance(valor, str) and not valor.strip()):
+        return None, "Stock vacío"
+    if isinstance(valor, bool):
+        return None, "Stock debe ser un entero mayor o igual a cero"
+    if isinstance(valor, int):
+        numero = valor
+    elif isinstance(valor, float):
+        if not valor.is_integer():
+            return None, "Stock debe ser un entero mayor o igual a cero"
+        numero = int(valor)
+    else:
+        texto = _texto(valor)
+        if not re.fullmatch(r"[+-]?\d+", texto):
+            return None, "Stock debe ser un entero mayor o igual a cero"
+        numero = int(texto)
+    if numero < 0:
+        return None, "Stock debe ser un entero mayor o igual a cero"
+    return numero, None
+
+
+def _stocks_por_sku(registros, crear_error):
+    """Devuelve ``SKU -> stock`` y deja fuera cualquier SKU inconsistente."""
+    stocks, excluidos = {}, set()
+    for sku, filas in registros.items():
+        invalidas = [r for r in filas if r["motivo"]]
+        if invalidas:
+            excluidos.add(sku)
+            for registro in invalidas:
+                crear_error(registro, registro["motivo"])
+            continue
+        stock = filas[0]["stock"]
+        distinta = next((r for r in filas[1:] if r["stock"] != stock), None)
+        if distinta:
+            excluidos.add(sku)
+            crear_error(distinta, "Stock diferente dentro del SKU")
+            continue
+        stocks[sku] = stock
+    return stocks, excluidos
 
 
 def _anio_entero(valor):
@@ -173,8 +220,10 @@ def _validar_anios_cauplas(datos):
 
 def _leer_master_cauplas(ws) -> ResultadoCatalogo:
     valido, columnas = _headers_cauplas(ws)
-    if not valido:
+    if not valido or STOCK_HEADER not in columnas:
         faltan = [h for h in CAUPLAS_HEADERS if _normalizar(h) not in columnas]
+        if STOCK_HEADER not in columnas:
+            faltan.append("stock")
         raise ValueError(
             f"La hoja «{ws.title}» parece ser el master CAUPLAS, pero le faltan "
             "los encabezados requeridos: " + ", ".join(faltan)
@@ -184,7 +233,7 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
         i = columnas.get(_normalizar(nombre))
         return fila[i] if i is not None and i < len(fila) else None
 
-    grupos, errores, sku_observados = {}, [], set()
+    grupos, errores, sku_observados, stocks_registrados = {}, [], set(), {}
     filas_master = validas = universales = duplicados = 0
     max_col = max(columnas.values()) + 1
     for numero, fila in enumerate(ws.iter_rows(min_row=2, max_col=max_col, values_only=True), 2):
@@ -199,6 +248,10 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
         sku = _texto(datos["sku"])
         if sku:
             sku_observados.add(sku.upper())
+            stock, motivo_stock = _stock_entero(val(fila, STOCK_HEADER))
+            stocks_registrados.setdefault(sku.upper(), []).append({
+                "fila": numero, "stock": stock, "motivo": motivo_stock, "datos": datos,
+            })
         if not sku:
             errores.append(_error_cauplas(numero, sku, datos, "SKU CAUPLAS vacío"))
             continue
@@ -264,8 +317,15 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
         except (TypeError, ValueError):
             pass
 
+    def error_stock(registro, motivo):
+        errores.append(_error_cauplas(registro["fila"], registro["datos"]["sku"],
+                                      registro["datos"], motivo))
+
+    stocks, sku_stock_invalido = _stocks_por_sku(stocks_registrados, error_stock)
+    piezas = [g for clave, g in grupos.items() if clave not in sku_stock_invalido]
     sin_precio = inconsistentes = 0
-    for g in grupos.values():
+    for g in piezas:
+        g["stock"] = stocks[g["clave"].upper()]
         if len(g["_costos"]) == 1:
             g["costo"] = next(iter(g["_costos"]))
         else:
@@ -279,7 +339,7 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
         del g["_costos"]
 
     return ResultadoCatalogo(
-        list(grupos.values()), "master_cauplas", filas_master, validas,
+        piezas, "master_cauplas", filas_master, validas,
         len([e for e in errores if e["motivo"] in {
             "Inicio y Fin deben ser años enteros entre 1900 y 2100",
             "Inicio es mayor que Fin", "Fecha no coincide con Inicio y Fin",
@@ -290,20 +350,26 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
 
 def _leer_master(ws) -> ResultadoCatalogo:
     valido, columnas, encabezado_costo = _headers_master(ws)
-    if not valido:
+    if not valido or STOCK_HEADER not in columnas:
         faltan = [h for h in MASTER_HEADERS if _normalizar(h) not in columnas]
+        if STOCK_HEADER not in columnas:
+            faltan.append("stock")
         raise ValueError(
             f"La hoja «{ws.title}» parece ser el master KG, pero le faltan "
             "los encabezados requeridos: " + ", ".join(faltan)
         )
     costos_presentes = [h for h in MASTER_HEADERS_COSTO if _normalizar(h) in columnas]
-    if any(columnas[_normalizar(h)] != 17 for h in costos_presentes):
+    # Stock puede estar en cualquier posición; el costo no puede adelantarse a
+    # las columnas estructurales (en particular Imagen 5), pero ya no se fija
+    # a una letra absoluta.
+    idx_imagen5 = columnas[_normalizar("Imagen 5")]
+    if any(columnas[_normalizar(h)] < idx_imagen5 for h in costos_presentes):
         raise ValueError(
-            "Gran Mayoreo o Precio debe ser la última columna, "
+            "Gran Mayoreo o Precio debe ir después de Imagen 5; antes debía estar "
             "inmediatamente después de Imagen 5"
         )
     precio_presente = encabezado_costo is not None
-    grupos, errores, vistos, claves_master = {}, [], set(), set()
+    grupos, errores, vistos, claves_master, stocks_registrados = {}, [], set(), set(), {}
     filas_master = validas = duplicados = 0
 
     def val(fila, nombre):
@@ -318,7 +384,12 @@ def _leer_master(ws) -> ResultadoCatalogo:
                  ("motor", "Motor"), ("producto", "Producto"), ("anio", "Año"),
                  ("inicio", "Inicio"), ("fin", "Fin"), ("clave", "Clave"))}
         clave = _texto(datos["clave"]); inicio = _anio_entero(datos["inicio"]); fin = _anio_entero(datos["fin"])
-        if clave: claves_master.add(clave.upper())
+        if clave:
+            claves_master.add(clave.upper())
+            stock, motivo_stock = _stock_entero(val(fila, STOCK_HEADER))
+            stocks_registrados.setdefault(clave.upper(), []).append({
+                "fila": numero, "stock": stock, "motivo": motivo_stock, "datos": datos,
+            })
         if not clave:
             errores.append(_error(numero, datos, "Clave vacía")); continue
         if inicio is None or fin is None or not (1900 <= inicio <= 2100 and 1900 <= fin <= 2100):
@@ -361,8 +432,14 @@ def _leer_master(ws) -> ResultadoCatalogo:
                 if costo > 0: g["_costos"].add(costo)
             except (TypeError, ValueError): pass
 
+    def error_stock(registro, motivo):
+        errores.append(_error(registro["fila"], registro["datos"], motivo))
+
+    stocks, sku_stock_invalido = _stocks_por_sku(stocks_registrados, error_stock)
+    piezas = [g for clave, g in grupos.items() if clave not in sku_stock_invalido]
     inconsistentes = sin_precio = 0
-    for g in grupos.values():
+    for g in piezas:
+        g["stock"] = stocks[g["clave"].upper()]
         if len(g["_costos"]) == 1: g["costo"] = next(iter(g["_costos"]))
         else:
             g["costo"] = None
@@ -376,22 +453,42 @@ def _leer_master(ws) -> ResultadoCatalogo:
                                   "Imágenes inconsistentes dentro del SKU"))
         del g["_costos"], g["_imagenes_sets"]
     invalidas = sum(1 for e in errores if "Inicio" in e["motivo"])
-    return ResultadoCatalogo(list(grupos.values()), "master_kg", filas_master, validas, invalidas,
+    return ResultadoCatalogo(piezas, "master_kg", filas_master, validas, invalidas,
                              duplicados, precio_presente, sin_precio, inconsistentes, errores,
                              len(claves_master))
 
 
 def _leer_legado(wb, perfil):
-    ws = wb[perfil.nombre_hoja] if perfil.nombre_hoja else wb.worksheets[0]; piezas = []
-    for fila in ws.iter_rows(min_row=perfil.fila_header + 1, values_only=True):
+    ws = wb[perfil.nombre_hoja] if perfil.nombre_hoja else wb.worksheets[0]
+    encabezados = [c.value for c in next(ws.iter_rows(min_row=perfil.fila_header,
+                                                       max_row=perfil.fila_header))]
+    columnas = {_normalizar(valor): i for i, valor in enumerate(encabezados) if _texto(valor)}
+    if STOCK_HEADER not in columnas:
+        raise ValueError(f"La hoja «{ws.title}» no tiene el encabezado requerido: stock")
+    piezas, errores, stocks_registrados = [], [], {}
+    for numero, fila in enumerate(ws.iter_rows(min_row=perfil.fila_header + 1, values_only=True),
+                                  perfil.fila_header + 1):
         clave = _texto(fila[perfil.col_clave]) if len(fila) > perfil.col_clave else ""
         if not clave: continue
         celda = lambda i: fila[i] if i is not None and len(fila) > i else None
+        stock, motivo_stock = _stock_entero(celda(columnas[STOCK_HEADER]))
+        datos = {"clave": clave}
+        stocks_registrados.setdefault(clave.upper(), []).append({
+            "fila": numero, "stock": stock, "motivo": motivo_stock, "datos": datos,
+        })
         piezas.append({"clave": clave, "linea": _texto(celda(perfil.col_linea)),
             "aplicaciones": celda(perfil.col_aplicaciones), "costo": celda(perfil.col_precio_costo),
             "codigo_barras": _texto(celda(perfil.col_codigo_barras)),
             "precio_publico": celda(perfil.col_precio_publico), "formato": "legado"})
-    return ResultadoCatalogo(piezas, "legado", len(piezas), len(piezas))
+    filas_master = len(piezas)
+    stocks, sku_stock_invalido = _stocks_por_sku(
+        stocks_registrados,
+        lambda registro, motivo: errores.append(_error(registro["fila"], registro["datos"], motivo)),
+    )
+    piezas = [p for p in piezas if p["clave"].upper() not in sku_stock_invalido]
+    for pieza in piezas:
+        pieza["stock"] = stocks[pieza["clave"].upper()]
+    return ResultadoCatalogo(piezas, "legado", filas_master, len(piezas), errores=errores)
 
 
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:

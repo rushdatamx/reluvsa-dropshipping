@@ -205,6 +205,10 @@ async def analizar(
             "publicaciones_estimadas": len(filas),
             "aplicaciones_truncadas": len(truncadas) - len(filas),
             "envio_pendiente": envio_pendiente(),
+            # Todos los lectores, incluso los perfiles futuros de catálogo
+            # legado, exponen las exclusiones con el mismo contrato que los
+            # masters KG y CAUPLAS para que la pantalla las pueda mostrar.
+            "errores_total": len(lectura.errores), "errores": lectura.errores[:200],
             "por_linea": [
                 {"linea": l, "piezas": n} for l, n in por_linea.most_common()
             ],
@@ -224,7 +228,6 @@ async def generar(
     descripcion_base: str = Form(""),
     marca: str = Form(""),
     categoria_ml: str = Form(""),
-    cantidad: int = Form(10),
     iva: float = Form(0.16),
     utilidad: float = Form(0.50),
     comision_ml: float = Form(0.13),
@@ -290,7 +293,6 @@ async def generar(
             descripcion_base=descripcion_base,
             marca=marca or perfil.marca_ml,
             categoria_ml=categoria_ml,
-            cantidad=cantidad,
             params_precio=ParametrosPrecio(
                 iva=iva, utilidad=utilidad, comision_ml=comision_ml,
                 envio_default=envio,

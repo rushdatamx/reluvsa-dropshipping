@@ -56,7 +56,6 @@ BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO"]
 # "Envio Gratis" no pertenece aquí: se deriva del precio final de cada fila.
 CONSTANTES = {
     "Moneda(MXN,ARS,COP)": "MXN",
-    "Cantidad": 10,
     "Tipo Publicacion (clasica,premium)": "Clasica",
     "Condición(nuevo,usado)": "Nuevo",
     "Garantia(CANTIDAD [días, meses, años]_[FABRICA,VENDEDOR])": "2meses_vendedor",
@@ -76,7 +75,6 @@ class ConfiguracionProveedor:
     descripcion_base: str = ""      # el cuerpo fijo (garantía, horarios, facturación)
     marca: str = ""
     categoria_ml: str = ""          # 'MLM163963' — la categoría de ML
-    cantidad: int = 10
     params_precio: ParametrosPrecio = field(default_factory=ParametrosPrecio)
 
 
@@ -93,6 +91,7 @@ class FilaPublicacion:
     truncada: bool = False
     imagenes: List[str] = field(default_factory=list)
     fila_origen: Optional[int] = None
+    stock: int = 0
 
 
 # Alias aprobados para las líneas reales del master. Sólo se usan si el nombre
@@ -136,6 +135,56 @@ def _sin_acentos(txt):
     import unicodedata
     return "".join(c for c in unicodedata.normalize("NFD", str(txt).lower())
                    if unicodedata.category(c) != "Mn")
+
+
+# Estas unidades pertenecen a la descripción variable del catálogo, no al cuerpo
+# fijo que Gaby escribe para cada proveedor.  La etiqueta se reconoce sin
+# importar mayúsculas ni acentos; Diámetro conserva opcionalmente su índice.
+_ETIQUETA_MEDIDA_RE = re.compile(
+    r"(?P<etiqueta>(?:alto|altura|largo|ancho)|(?:di[aá]metro)(?:\s+\d+)?)"
+    r"(?P<separador>\s*(?::|=)\s*|\s+)"
+    r"(?P<valores>-?\d+(?:[.,]\d+)?(?:\s*(?:mm|cm|pulgadas?))?"
+    r"(?:\s*\|\s*-?\d+(?:[.,]\d+)?(?:\s*(?:mm|cm|pulgadas?))?)*)",
+    re.IGNORECASE,
+)
+_NUMERO_CON_UNIDAD_RE = re.compile(
+    r"(?P<numero>-?\d+(?:[.,]\d+)?)(?P<unidad>\s*(?:mm|cm|pulgadas?))?",
+    re.IGNORECASE,
+)
+
+
+def _unidad_de_medida(etiqueta: str) -> str:
+    """Devuelve la unidad acordada para una etiqueta de medida del catálogo."""
+    etiqueta = _sin_acentos(etiqueta)
+    return "mm" if etiqueta.startswith("diametro") else "cm"
+
+
+def _formatear_valores_medida(etiqueta: str, valores) -> str:
+    """Agrega la unidad a cada número sin unidad de una medida conocida.
+
+    Se usa tanto para la estructura de CAUPLAS como para texto libre de otros
+    masters. No transforma texto sin una cifra ni reescribe unidades existentes.
+    """
+    unidad = _unidad_de_medida(etiqueta)
+
+    def reemplazar(numero):
+        return numero.group(0) if numero.group("unidad") else f"{numero.group('numero')} {unidad}"
+
+    return _NUMERO_CON_UNIDAD_RE.sub(reemplazar, str(valores))
+
+
+def _normalizar_medidas_en_texto(texto) -> str:
+    """Normaliza sólo fragmentos `Alto/…: número` de datos variables.
+
+    Requerir una cifra junto a la etiqueta evita modificar expresiones como
+    ``Alto Flujo``. Cada cifra separada por ``|`` recibe su propia unidad.
+    """
+    def reemplazar(coincidencia):
+        return (coincidencia.group("etiqueta") + coincidencia.group("separador") +
+                _formatear_valores_medida(coincidencia.group("etiqueta"),
+                                           coincidencia.group("valores")))
+
+    return _ETIQUETA_MEDIDA_RE.sub(reemplazar, str(texto or ""))
 
 
 def _cilindrada(motor):
@@ -293,9 +342,13 @@ def _describir_master(pieza, config):
     guias = [c.get("guia") for c in pieza.get("compatibilidades", []) if c.get("guia")]
     if guias: partes += ["", "Compatibilidades:"] + list(dict.fromkeys(guias))
     if pieza.get("especificaciones"):
-        partes += ["", "Especificaciones:"] + pieza["especificaciones"]
+        partes += ["", "Especificaciones:"] + [
+            _normalizar_medidas_en_texto(valor) for valor in pieza["especificaciones"]
+        ]
     if pieza.get("caracteristicas"):
-        partes += ["", "Características:"] + pieza["caracteristicas"]
+        partes += ["", "Características:"] + [
+            _normalizar_medidas_en_texto(valor) for valor in pieza["caracteristicas"]
+        ]
     if config.descripcion_base: partes += ["", config.descripcion_base.strip()]
     return "\n".join(str(x).strip() for x in partes)
 
@@ -304,7 +357,8 @@ def _describir_cauplas(pieza, config):
     partes = ["Productos y especificaciones:"]
     for par in pieza.get("productos_especificaciones", []):
         producto, especificacion = par.get("producto", ""), par.get("especificacion", "")
-        partes.append(f"{producto} — {especificacion}" if especificacion else producto)
+        texto = f"{producto} — {especificacion}" if especificacion else producto
+        partes.append(_normalizar_medidas_en_texto(texto))
     if pieza.get("oems"):
         partes += ["", "OEM: " + " | ".join(pieza["oems"])]
     equivalencias = [(marca, codigos) for marca, codigos in pieza.get("equivalencias", {}).items()
@@ -317,7 +371,8 @@ def _describir_cauplas(pieza, config):
         medidas = [(nombre, valores) for nombre, valores in pieza.get("medidas", {}).items() if valores]
         if medidas:
             partes += ["", "Medidas:"]
-            partes += [f"{nombre}: {' | '.join(valores)}" for nombre, valores in medidas]
+            partes += [f"{nombre}: {' | '.join(_formatear_valores_medida(nombre, valor) for valor in valores)}"
+                       for nombre, valores in medidas]
     compatibilidades = []
     for compat in pieza.get("compatibilidades", []):
         if compat.get("universal"):
@@ -360,6 +415,7 @@ def generar_filas_con_reporte(piezas, config):
                         titulo, str(pieza.get("clave") or "").strip(), producto, precio,
                         descripcion, "Universal" if compat.get("universal") else
                         f"{compat.get('inicio')}-{compat.get('fin')}", False, [], compat.get("fila"),
+                        stock=pieza["stock"],
                     ))
             continue
         if pieza.get("formato") != "master_kg":
@@ -382,7 +438,7 @@ def generar_filas_con_reporte(piezas, config):
                 vistos.add(par)
                 filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
                     pieza.get("producto", ""), precio, descripcion, compat.get("guia", ""), False,
-                    pieza.get("imagenes", []), compat.get("fila")))
+                    pieza.get("imagenes", []), compat.get("fila"), stock=pieza["stock"]))
     return filas, {"exclusiones": exclusiones, "deduplicadas": deduplicadas}
 
 
@@ -413,6 +469,7 @@ def generar_filas(piezas, config: ConfiguracionProveedor,
                 descripcion=descripcion,
                 aplicacion=app.texto,
                 truncada=app.truncada,
+                stock=pieza["stock"],
             ))
 
     return filas
@@ -453,11 +510,11 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
 
         for nombre, valor in CONSTANTES.items():
             ws.cell(f, idx[nombre], valor)
-        ws.cell(f, idx["Cantidad"], config.cantidad)
+        ws.cell(f, idx["Cantidad"], fila.stock)
 
         # Stock en la bodega del proveedor, 0 en las demás.
         for b in BODEGAS:
-            ws.cell(f, idx[b], config.cantidad if b == bodega else 0)
+            ws.cell(f, idx[b], fila.stock if b == bodega else 0)
 
         # KG conserva Imagen1..5; CAUPLAS puede usar la galería completa de 10.
 

@@ -32,13 +32,13 @@ HEADERS = [
     "disposicion", "combustible", "uso", "especificaciones", "fecha", "inicio",
     "fin", "cauplas", "imagen", "alto", "largo", "diametro1", "diametro2", "apa",
     "continental", "dayco", "gates", "keepongreen", "meisterzats", "tepeyac", "oe",
-    "compatibilidad", "estatus", "abc", "codigo SAT", "Precio",
+    "compatibilidad", "estatus", "abc", "codigo SAT", "Precio", "  STOCK  ",
 ]
 
 
 def fila(sku, producto="Manguera Radiador", especificacion="Superior", fecha="2010-2012",
          inicio=2010, fin=2012, precio=100, armadora="GENERAL MOTORS", modelo="SILVERADO",
-         cilindrada="5.3L", medidas=(10, 40, 32, 32)):
+         cilindrada="5.3L", medidas=(10, 40, 32, 32), stock=10):
     valores = [None] * len(HEADERS)
     datos = {
         "armadora": armadora, "modelo": modelo, "cilindrada": cilindrada,
@@ -47,7 +47,7 @@ def fila(sku, producto="Manguera Radiador", especificacion="Superior", fecha="20
         "largo": medidas[1], "diametro1": medidas[2], "diametro2": medidas[3],
         "continental": "C-1 | C-2", "dayco": "D-1", "gates": "G-1",
         "keepongreen": "KG-1", "meisterzats": "M-1", "tepeyac": "T-1",
-        "oe": "OEM-1 | OEM-2", "Precio": precio,
+        "oe": "OEM-1 | OEM-2", "Precio": precio, "  STOCK  ": stock,
     }
     indices = {nombre: i for i, nombre in enumerate(HEADERS)}
     for nombre, valor in datos.items():
@@ -128,6 +128,14 @@ except ValueError as exc:
 check("master CAUPLAS incompleto se rechaza con encabezado faltante",
       "master CAUPLAS" in mensaje and "oe" in mensaje, mensaje)
 
+sin_stock = openpyxl.Workbook(); sin_stock.active.append([h for h in HEADERS if h != "  STOCK  "])
+try:
+    leer_catalogo_detallado(guardar(sin_stock), perfil_de("CAUPLAS"))
+    mensaje_stock = ""
+except ValueError as exc:
+    mensaje_stock = str(exc)
+check("master CAUPLAS sin stock se rechaza antes de analizar", "stock" in mensaje_stock.lower(), mensaje_stock)
+
 print("\n=== 2. CONSOLIDACIÓN Y DESCRIPCIÓN ===")
 wc = openpyxl.Workbook(); sc = wc.active; sc.append(HEADERS)
 sc.append(fila(500, especificacion="Superior", precio=100))
@@ -147,8 +155,10 @@ check("consolida combinaciones I/J distintas", "Superior" in f500.descripcion an
 check("OEM se separa con | y sin duplicados", "OEM: OEM-1 | OEM-2 | OEM-3" in f500.descripcion)
 check("equivalencias quedan separadas por marca y sin duplicados",
       "Continental: C-1 | C-2 | C-3" in f500.descripcion and "Dayco: D-1" in f500.descripcion)
-check("manguera incluye medidas no cero sin unidades",
-      "Alto: 10" in f500.descripcion and "Largo: 40 | 45" in f500.descripcion and "Diámetro 1: 32" in f500.descripcion)
+check("manguera añade cm a Alto/Largo y mm a cada diámetro",
+      "Alto: 10 cm" in f500.descripcion and "Largo: 40 cm | 45 cm" in f500.descripcion and
+      "Diámetro 1: 32 mm" in f500.descripcion and "Diámetro 2: 32 mm | 35 mm" in f500.descripcion,
+      f500.descripcion)
 fterm = next(f for f in filas if f.sku == "NO-MANG")
 check("producto que no es manguera omite medidas", "Medidas:" not in fterm.descripcion)
 check("costos contradictorios no se eligen arbitrariamente",
@@ -194,9 +204,27 @@ check("CAUPLAS escribe hasta diez imágenes y conserva posición",
       so.cell(2, idx["Imagen1"]).value == "https://ik.imagekit.io/cauplas/500.jpg" and
       so.cell(2, idx["Imagen2"]).value == "https://ik.imagekit.io/cauplas/500-2.jpg" and
       so.cell(2, idx["Imagen3"]).value is None)
+check("el Excel conserva las unidades de las medidas en descripción",
+      "Largo: 40 cm | 45 cm" in so.cell(2, idx["Descripcion"]).value and
+      "Diámetro 1: 32 mm" in so.cell(2, idx["Descripcion"]).value)
 check("stock queda exclusivamente en CAUPLAS",
-      so.cell(2, idx["CAUPLAS"]).value == 10 and
+      so.cell(2, idx["Cantidad"]).value == 10 and so.cell(2, idx["CAUPLAS"]).value == 10 and
       all(so.cell(2, idx[b]).value == 0 for b in ("AG", "KG", "KIM", "MATRIZ", "VAZLO")))
+
+print("\n=== 4B. STOCK POR SKU ===")
+stocks = openpyxl.Workbook(); ss = stocks.active; ss.append(HEADERS)
+ss.append(fila("ST-OK", stock=10.0)); ss.append(fila("ST-OK", fecha="2013", inicio=2013, fin=2013, stock=10))
+ss.append(fila("ST-0", stock=0)); ss.append(fila("ST-NEG", stock=-1))
+ss.append(fila("ST-DEC", stock=1.5)); ss.append(fila("ST-TXT", stock="mucho"))
+ss.append(fila("ST-DIF", stock=2)); ss.append(fila("ST-DIF", fecha="2013", inicio=2013, fin=2013, stock=3))
+rs = leer_catalogo_detallado(guardar(stocks), perfil_de("CAUPLAS"))
+check("10.0 se interpreta como entero y se repite en cada variante",
+      next(p for p in rs.piezas if p["clave"] == "ST-OK")["stock"] == 10 and
+      {f.stock for f in generar_filas_con_reporte(rs.piezas, cfg)[0] if f.sku == "ST-OK"} == {10})
+check("stock 0 es válido", next(p for p in rs.piezas if p["clave"] == "ST-0")["stock"] == 0)
+check("stock inválido o diferente excluye el SKU completo",
+      {"ST-NEG", "ST-DEC", "ST-TXT", "ST-DIF"}.isdisjoint({p["clave"] for p in rs.piezas}) and
+      {e["clave"] for e in rs.errores} >= {"ST-NEG", "ST-DEC", "ST-TXT", "ST-DIF"}, rs.errores)
 check("precio reutiliza la fórmula vigente y activa envío gratis",
       so.cell(2, idx["Precio"]).value == 200 and so.cell(2, idx["Envio Gratis(si,no)"]).value == "No",
       so.cell(2, idx["Precio"]).value)
@@ -204,14 +232,18 @@ check("precio reutiliza la fórmula vigente y activa envío gratis",
 print("\n=== 5. LÍNEA BASE REAL ===")
 real = Path(__file__).resolve().parents[2] / "archivos/publicaciones-masivas/master-cauplas.xlsx"
 if real.exists():
-    rr = leer_catalogo_detallado(real, perfil_de("CAUPLAS"))
-    check("master real: 15,612 filas", rr.filas_master == 15612, rr.filas_master)
-    check("master real: 4,214 SKU observados", rr.sku_unicos_master == 4214, rr.sku_unicos_master)
-    check("master real: 370 universales", rr.universales == 370, rr.universales)
-    check("master real: 15,202 compatibilidades con años", rr.compatibilidades_validas == 15202,
-          rr.compatibilidades_validas)
-    check("master real: 40 exclusiones por años", rr.compatibilidades_invalidas == 40,
-          rr.compatibilidades_invalidas)
+    try:
+        rr = leer_catalogo_detallado(real, perfil_de("CAUPLAS"))
+    except ValueError as exc:
+        check("master real histórico sin stock se rechaza", "stock" in str(exc).lower(), str(exc))
+    else:
+        check("master real: 15,612 filas", rr.filas_master == 15612, rr.filas_master)
+        check("master real: 4,214 SKU observados", rr.sku_unicos_master == 4214, rr.sku_unicos_master)
+        check("master real: 370 universales", rr.universales == 370, rr.universales)
+        check("master real: 15,202 compatibilidades con años", rr.compatibilidades_validas == 15202,
+              rr.compatibilidades_validas)
+        check("master real: 40 exclusiones por años", rr.compatibilidades_invalidas == 40,
+              rr.compatibilidades_invalidas)
 else:
     print("  · master real no disponible; se omite la línea base local")
 

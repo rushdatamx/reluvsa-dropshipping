@@ -45,10 +45,30 @@ KG conserva sus primeras cinco imágenes y no acepta el CSV. Contrato completo:
 `docs/master-cauplas-publicaciones-masivas.md` §11 y
 `docs/validacion-imagenes-catalogo.md`.
 
+## Actualización 2026-09-05 — stock por SKU desde el master
+
+El inventario dejó de ser un ajuste global de la pantalla. `stock` es ahora una
+columna obligatoria del catálogo para CAUPLAS, KG y cualquier perfil futuro; se
+detecta por encabezado normalizado (mayúsculas, espacios, acentos y posición no
+importan). El lector conserva el valor en cada SKU consolidado y lo propaga a
+todas sus publicaciones derivadas.
+
+La celda debe contener un entero mayor o igual a cero. Un valor numérico `10.0`
+de Excel se acepta como `10`; vacío, texto, negativo o decimal se rechaza. Si
+un SKU repetido trae stocks distintos, se excluye el SKU completo. Todas las
+exclusiones se devuelven con fila, clave y motivo para mostrarlas en la interfaz.
+Stock `0` es válido y se publica como agotado.
+
+En el XLSX de salida, `Cantidad` y la columna de bodega del proveedor reciben el
+stock del SKU; las otras bodegas reciben `0`. El endpoint `/api/publicaciones/generar`
+y la pantalla ya no aceptan ni envían una cantidad global. El endpoint de análisis
+expone también `errores_total` y `errores` para perfiles legado/futuros.
+
 ## Actualización 2026-08-27 — nuevo master KG
 
 El formato vigente es `nuevo-master-kg.xlsx`: una fila por compatibilidad y
-agrupación por `Clave`. Se detecta por sus 17 encabezados normalizados, aunque
+agrupación por `Clave`. Se detecta por sus 17 encabezados estructurales más
+`stock`, aunque
 la hoja ya no se llame `BD_Catalogo`; ese nombre conserva preferencia. Un archivo
 que parece master pero está incompleto se rechaza con los encabezados faltantes,
 en vez de interpretarse como legado. El catálogo KG anterior sigue aceptado por
