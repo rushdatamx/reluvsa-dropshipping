@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
     sku TEXT,
     deposito TEXT,
     fecha_venta TIMESTAMP,
+    -- Fecha original de creación de la orden en ML. Es sólo de auditoría:
+    -- la fecha efectiva visible y usada por el negocio sigue siendo fecha_venta
+    -- (= date_closed, con date_created como fallback mientras no cierre).
+    fecha_creacion_ml TIMESTAMP,
     estado TEXT,
     titulo TEXT,
     unidades INTEGER,
@@ -393,6 +397,7 @@ def init_database():
         _migrar_columna_albaran(cursor)
         _migrar_columna_pack_id(cursor)
         _migrar_columna_total_neto(cursor)
+        _migrar_columna_fecha_creacion_ml(cursor)
         _migrar_columna_logistic_type(cursor)
         _migrar_columna_num_venta_pdf(cursor)
         _migrar_columnas_num_venta_cauplas(cursor)
@@ -628,6 +633,19 @@ def _migrar_columna_total_neto(cursor):
     if "total_neto" not in cols:
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN total_neto REAL")
         print("[migracion] ventas_ml.total_neto agregada.")
+
+
+def _migrar_columna_fecha_creacion_ml(cursor):
+    """Agrega la fecha técnica `date_created` sin modificar ventas históricas.
+
+    El NULL de las filas preexistentes es intencional: identifica ventas legacy y
+    evita que una reconsulta incremental cambie parcialmente su fecha_venta. Las
+    ventas creadas por el sync nuevo sí guardan esta columna desde el INSERT.
+    """
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ventas_ml)").fetchall()}
+    if "fecha_creacion_ml" not in cols:
+        cursor.execute("ALTER TABLE ventas_ml ADD COLUMN fecha_creacion_ml TIMESTAMP")
+        print("[migracion] ventas_ml.fecha_creacion_ml agregada (sin backfill).")
 
 
 def _migrar_columna_pack_id(cursor):

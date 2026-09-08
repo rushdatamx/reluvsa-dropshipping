@@ -487,7 +487,9 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
     sku = primero.get("seller_sku") or primero.get("seller_custom_field")
     titulo = primero.get("title")
     unidades = sum(int(i.get("quantity") or 0) for i in items) or None
-    fecha = _fecha_api(order.get("date_created"))
+    fecha_creacion = _fecha_api(order.get("date_created"))
+    fecha_cierre = _fecha_api(order.get("date_closed"))
+    fecha_efectiva = fecha_cierre or fecha_creacion
     estado = _mapear_estado(order)
     total = order.get("total_amount")
     deposito = _deposito_de_orden(order, stores)
@@ -496,24 +498,33 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
     pack_id = str(order["pack_id"]) if order.get("pack_id") else None
 
     existe = conn.execute(
-        "SELECT num_venta FROM ventas_ml WHERE num_venta = ?", (num_venta,)
+        "SELECT num_venta, fecha_creacion_ml FROM ventas_ml WHERE num_venta = ?", (num_venta,)
     ).fetchone()
     if existe:
         conn.execute(
-            """UPDATE ventas_ml SET sku=?, deposito=COALESCE(?, deposito), fecha_venta=?, estado=?,
+            """UPDATE ventas_ml SET sku=?, deposito=COALESCE(?, deposito),
+                                    fecha_venta=CASE
+                                        WHEN fecha_creacion_ml IS NULL THEN fecha_venta
+                                        ELSE COALESCE(?, fecha_venta)
+                                    END,
+                                    fecha_creacion_ml=CASE
+                                        WHEN fecha_creacion_ml IS NULL THEN NULL
+                                        ELSE COALESCE(?, fecha_creacion_ml)
+                                    END,
+                                    estado=?,
                                     titulo=?, unidades=?, total=?, comprador=COALESCE(?, comprador),
                                     pack_id=COALESCE(?, pack_id),
                                     total_neto=COALESCE(?, total_neto)
                WHERE num_venta=?""",
-            (sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
+            (sku, deposito, fecha_efectiva, fecha_creacion, estado, titulo, unidades, total, receiver_name,
              pack_id, total_neto, num_venta),
         )
     else:
         conn.execute(
-            """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, estado, titulo,
-                                      unidades, total, comprador, pack_id, total_neto)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (num_venta, sku, deposito, fecha, estado, titulo, unidades, total, receiver_name,
+            """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, fecha_creacion_ml,
+                                      estado, titulo, unidades, total, comprador, pack_id, total_neto)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (num_venta, sku, deposito, fecha_efectiva, fecha_creacion, estado, titulo, unidades, total, receiver_name,
              pack_id, total_neto),
         )
 

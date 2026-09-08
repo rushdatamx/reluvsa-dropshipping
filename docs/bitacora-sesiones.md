@@ -2459,7 +2459,7 @@ webhooks, ventas, facturas o matcher.
 - Frontend: build de producción correcto.
 
 La regla completa para futuros cambios quedó en
-`docs/master-cauplas-publicaciones-masivas.md`.
+  `docs/master-cauplas-publicaciones-masivas.md`.
 
 # 2026-09-05 — Stock por SKU desde el master
 
@@ -2502,3 +2502,74 @@ ni a otro valor manual.
   `docs/modulo2-publicaciones-masivas.md` y
   `docs/master-cauplas-publicaciones-masivas.md`; el tablero vigente se actualizó
   en `CLAUDE.md`.
+
+# 2026-09-08 — Búsqueda de ventas por número de factura
+
+El buscador único de «Ventas y cruces» ahora también consulta el número visible de
+factura a partir de Serie/Folio del XML. El filtro usa un `EXISTS` sobre conceptos
+cruzados, contempla los formatos de KIM, CAUPLAS, KG, AG y VAZLO, y conserva la
+deduplicación y las restricciones existentes. Listado, contador, paginación y CSV
+siguen compartiendo `_construir_filtros`; no hubo llamadas nuevas a Mercado Libre ni
+cambios de esquema.
+
+Se actualizó el placeholder de la UI y se agregó `backend/scripts/test_filtro_factura.py`
+con pruebas de formatos visibles, búsquedas parciales, conceptos múltiples, facturas
+no cruzadas, filtros combinados y rol proveedor.
+
+## Verificación
+
+- Regresión factura: **16/16**.
+- Regresiones albarán y canceladas: **todas OK**.
+- Build de producción del frontend: correcto.
+- `git diff --check`: correcto.
+
+# 2026-09-08 — La fecha efectiva de venta viene de `date_closed`
+
+## El hallazgo
+
+La venta `2000018209888406` aparecía en el portal con una hora distinta a la que
+mostraba Mercado Libre. La investigación de la orden real confirmó que no era un
+problema de formato del frontend: el sincronizador estaba guardando siempre
+`order.date_created`, mientras que la fecha efectiva que ML enseña como venta es
+`order.date_closed`. Para esta orden, `2026-09-02T12:56:40-04:00` corresponde a
+`2026-09-02 10:56:40` en hora de México y coincide exactamente con la evidencia.
+
+## Decisión y protección del histórico
+
+Se fijó el contrato canónico: `ventas_ml.fecha_venta` usa `date_closed` y cae a
+`date_created` mientras una orden todavía no tenga cierre. Se agregó la columna
+nullable `fecha_creacion_ml` para conservar `date_created` como dato técnico de
+auditoría; no se muestra como una segunda fecha en la tabla.
+
+La migración no hace backfill. El `NULL` de `fecha_creacion_ml` identifica una
+venta histórica, por lo que una reconsulta conserva su `fecha_venta` anterior y
+evita una corrección masiva o parcial accidental. Las ventas creadas después del
+despliegue sí guardan ambas fechas, y una venta pendiente actualiza su fecha
+efectiva cuando ML publica posteriormente `date_closed`.
+
+## Corrección puntual y operación segura
+
+Se creó `backend/scripts/corregir_fecha_venta_ml.py`. La herramienta recibe un
+`num_venta`, consulta únicamente `GET /orders/{id}` mediante el cliente protegido,
+valida que ML haya devuelto la misma orden y muestra la fecha actual, creación,
+cierre y propuesta. Sin bandera sólo simula; con `--ejecutar` actualiza localmente
+`fecha_creacion_ml` y `fecha_venta` dentro de una transacción. No toca envíos,
+facturas, albaranes, proveedores, importes ni asignaciones.
+
+La operación productiva queda separada del despliegue y documentada en
+`docs/correccion-fecha-venta-ml.md`: respaldo previo, sincronización automática
+apagada, simulación, corrección exclusiva de `2000018209888406`, verificación de
+integridad y reactivación. Las otras **63,208 ventas existentes no se modificarán**.
+
+## Verificación
+
+- Fecha efectiva, fallback, conversión horaria, cierre tardío y protección legacy:
+  todas las pruebas nuevas pasaron.
+- Herramienta puntual: simulación, validación de identidad, idempotencia y columnas
+  autorizadas verificadas.
+- `test_ml_client_solo_lectura.py`: todo correcto.
+- `test_sync_ml_e2e.py`: todo correcto.
+- Regresiones de filtros, matcher, carritos y facturas: correctas.
+- Build de producción del frontend y `git diff --check`: correctos.
+- `api-guardian`: **APROBADO** durante desarrollo; se exige una revisión nueva antes
+  de ejecutar la corrección en producción.

@@ -177,7 +177,7 @@ export default function Ventas() {
                 value={filtros.q}
                 onChange={(e) => set('q', e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && cargar(1)}
-                placeholder="# de venta de ML, SKU o título"
+                placeholder="# de venta, SKU, título o factura"
                 className="w-full pl-9 pr-3 py-2 border border-notion-border rounded-lg text-sm focus:outline-none focus:border-reluvsa-black"
               />
             </div>

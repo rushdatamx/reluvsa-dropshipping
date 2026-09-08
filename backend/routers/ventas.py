@@ -205,9 +205,37 @@ def _construir_filtros(
         # v.pack_id es el número que ML le muestra a Gaby en su portal, y es el que
         # ella usa a diario para buscar (casi nunca el num_venta interno). Va indexado
         # (idx_ventas_pack_id) porque esta consulta corre en cada tecleo sobre ~27k filas.
-        where.append("(v.num_venta LIKE ? OR v.pack_id LIKE ? OR v.sku LIKE ? OR v.titulo LIKE ?)")
         like = f"%{q}%"
-        params.extend([like, like, like, like])
+        # El número de factura visible no se guarda como una columna: se forma con
+        # Serie/Folio del XML según el proveedor (ver services/folio_factura.py).
+        # El EXISTS es importante: una factura puede tener varios conceptos y una
+        # venta puede tener varias facturas, pero la venta debe aparecer una sola vez.
+        existe_factura_q = """
+            EXISTS (
+                SELECT 1
+                FROM factura_conceptos fcq
+                JOIN facturas fq ON fq.id = fcq.factura_id
+                JOIN proveedores pq ON pq.id = fq.proveedor_id
+                WHERE fcq.num_venta_match = v.num_venta
+                  AND (
+                      fq.serie LIKE ?
+                      OR fq.folio LIKE ?
+                      OR (
+                          CASE UPPER(TRIM(COALESCE(pq.codigo_bodega, '')))
+                              WHEN 'CAUPLAS' THEN TRIM(COALESCE(fq.folio, '') || ' ' || COALESCE(fq.serie, ''))
+                              WHEN 'KG' THEN TRIM(COALESCE(fq.serie, '') || ' ' || COALESCE(fq.folio, ''))
+                              WHEN 'AG' THEN COALESCE(fq.folio, '')
+                              ELSE COALESCE(fq.serie, '') || COALESCE(fq.folio, '')
+                          END LIKE ?
+                      )
+                  )
+            )
+        """
+        where.append(
+            "(v.num_venta LIKE ? OR v.pack_id LIKE ? OR v.sku LIKE ? OR v.titulo LIKE ? "
+            f"OR {existe_factura_q})"
+        )
+        params.extend([like, like, like, like, like, like, like])
 
     # Facturada / sin factura. Se evalúa con un subquery EXISTS para no duplicar
     # filas cuando una venta tiene varios conceptos facturados.
