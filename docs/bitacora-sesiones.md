@@ -2573,3 +2573,18 @@ integridad y reactivación. Las otras **63,208 ventas existentes no se modificar
 - Build de producción del frontend y `git diff --check`: correctos.
 - `api-guardian`: **APROBADO** durante desarrollo; se exige una revisión nueva antes
   de ejecutar la corrección en producción.
+# 2026-09-09 — Compatibilidades Autozur
+
+Se agregó el apartado administrativo **Compatibilidades Autozur** para completar la
+plantilla de publicaciones usando el catálogo vehicular de México. Es un proceso local
+Excel → Excel: no consulta ni modifica la API de Mercado Libre.
+
+El parser extrae fabricante, modelo, años, litros y cilindros del título; el cruce exacto
+se aprueba, mientras fabricante inferido, motor incompleto, detalle de submodelo o motor
+sin coincidencia exacta pasan a revisión. Gaby puede aprobar las propuestas o excluirlas.
+El archivo conserva las 17 columnas originales y repite UserProductID, título y SKU por
+cada compatibilidad.
+
+Línea base de los archivos recibidos: 1,772 publicaciones, 349,106 vehículos utilizables,
+615 listas, 698 a revisión, 459 sin coincidencia y 20,778 filas automáticas. La regresión
+específica quedó en `backend/scripts/test_publicaciones_autozur.py`.

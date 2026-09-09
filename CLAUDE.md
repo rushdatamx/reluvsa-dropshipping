@@ -519,6 +519,10 @@ Convenciones:
   Imagen1–Imagen10. Toda URL se valida por host exacto, HTTPS, imagen y resolución mínima.
   El Envío Gratis se deriva del precio final por publicación y el stock se toma por SKU desde
   la columna obligatoria `stock` del master. Ver §9 y los documentos canónicos.
+- **Compatibilidades Autozur: base funcionando.** Flujo administrativo Excel → Excel,
+  separado de Publicaciones masivas y sin API de ML. Cruza título contra el catálogo
+  vehicular, manda ambigüedades a revisión y repite una fila por compatibilidad. Reglas y
+  línea base en `docs/publicaciones-autozur.md`.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 

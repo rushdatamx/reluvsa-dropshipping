@@ -145,4 +145,32 @@ export const pubGenerar = (payload) => {
   });
 };
 
+// Publicaciones Autozur: ambos archivos se procesan localmente. No usa la API de ML.
+export const autozurAnalizar = (publicaciones, catalogo) => {
+  const fd = new FormData();
+  fd.append('publicaciones', publicaciones);
+  fd.append('catalogo', catalogo);
+  return api.post('/publicaciones-autozur/analizar', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+  });
+};
+
+export const autozurGenerar = (sessionId, aprobadasRevision, excluidas) => {
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  fd.append('aprobadas_revision', JSON.stringify(aprobadasRevision));
+  fd.append('excluidas', JSON.stringify(excluidas));
+  return api.post('/publicaciones-autozur/generar', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    responseType: 'blob',
+    timeout: 300000,
+  });
+};
+
+export const autozurDetalle = (sessionId, resultadoId) =>
+  api.get(`/publicaciones-autozur/sesiones/${encodeURIComponent(sessionId)}/resultados/${resultadoId}`, {
+    timeout: 120000,
+  });
+
 export default api;

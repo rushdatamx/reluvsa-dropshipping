@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_database
-from routers import admin, auth, envios, facturas, incidencias, metricas, ml, proveedores, publicaciones, uploads, ventas, webhooks
+from routers import admin, auth, envios, facturas, incidencias, metricas, ml, proveedores, publicaciones, publicaciones_autozur, uploads, ventas, webhooks
 from services import sync_ml
 
 app = FastAPI(
@@ -45,6 +45,7 @@ app.include_router(uploads.router)
 app.include_router(webhooks.router)
 app.include_router(ml.router)
 app.include_router(publicaciones.router)
+app.include_router(publicaciones_autozur.router)
 
 
 @app.on_event("startup")
