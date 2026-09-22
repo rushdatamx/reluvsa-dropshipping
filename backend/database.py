@@ -245,6 +245,34 @@ CREATE TABLE IF NOT EXISTS kit_componentes (
     PRIMARY KEY (kit_sku, componente_codigo)
 );
 
+-- Cada archivo ERP es una foto auditable: sus entradas no se reemplazan cuando
+-- llega una carga posterior. El cruce con CFDI se calcula al consultar.
+CREATE TABLE IF NOT EXISTS cargas_erp (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre_archivo TEXT NOT NULL,
+    archivo_path TEXT,
+    fecha_referencia_desde TEXT NOT NULL,
+    fecha_referencia_hasta TEXT NOT NULL,
+    total_entradas INTEGER NOT NULL DEFAULT 0,
+    resumen_json TEXT,
+    subido_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS entradas_erp (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    carga_id INTEGER NOT NULL REFERENCES cargas_erp(id) ON DELETE CASCADE,
+    numero_fila INTEGER NOT NULL,
+    fila_original_json TEXT NOT NULL,
+    proveedor_original TEXT,
+    proveedor_codigo TEXT,
+    referencia_original TEXT,
+    referencia_normalizada TEXT,
+    fecha_referencia TEXT,
+    fecha_captura TEXT,
+    motivo_revision TEXT
+);
+
 CREATE TABLE IF NOT EXISTS ml_notificaciones (
     -- Buzón de webhooks de Mercado Libre (topics orders_v2 / shipments / ...).
     -- ML exige responder 200 en <=500 ms o desactiva los tópicos, así que el endpoint
@@ -369,6 +397,9 @@ CREATE INDEX IF NOT EXISTS idx_conceptos_factura ON factura_conceptos(factura_id
 CREATE INDEX IF NOT EXISTS idx_conceptos_venta ON factura_conceptos(num_venta_match);
 CREATE INDEX IF NOT EXISTS idx_incidencias_proveedor ON incidencias(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_publicaciones_sku ON publicaciones_ml(att_seller_sku);
+CREATE INDEX IF NOT EXISTS idx_entradas_erp_carga ON entradas_erp(carga_id);
+CREATE INDEX IF NOT EXISTS idx_entradas_erp_cruce ON entradas_erp(carga_id, proveedor_codigo, referencia_normalizada);
+CREATE INDEX IF NOT EXISTS idx_cargas_erp_fecha ON cargas_erp(fecha_subida);
 """
 
 
@@ -403,6 +434,7 @@ def init_database():
         _migrar_columnas_num_venta_cauplas(cursor)
         _migrar_ocupacion_unica_factura(cursor)
         _migrar_envio_pack_id(cursor)
+        _migrar_cargas_erp(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -494,6 +526,13 @@ def _migrar_columnas_cruce(cursor):
         cursor.execute("ALTER TABLE envios_colecta ADD COLUMN match_cruce_confianza REAL")
         print("[migracion] envios_colecta.match_cruce_confianza agregada.")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_venta_ml ON envios_colecta(num_venta_ml)")
+
+
+def _migrar_cargas_erp(cursor):
+    """Compatibilidad para instalaciones que ya alcanzaron a crear cargas_erp."""
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(cargas_erp)").fetchall()}
+    if "archivo_path" not in cols:
+        cursor.execute("ALTER TABLE cargas_erp ADD COLUMN archivo_path TEXT")
 
 
 def _migrar_rfc_keepongreen(cursor):

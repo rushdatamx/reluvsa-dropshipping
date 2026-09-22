@@ -110,6 +110,17 @@ export const subirKits = (file) => {
   });
 };
 
+// Conciliación ERP (solo administradores)
+export const subirCargaERP = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.post('/conciliacion-erp/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+};
+export const listarCargasERP = () => api.get('/conciliacion-erp/cargas');
+export const listarConciliacionERP = (params = {}) => api.get('/conciliacion-erp', { params });
+export const resumenConciliacionERP = (params = {}) => api.get('/conciliacion-erp/resumen', { params });
+export const exportarConciliacionERPCsv = (params = {}) => api.get('/conciliacion-erp/export.csv', { params, responseType: 'blob' });
+
 // Integración Mercado Libre (admin)
 export const mlEstado = () => api.get('/ml/estado');
 export const mlIniciarOauth = () => api.post('/ml/oauth/iniciar');

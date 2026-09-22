@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Upload, FileSpreadsheet } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { subirVentasML, subirColecta, subirAlbaranes, subirKits } from '../services/api';
+import { subirVentasML, subirColecta, subirAlbaranes, subirKits, subirCargaERP } from '../services/api';
+import { Link } from 'react-router-dom';
 
 function UploadCard({ title, description, onSubmit, accept = '.xlsx', renderResult }) {
   const [file, setFile] = useState(null);
@@ -114,6 +115,12 @@ export default function Uploads() {
           description="Excel con 2 columnas: # de venta y # de albarán. Acepta cualquiera de los dos números que muestra Mercado Libre (el de la venta o el del carrito). Solo actualiza ventas ya cargadas, no crea ventas nuevas."
           onSubmit={subirAlbaranes}
           renderResult={renderResultadoAlbaran}
+        />
+        <UploadCard
+          title="Entradas ERP de facturas"
+          description="Plantilla ERP con Referencia, Proveedor → Nombre, Fecha Referencia y Fecha Captura. Cada carga queda disponible para auditoría."
+          onSubmit={subirCargaERP}
+          renderResult={(d) => <div><strong>Carga #{d.carga_id}</strong>: {d.total} filas guardadas ({d.para_revision} para revisar).<Link to="/conciliacion-erp" className="block underline mt-1">Abrir conciliación ERP</Link></div>}
         />
         <UploadCard
           title="Relación kits → componentes"

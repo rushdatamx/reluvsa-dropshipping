@@ -41,7 +41,7 @@ def _texto_primeras_filas(ws, max_filas: int = 12) -> str:
 
 
 def detectar_tipo_xlsx(path: Path) -> Optional[str]:
-    """Devuelve 'ventas_ml', 'colecta', 'albaran', 'kits' o None según el contenido.
+    """Devuelve el tipo conocido del Excel según el contenido.
 
     None = no se reconoce como ninguno (archivo ajeno o corrupto).
     Nunca lanza: ante cualquier error de lectura, devuelve None.
@@ -63,6 +63,13 @@ def detectar_tipo_xlsx(path: Path) -> Optional[str]:
         # --- Señales por contenido de las primeras filas de la 1a hoja ---
         ws = wb[wb.sheetnames[0]]
         texto = _texto_primeras_filas(ws)
+
+        # ERP: plantilla de cuentas por pagar. Se detecta por las cuatro columnas
+        # requeridas, no por el nombre de hoja o archivo.
+        if all(ancla in texto for ancla in (
+            "referencia", "proveedor", "fecha referencia", "fecha captura"
+        )):
+            return "erp_facturas"
 
         # Kits: el header trae "componente" + "cantidad" + "paquete"/"kit". Va antes
         # de albarán: es el único con "componente", y no comparte anclas con ventas/colecta.
