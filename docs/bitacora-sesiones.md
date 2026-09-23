@@ -15,7 +15,9 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-09-23](#2026-09-23--kims-en-publicaciones-masivas) | Módulo 2: master KIMS | ✅ Implementado y verificado |
 | [2026-09-05](#2026-09-05--stock-por-sku-desde-el-master) | Módulo 2: stock por SKU desde el master | ✅ Implementado y documentado |
+| [2026-09-09](#2026-09-09--compatibilidades-autozur) | Compatibilidades Autozur | ✅ Commiteado en `main` (`14a5ad1`); Railway SUCCESS |
 | [2026-09-03](#2026-09-03--cauplas-fotos-por-csv-de-imagekit-en-publicaciones-masivas) | CAUPLAS: fotos por CSV de ImageKit | ✅ Enviado a `main` (`0045aa4`); Vercel debe desplegarlo |
 | [2026-09-03](#2026-09-03--validación-universal-de-imágenes-en-publicaciones-masivas) | Validación universal de imágenes | ✅ Enviado a `main` (`1a1ac1b`); Vercel debe desplegarlo |
 | [2026-08-31](#2026-08-31--cauplas-en-publicaciones-masivas) | Módulo 2: master CAUPLAS | ✅ Implementado; despliegue iniciado con este cierre |
@@ -2573,18 +2575,166 @@ integridad y reactivación. Las otras **63,208 ventas existentes no se modificar
 - Build de producción del frontend y `git diff --check`: correctos.
 - `api-guardian`: **APROBADO** durante desarrollo; se exige una revisión nueva antes
   de ejecutar la corrección en producción.
-# 2026-09-09 — Compatibilidades Autozur
+## 2026-09-09 — Compatibilidades Autozur
 
-Se agregó el apartado administrativo **Compatibilidades Autozur** para completar la
-plantilla de publicaciones usando el catálogo vehicular de México. Es un proceso local
-Excel → Excel: no consulta ni modifica la API de Mercado Libre.
+### Contexto y pedido de Gaby
 
-El parser extrae fabricante, modelo, años, litros y cilindros del título; el cruce exacto
-se aprueba, mientras fabricante inferido, motor incompleto, detalle de submodelo o motor
-sin coincidencia exacta pasan a revisión. Gaby puede aprobar las propuestas o excluirlas.
-El archivo conserva las 17 columnas originales y repite UserProductID, título y SKU por
-cada compatibilidad.
+Se analizó el pedido de Gaby para automatizar el llenado de la plantilla que Autozur
+entrega como `publicaciones-compatibilidades.xlsx`. La plantilla contiene publicaciones
+que ya existen, pero deja vacíos los atributos de compatibilidad vehicular. El segundo
+archivo, `catalogo-vehiculos-mexico.xlsx`, es el catálogo maestro contra el que deben
+resolverse esos atributos.
 
-Línea base de los archivos recibidos: 1,772 publicaciones, 349,106 vehículos utilizables,
-615 listas, 698 a revisión, 459 sin coincidencia y 20,778 filas automáticas. La regresión
-específica quedó en `backend/scripts/test_publicaciones_autozur.py`.
+Gaby aclaró que una publicación puede ser compatible con muchos vehículos. Autozur no
+representa eso en una sola celda: duplica `UserProductID`, título y SKU en varias filas,
+y cada fila representa una combinación vehicular. Por tanto, el resultado esperado no es
+una publicación nueva, sino una plantilla de compatibilidades con una fila por vehículo.
+
+La idea inicial era cruzar el título directamente contra el catálogo. Se fijó una regla
+de seguridad funcional: si el título no da información suficiente o produce más de una
+interpretación razonable, el portal no debe elegir por su cuenta. El caso pasa a revisión
+para que Gaby apruebe las propuestas o lo excluya.
+
+### Hallazgos de los archivos
+
+`catalogo-vehiculos-mexico.xlsx` contiene una hoja con **349,110 filas físicas** y 12
+columnas. Después de descartar filas sin fabricante, modelo o año válido quedaron
+**349,106 vehículos utilizables**. Hay 212 fabricantes, 3,406 modelos y 68 años
+distintos. `TIPO DE COMBUSTIBLE` está vacío en todo el archivo; el portal conserva esa
+ausencia y no inventa el valor. También existen faltantes en transmisión, carrocería y
+tipo de motor.
+
+`publicaciones-compatibilidades.xlsx` contiene una hoja con **1,772 publicaciones** y
+17 columnas. `UserProductID`, título y SKU están llenos. Las 14 columnas restantes están
+vacías en la entrega recibida: los atributos vehiculares, asignación de posición y notas.
+Los 1,772 `UserProductID` son únicos, pero sólo hay 250 SKU: un SKU puede tener muchas
+publicaciones. Los casos más grandes observados fueron `B-580-B` con 103 publicaciones,
+`MLD604-108` con 62 y `CAU20442` con 50.
+
+### Diseño aprobado
+
+El flujo quedó separado del apartado **Publicaciones masivas** porque resuelve una etapa
+distinta:
+
+```text
+Plantilla Autozur + catálogo vehicular
+        → interpretar títulos
+        → proponer vehículos
+        → revisar ambigüedades
+        → repetir una fila por compatibilidad
+        → descargar plantilla Autozur
+```
+
+La pantalla nueva se llama **Compatibilidades Autozur** y sólo está disponible para
+administradores. Tiene tres etapas: cargar los dos Excel, analizar/revisar y descargar.
+Incluye métricas, filtros por estado, búsqueda por ID/SKU/título, paginación y tarjetas
+con los campos extraídos.
+
+Los estados son:
+
+- **Lista:** fabricante, modelo, años y litros están presentes y producen coincidencias
+  coherentes.
+- **A revisión:** falta un dato, el fabricante fue inferido, el título contiene un
+  submodelo adicional o el motor exacto no aparece pero hay opciones cercanas.
+- **Sin coincidencia:** no hay una propuesta segura que mostrar.
+
+Las revisiones con más de cinco candidatos se cargan bajo demanda. Gaby debe abrir la
+lista completa antes de que aparezca el botón para aprobar todas las propuestas de esa
+publicación. También puede excluir publicaciones claras o revisables. Las pendientes y
+las revisiones no aprobadas no entran al archivo final.
+
+### Parte técnica
+
+El núcleo está en `backend/services/autozur_compatibilidades.py`:
+
+- valida encabezados y formato de ambos libros;
+- lee el catálogo en modo `read_only`;
+- normaliza acentos, mayúsculas, espacios, guiones y números;
+- crea un índice por `(fabricante, modelo)` para no comparar cada título contra las
+  349 mil filas completas;
+- reconoce rangos `1975/1979`, `1975-1979`, listas de años, litros con o sin `L` y
+  motores como `L4`, `V6` y `V8`;
+- admite alias controlados como `VW → VOLKSWAGEN`;
+- puede proponer el fabricante cuando el modelo sólo existe en una marca, pero siempre
+  manda ese caso a revisión;
+- filtra por año, litros y cilindros cuando aparecen explícitamente;
+- si el motor exacto no existe, muestra opciones del mismo modelo y años como propuestas,
+  nunca como aprobación automática;
+- conserva todos los campos originales y genera las 17 columnas en el mismo orden.
+
+El parser no intenta adivinar fabricante, años, litros, submodelo ni atributos ausentes.
+Esto es especialmente importante para títulos abreviados como `P/ Spark 1.2 2017`,
+`P/ Silverado 1500 V8 5.3 2018-2019` o títulos que mezclan versión y modelo. Esos casos
+quedan visibles para revisión en lugar de producir una compatibilidad silenciosamente
+incorrecta.
+
+El backend expone únicamente endpoints internos del portal:
+
+```text
+POST /api/publicaciones-autozur/analizar
+GET  /api/publicaciones-autozur/sesiones/{session_id}/resultados/{resultado_id}
+POST /api/publicaciones-autozur/generar
+```
+
+El análisis se guarda en una sesión temporal JSON con identificador aleatorio, no en la
+base de datos. Las sesiones se limpian después de 24 horas y el archivo XLSX generado se
+elimina al terminar la respuesta. Los uploads originales se borran al finalizar el
+análisis.
+
+El generador usa `openpyxl` para escribir una fila por cada vehículo compatible. Repite
+`UserProductID`, `TITULO` y `SKU`, copia posición/notas originales y deja vacío cualquier
+atributo que también esté vacío en el catálogo. No hay cliente HTTP, OAuth, tokens,
+webhooks ni llamadas a Mercado Libre en este módulo.
+
+### Medición con los archivos reales
+
+La primera ejecución completa tardó aproximadamente **19 segundos** y arrojó:
+
+| Resultado | Cantidad |
+|---|---:|
+| Publicaciones analizadas | 1,772 |
+| Cruces claros automáticos | 615 |
+| Publicaciones a revisión | 698 |
+| Sin coincidencia | 459 |
+| Compatibilidades automáticas | 20,778 |
+| Filas del catálogo utilizables | 349,106 |
+
+La descarga automática produjo un XLSX válido con **20,778 filas y 17 columnas**, y los
+encabezados coincidieron exactamente con la plantilla recibida.
+
+### Verificación y entrega
+
+Se agregó `backend/scripts/test_publicaciones_autozur.py`, con **13/13 pruebas** para
+parser, rangos de años, fabricante inferido, revisión obligatoria, duplicación por
+compatibilidad y estructura del XLSX. También pasaron las **86/86 pruebas** del módulo
+existente de Publicaciones masivas y `git diff --check`.
+
+El guardián global `test_ml_client_solo_lectura.py` terminó con todos los checks en verde,
+incluida la revisión estática que confirma que ningún archivo fuera de `ml_client` agrega
+clientes HTTP o endpoints de Mercado Libre.
+
+El cambio se guardó en el commit **`14a5ad1`** (`feat: agregar compatibilidades Autozur`) y
+se envió a `origin/main`. Railway detectó el push y terminó el deployment en estado
+**SUCCESS**. No se hizo ninguna modificación en la API de Mercado Libre ni se abrió una
+publicación desde el portal.
+
+## 2026-09-23 — KIMS en Publicaciones masivas
+
+Se incorporó el master KIMS como `master_kims` con código interno `KIM`, sin base de
+datos ni llamadas a Mercado Libre. El lector agrupa por `original`, excluye SKU por
+precio/stock, marca, producto o estructura y limita los años inválidos a la compatibilidad
+afectada. Consolida OEM, combustible, comentarios, posiciones, fotos y compatibilidades;
+genera títulos de hasta 60 caracteres sin cortar campos esenciales.
+
+El precio convierte primero USD a MXN con tipo de cambio editable (18.50 por default) y
+después usa la fórmula compartida. La plantilla conserva 36 columnas, escribe marca por
+SKU, stock sólo en KIM y FOTO 1–4 en sus posiciones. Las imágenes sólo admiten HTTPS en
+`www.kimsauto.com.mx` y pasan por el candado común de disponibilidad y resolución.
+
+La interfaz muestra KIMS, filtro jerárquico sistema → producto, tipo de cambio y la marca
+del catálogo. La medición real quedó en 19,289 filas, 7,945 SKU observados, 3,027 con
+precio/stock inválido, 95 con marca problemática, 2 con producto contradictorio, 4,852
+SKU utilizables, 7 compatibilidades con años inválidos y 10,799 variantes finales.
+
+Se agregó `test_publicaciones_kims.py`; el contrato detallado vive en
+`docs/master-kims-publicaciones-masivas.md`.

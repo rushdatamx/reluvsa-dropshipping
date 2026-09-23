@@ -12,6 +12,7 @@ Flujo de 3 pasos que ve Gaby:
 """
 import asyncio
 import json
+import math
 import shutil
 import tempfile
 from collections import Counter
@@ -83,7 +84,7 @@ def _leer_o_400(ruta, perfil):
                     f"{perfil.codigo_bodega}? Esperamos la clave en la columna "
                     f"{chr(65 + perfil.col_clave)}."),
         )
-    formato_esperado = {"CAUPLAS": "master_cauplas"}.get(perfil.codigo_bodega)
+    formato_esperado = {"CAUPLAS": "master_cauplas", "KIM": "master_kims"}.get(perfil.codigo_bodega)
     if formato_esperado and resultado.formato != formato_esperado:
         raise HTTPException(
             status_code=400,
@@ -94,6 +95,9 @@ def _leer_o_400(ruta, perfil):
             status_code=400,
             detail="Este archivo parece ser el master de CAUPLAS; selecciona CAUPLAS como proveedor.",
         )
+    if resultado.formato == "master_kims" and perfil.codigo_bodega != "KIM":
+        raise HTTPException(status_code=400,
+                            detail="Este archivo parece ser el master de KIMS; selecciona KIMS como proveedor.")
     return resultado
 
 
@@ -103,6 +107,7 @@ def listar_proveedores_soportados(_=Depends(require_admin)):
     return {
         "soportados": proveedores_soportados(),
         "marcas": {codigo: perfil_de(codigo).marca_ml for codigo in proveedores_soportados()},
+        "nombres": {**{codigo: codigo for codigo in proveedores_soportados()}, "KIM": "KIMS"},
         "envio_pendiente": envio_pendiente(),
     }
 
@@ -143,7 +148,7 @@ async def analizar(
         publicados = set()
         if ruta_pub:
             try:
-                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas"}
+                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims"}
                               else leer_skus_publicados(ruta_pub))
             except Exception:
                 raise HTTPException(
@@ -153,25 +158,34 @@ async def analizar(
                 )
 
         cfg = ConfiguracionProveedor(codigo_bodega=codigo_bodega)
-        if lectura.formato in {"master_kg", "master_cauplas"}:
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims"}:
             candidatos, reporte = generar_filas_con_reporte(piezas, cfg)
             cruce_v = cruzar_variantes(candidatos, publicados)
             filas = cruce_v["pendientes"]
             sku_publicados = {sku for sku, _ in publicados}
             por_producto = []
-            productos = ({p["linea"] for p in piezas} if lectura.formato == "master_kg" else
+            productos = ({p["linea"] for p in piezas} if lectura.formato in {"master_kg", "master_kims"} else
                          {producto for p in piezas for producto in p.get("lineas", [])})
             for producto in sorted(productos):
-                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato == "master_kg"
+                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato in {"master_kg", "master_kims"}
                                             else producto in p.get("lineas", []))]
                 cand = [f for f in candidatos if f.linea == producto]
                 pend = [f for f in filas if f.linea == producto]
                 por_producto.append({"linea": producto, "producto": producto, "piezas": len(pp),
                     "compatibilidades": (sum(len(p["compatibilidades"]) for p in pp)
-                        if lectura.formato == "master_kg" else
+                        if lectura.formato in {"master_kg", "master_kims"} else
                         sum(1 for p in pp for c in p["compatibilidades"] if c.get("producto") == producto)),
                     "publicaciones": len(cand), "publicaciones_faltantes": len(pend)})
             errores = lectura.errores + reporte["exclusiones"]
+            por_sistema = []
+            if lectura.formato == "master_kims":
+                for sistema in sorted({s for p in piezas for s in p.get("sistemas", [])}):
+                    sp = [p for p in piezas if sistema in p.get("sistemas", [])]
+                    productos_sistema = sorted({p["producto"] for p in sp})
+                    por_sistema.append({"sistema": sistema, "productos": productos_sistema,
+                        "piezas": len(sp), "compatibilidades": sum(len(p["compatibilidades"]) for p in sp),
+                        "publicaciones_faltantes": sum(1 for f in filas if f.sku.upper() in
+                            {p['clave'].upper() for p in sp})})
             return {"proveedor": codigo_bodega, "formato": lectura.formato,
                 "cruce_realizado": ruta_pub is not None, "filas_master": lectura.filas_master,
                 "total_catalogo": len(piezas), "sku_unicos": lectura.sku_unicos_master or len(piezas),
@@ -188,6 +202,8 @@ async def analizar(
                 "ya_publicadas": len(cruce_v["existentes"]), "faltantes": len(filas),
                 "aplicaciones_truncadas": 0, "envio_pendiente": envio_pendiente(),
                 "errores_total": len(errores), "errores": errores[:200], "por_linea": por_producto,
+                "por_sistema": por_sistema,
+                **getattr(lectura, "metricas_kims", {}),
                 **({"fotos": resumen_fotos} if fotos_cauplas is not None else {})}
 
         resultado = cruzar(piezas, publicados)
@@ -232,7 +248,9 @@ async def generar(
     utilidad: float = Form(0.50),
     comision_ml: float = Form(0.13),
     envio: float = Form(0.0),
+    tipo_cambio_usd: float = Form(18.50),
     lineas: str = Form(""),          # JSON con las líneas elegidas; vacío = todas
+    sistemas: str = Form(""),        # JSON con sistemas KIMS; vacío = todos
     solo_faltantes: bool = Form(True),
     _=Depends(require_admin),
 ):
@@ -248,6 +266,8 @@ async def generar(
     try:
         lectura = _leer_o_400(ruta_cat, perfil)
         piezas = lectura.piezas
+        if lectura.formato == "master_kims" and (not math.isfinite(tipo_cambio_usd) or tipo_cambio_usd <= 0):
+            raise HTTPException(status_code=400, detail="El tipo de cambio USD debe ser mayor que cero.")
         galerias_cauplas = None
         resumen_fotos = None
         if perfil.codigo_bodega == "CAUPLAS":
@@ -282,6 +302,19 @@ async def generar(
                 else:
                     piezas = [p for p in piezas if (p["linea"] or "").upper() in elegidas]
 
+        if sistemas.strip():
+            if lectura.formato != "master_kims":
+                raise HTTPException(status_code=400, detail="El filtro de sistemas sólo aplica para KIMS.")
+            try:
+                sistemas_json = json.loads(sistemas)
+                if not isinstance(sistemas_json, list): raise TypeError
+                sistemas_elegidos = {s.strip().upper() for s in sistemas_json if isinstance(s, str)}
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="El filtro de sistemas no es una lista válida.")
+            if sistemas_elegidos:
+                piezas = [p for p in piezas if sistemas_elegidos &
+                          {s.upper() for s in p.get("sistemas", [])}]
+
         if not piezas:
             raise HTTPException(
                 status_code=400,
@@ -293,6 +326,7 @@ async def generar(
             descripcion_base=descripcion_base,
             marca=marca or perfil.marca_ml,
             categoria_ml=categoria_ml,
+            tipo_cambio_usd=tipo_cambio_usd,
             params_precio=ParametrosPrecio(
                 iva=iva, utilidad=utilidad, comision_ml=comision_ml,
                 envio_default=envio,
@@ -302,7 +336,7 @@ async def generar(
         filas = generar_filas(piezas, config)
         if galerias_cauplas is not None:
             asignar_imagenes_cauplas(filas, galerias_cauplas)
-        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas"}:
+        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas:
             raise HTTPException(

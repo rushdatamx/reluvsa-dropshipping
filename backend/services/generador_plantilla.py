@@ -75,6 +75,7 @@ class ConfiguracionProveedor:
     descripcion_base: str = ""      # el cuerpo fijo (garantía, horarios, facturación)
     marca: str = ""
     categoria_ml: str = ""          # 'MLM163963' — la categoría de ML
+    tipo_cambio_usd: float = 18.50
     params_precio: ParametrosPrecio = field(default_factory=ParametrosPrecio)
 
 
@@ -92,6 +93,7 @@ class FilaPublicacion:
     imagenes: List[str] = field(default_factory=list)
     fila_origen: Optional[int] = None
     stock: int = 0
+    marca: str = ""
 
 
 # Alias aprobados para las líneas reales del master. Sólo se usan si el nombre
@@ -282,6 +284,28 @@ def _variantes_cauplas(producto, compat):
     return variantes, excluidas
 
 
+def _titulo_kims(producto, compat) -> Optional[str]:
+    producto = " ".join(str(producto or "").split())
+    armadora = " ".join(str(compat.get("armadora") or "").split())
+    modelo = " ".join(str(compat.get("modelo") or "").split())
+    version = " ".join(str(compat.get("version") or "").split())
+    motor = " ".join(str(compat.get("motor") or "").split())
+    inicio, fin = compat["inicio"], compat["fin"]
+    anios = str(inicio) if inicio == fin else f"{inicio}/{fin}"
+    intentos = [
+        (producto, "P/", armadora, modelo, version, motor, anios),
+        (producto, "P/", modelo, version, motor, anios),
+        (producto, "P/", modelo, motor, anios),
+    ]
+    for partes in intentos:
+        titulo = " ".join(x for x in partes if x)
+        titulo = re.sub(r"\s+", " ", titulo).strip()
+        # Producto, modelo y años son estructurales; motor se conserva cuando existe.
+        if titulo and len(titulo) <= MAX_TITULO:
+            return titulo
+    return None
+
+
 def _titular(nombre_pieza: str, app: Aplicacion) -> str:
     """Arma el título como lo escribe Gaby: 'Pieza P/ Coche Motor Años'.
 
@@ -391,9 +415,50 @@ def _describir_cauplas(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _describir_kims(pieza, config):
+    partes = [pieza.get("producto", "")]
+    if pieza.get("oems"): partes += ["", "OEM: " + " | ".join(pieza["oems"])]
+    if pieza.get("combustibles"): partes += ["", "Combustible: " + " | ".join(pieza["combustibles"])]
+    if pieza.get("comentarios"): partes += ["", "Comentarios:"] + pieza["comentarios"]
+    if pieza.get("posiciones"): partes += ["", "Posiciones: " + " | ".join(pieza["posiciones"])]
+    compatibilidades = []
+    for c in pieza.get("compatibilidades", []):
+        anios = str(c["inicio"]) if c["inicio"] == c["fin"] else f"{c['inicio']}/{c['fin']}"
+        texto = " ".join(x for x in (c.get("armadora"), c.get("modelo"), c.get("version"),
+                                      c.get("motor"), anios) if x)
+        if _sin_acentos(texto) not in {_sin_acentos(x) for x in compatibilidades}:
+            compatibilidades.append(texto)
+    if compatibilidades: partes += ["", "Compatibilidades:"] + compatibilidades
+    if config.descripcion_base: partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
+        if pieza.get("formato") == "master_kims":
+            descripcion = _describir_kims(pieza, config)
+            precio = calcular_precio(pieza.get("costo_usd") * config.tipo_cambio_usd,
+                                     pieza.get("linea", ""), config.params_precio)
+            for compat in pieza.get("compatibilidades", []):
+                titulo = _titulo_kims(pieza.get("producto"), compat)
+                if not titulo:
+                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                        "anio": f"{compat.get('inicio')}/{compat.get('fin')}",
+                        "inicio": compat.get("inicio"), "fin": compat.get("fin"),
+                        "motivo": "Título excede 60 caracteres"})
+                    continue
+                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                if par in vistos:
+                    deduplicadas += 1; continue
+                vistos.add(par)
+                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
+                    pieza.get("producto", ""), precio, descripcion,
+                    f"{compat.get('inicio')}/{compat.get('fin')}", False,
+                    pieza.get("imagenes", []), compat.get("fila"), stock=pieza["stock"],
+                    marca=pieza.get("marca", "")))
+            continue
         if pieza.get("formato") == "master_cauplas":
             descripcion = _describir_cauplas(pieza, config)
             for compat in pieza.get("compatibilidades", []):
@@ -445,7 +510,7 @@ def generar_filas_con_reporte(piezas, config):
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
-    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas"}:
+    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims"}:
         return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 
@@ -502,7 +567,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
             ws.cell(f, idx["Envio Gratis(si,no)"], "Si" if fila.precio >= 299.00 else "No")
         ws.cell(f, idx["SKU"], fila.sku)
         ws.cell(f, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
-        ws.cell(f, idx["Marca"], config.marca)
+        ws.cell(f, idx["Marca"], fila.marca or config.marca)
         ws.cell(f, idx["Modelo"], fila.sku)
         limite_imagenes = 10 if bodega == "CAUPLAS" else 5
         for numero, imagen in enumerate(fila.imagenes[:limite_imagenes], 1):

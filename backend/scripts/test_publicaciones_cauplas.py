@@ -63,7 +63,8 @@ def guardar(wb):
 
 
 print("\n=== 1. PERFIL Y DETECCIÓN ===")
-check("CAUPLAS y KG son proveedores soportados", proveedores_soportados() == ["CAUPLAS", "KG"])
+check("CAUPLAS, KIMS y KG son proveedores soportados",
+      proveedores_soportados() == ["CAUPLAS", "KG", "KIM"])
 check("la marca predeterminada de CAUPLAS es editable desde CAUPLAS",
       perfil_de("CAUPLAS").marca_ml == "CAUPLAS")
 check("CAUPLAS sólo autoriza fotos de ImageKit",

@@ -31,6 +31,18 @@ class PerfilCatalogo:
 
 
 PERFILES: Dict[str, PerfilCatalogo] = {
+    "KIM": PerfilCatalogo(
+        codigo_bodega="KIM",
+        nombre_hoja=None,
+        fila_header=1,
+        col_clave=0,
+        col_linea=19,
+        col_aplicaciones=5,
+        col_precio_costo=24,
+        anclas_header=("original", "armadora", "modelo", "descripcion", "cantidad", "precio"),
+        marca_ml="",
+        dominios_imagenes=("www.kimsauto.com.mx",),
+    ),
     # QUALITY HOSES / CAUPLAS — el master vigente se reconoce por encabezados
     # y tiene un lector exclusivo en parser_catalogo.py. Estos índices conservan
     # el contrato físico documentado por Gaby y sirven para mensajes de error.

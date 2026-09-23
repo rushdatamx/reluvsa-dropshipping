@@ -42,6 +42,7 @@ const inputCls = 'w-full px-3 py-2 border border-notion-border rounded-lg text-s
 export default function Publicaciones() {
   const [soportados, setSoportados] = useState([]);
   const [marcas, setMarcas] = useState({});
+  const [nombres, setNombres] = useState({});
   const [envioPendiente, setEnvioPendiente] = useState(false);
   const [proveedor, setProveedor] = useState('KG');
   const [catalogo, setCatalogo] = useState(null);
@@ -50,6 +51,7 @@ export default function Publicaciones() {
 
   const [analisis, setAnalisis] = useState(null);
   const [lineasSel, setLineasSel] = useState([]);
+  const [sistemasSel, setSistemasSel] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [error, setError] = useState(null);
@@ -57,7 +59,7 @@ export default function Publicaciones() {
 
   const [config, setConfig] = useState({
     marca: '', categoria_ml: '',
-    iva: 0.16, utilidad: 0.5, comision_ml: 0.13, envio: 0,
+    iva: 0.16, utilidad: 0.5, comision_ml: 0.13, envio: 0, tipo_cambio_usd: 18.50,
     descripcion_base: DESCRIPCION_BASE_DEFAULT,
   });
 
@@ -66,6 +68,7 @@ export default function Publicaciones() {
       .then(({ data }) => {
         setSoportados(data.soportados || []);
         setMarcas(data.marcas || {});
+        setNombres(data.nombres || {});
         setEnvioPendiente(!!data.envio_pendiente);
         if (data.soportados?.length) {
           const inicial = data.soportados[0];
@@ -78,7 +81,7 @@ export default function Publicaciones() {
 
   const analizar = async () => {
     if (!catalogo) return;
-    setCargando(true); setError(null); setAnalisis(null); setLineasSel([]);
+    setCargando(true); setError(null); setAnalisis(null); setLineasSel([]); setSistemasSel([]);
     try {
       const { data } = await pubAnalizar(proveedor, catalogo, publicacionesML, imagenesCauplas);
       setAnalisis(data);
@@ -99,6 +102,7 @@ export default function Publicaciones() {
         publicaciones_ml: publicacionesML,
         imagenes_cauplas: imagenesCauplas,
         lineas: lineasSel.length ? JSON.stringify(lineasSel) : '',
+        sistemas: sistemasSel.length ? JSON.stringify(sistemasSel) : '',
         solo_faltantes: true,
         ...config,
       });
@@ -134,21 +138,28 @@ export default function Publicaciones() {
   const toggleLinea = (linea) =>
     setLineasSel((prev) =>
       prev.includes(linea) ? prev.filter((l) => l !== linea) : [...prev, linea]);
+  const toggleSistema = (sistema) =>
+    setSistemasSel((prev) => prev.includes(sistema)
+      ? prev.filter((s) => s !== sistema) : [...prev, sistema]);
 
   const cambiarProveedor = (codigo) => {
     setProveedor(codigo);
     setAnalisis(null);
     setLineasSel([]);
+    setSistemasSel([]);
     setImagenesCauplas(null);
     setConfig((prev) => ({ ...prev, marca: marcas[codigo] || '' }));
   };
 
   const publicacionesElegidas = analisis
-    ? (lineasSel.length
-        ? analisis.por_linea.filter((l) => lineasSel.includes(l.linea))
-        : analisis.por_linea
-      ).reduce((s, l) => s + (l.publicaciones_faltantes ?? l.piezas), 0)
+    ? (lineasSel.length || sistemasSel.length ? analisis.variantes_faltantes :
+      analisis.por_linea.reduce((s, l) => s + (l.publicaciones_faltantes ?? l.piezas), 0))
     : 0;
+  const productosVisibles = analisis?.formato === 'master_kims' && sistemasSel.length
+    ? new Set((analisis.por_sistema || [])
+        .filter((s) => sistemasSel.includes(s.sistema))
+        .flatMap((s) => s.productos || []))
+    : null;
 
   return (
     <div>
@@ -173,7 +184,7 @@ export default function Publicaciones() {
         <div className="grid md:grid-cols-3 gap-4">
           <Campo label="Proveedor" hint="Cada uno manda su información distinta">
             <select value={proveedor} onChange={(e) => cambiarProveedor(e.target.value)} className={inputCls}>
-              {soportados.map((p) => <option key={p} value={p}>{p}</option>)}
+              {soportados.map((p) => <option key={p} value={p}>{nombres[p] || p}</option>)}
             </select>
           </Campo>
 
@@ -280,6 +291,13 @@ export default function Publicaciones() {
             </div>
           )}
 
+          {analisis.formato === 'master_kims' && (
+            <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
+              KIMS excluye el SKU completo cuando stock o precio USD son cero, negativos,
+              inválidos o inconsistentes. La marca se toma directamente del catálogo.
+            </div>
+          )}
+
           {analisis.fotos && (
             <div className="mb-3 p-3 bg-blue-50 text-blue-900 rounded-lg text-xs">
               <strong>Fotos CAUPLAS:</strong> {analisis.fotos.skus_con_fotos.toLocaleString('es-MX')} SKU con fotos,
@@ -292,12 +310,30 @@ export default function Publicaciones() {
             </div>
           )}
 
+          {analisis.formato === 'master_kims' && <>
+            <p className="text-sm font-medium mb-2">1. Filtra por sistema
+              <span className="text-notion-text-secondary font-normal"> — ninguno = todos</span>
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto mb-4">
+              {(analisis.por_sistema || []).map(({ sistema, piezas, productos }) => (
+                <button key={sistema} onClick={() => toggleSistema(sistema)}
+                        className={`px-3 py-1.5 rounded-lg text-xs border ${sistemasSel.includes(sistema)
+                          ? 'bg-reluvsa-black text-reluvsa-yellow border-reluvsa-black'
+                          : 'bg-white border-notion-border hover:bg-notion-bg'}`}>
+                  {sistemasSel.includes(sistema) && <Check size={12} className="inline mr-1" />}
+                  {sistema} <span className="opacity-60">({piezas} SKU · {productos.length} productos)</span>
+                </button>
+              ))}
+            </div>
+          </>}
           <p className="text-sm font-medium mb-2">
-            Filtra por categoría de producto para trabajar por tandas
+            {analisis.formato === 'master_kims' ? '2. Filtra por producto' : 'Filtra por categoría de producto para trabajar por tandas'}
             <span className="text-notion-text-secondary font-normal"> — ninguna seleccionada = todas</span>
           </p>
           <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto">
-            {analisis.por_linea.map(({ linea, piezas, compatibilidades, publicaciones_faltantes }) => (
+            {analisis.por_linea
+              .filter(({ linea }) => !productosVisibles || productosVisibles.has(linea))
+              .map(({ linea, piezas, compatibilidades, publicaciones_faltantes }) => (
               <button key={linea} onClick={() => toggleLinea(linea)}
                       className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                         lineasSel.includes(linea)
@@ -339,8 +375,9 @@ export default function Publicaciones() {
           </div>
 
           <div className="grid md:grid-cols-3 gap-4 mb-4">
-            <Campo label="Marca" hint="Va en la columna Marca de ML">
+            <Campo label="Marca" hint={proveedor === 'KIM' ? 'KIMS la toma de la columna Marca del catálogo' : 'Va en la columna Marca de ML'}>
               <input className={inputCls} value={config.marca}
+                     disabled={proveedor === 'KIM'}
                      onChange={(e) => setConfig({ ...config, marca: e.target.value })}
                      placeholder={marcas[proveedor] || 'Marca'} />
             </Campo>
@@ -368,6 +405,16 @@ export default function Publicaciones() {
             </Campo>
           </div>
 
+          {proveedor === 'KIM' && (
+            <div className="grid md:grid-cols-4 gap-4 mb-4">
+              <Campo label="Tipo de cambio USD" hint="USD → MXN; debe ser mayor que cero">
+                <input type="number" min="0.01" step="0.01" className={inputCls}
+                       value={config.tipo_cambio_usd}
+                       onChange={(e) => setConfig({ ...config, tipo_cambio_usd: +e.target.value })} />
+              </Campo>
+            </div>
+          )}
+
           {envioPendiente && config.envio === 0 && (
             <div className="mb-4 p-3 bg-amber-50 text-amber-800 rounded-lg text-xs">
               El <strong>costo de envío todavía no está cargado</strong>, así que el precio sale sin él
@@ -388,6 +435,9 @@ export default function Publicaciones() {
               <><strong>CAUPLAS llena Imagen 1–10 desde el CSV de ImageKit.</strong> Las URLs inválidas,
               inaccesibles o sin cruce se omiten sin impedir la descarga. La descripción sí incluirá
               equivalencias y, cuando sea manguera, sus medidas.</>
+            ) : analisis.formato === 'master_kims' ? (
+              <><strong>KIMS conserva FOTO 1–4 en su posición original.</strong> Sólo se acepta HTTPS
+              desde www.kimsauto.com.mx y cada imagen debe medir al menos 1200×1200.</>
             ) : (
               <><strong>Imagen 1–5 se conservan desde el catálogo cuando existan</strong> y sólo pasan si el dominio está autorizado, responden y miden al menos 1200×1200.
               Imagen 6–10 permanecen vacías.</>

@@ -665,6 +665,7 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 > columnas, leer **`docs/envio-gratis-precio-final.md` completo**.
 > Antes de tocar imágenes de catálogo, sus URLs, la red o Imagen 1–10, leer
 > **`docs/validacion-imagenes-catalogo.md` completo**.
+> Antes de tocar KIMS, leer **`docs/master-kims-publicaciones-masivas.md` completo**.
 
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
 plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
@@ -676,6 +677,11 @@ a ML. Ver `docs/validacion-imagenes-catalogo.md`.
 **Formato vigente:** nuevo master KG, detectado por encabezados aunque se renombre la hoja
 (`BD_Catalogo` conserva preferencia), medido en **29,216 filas / 4,021 SKU utilizables / 9
 filas inválidas**. El catálogo anterior de 3,676 piezas sigue aceptado como formato legado.
+
+**KIMS:** formato `master_kims`, código `KIM`, detectado por encabezados. Línea base:
+19,289 filas / 7,945 SKU observados / 4,852 utilizables / 10,799 variantes. Convierte USD
+con tipo de cambio editable, usa marca por SKU, filtra sistema → producto y valida FOTO 1–4
+sólo desde `www.kimsauto.com.mx`. Contrato en `docs/master-kims-publicaciones-masivas.md`.
 
 **⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de
 Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "Aplicaciones
@@ -716,9 +722,10 @@ es la **LÍNEA de producto**, no el precio ni el peso: el catálogo **no trae pe
 dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo** con la columna
 AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
 
-⬜ **Otros pendientes:** ya hay perfiles de **KG y CAUPLAS** (KIM, AG y VAZLO dan 400 con
-mensaje claro); KG copia Imagen 1–5 y CAUPLAS cruza su CSV obligatorio de ImageKit hasta
-Imagen 1–10; el legado las deja vacías; la **categoría de ML** se teclea y aplica a todo el archivo.
+⬜ **Otros pendientes:** ya hay perfiles de **KG, CAUPLAS y KIM** (AG y VAZLO dan 400 con
+mensaje claro); KG copia Imagen 1–5, KIMS conserva FOTO 1–4 y CAUPLAS cruza su CSV obligatorio
+de ImageKit hasta Imagen 1–10; el legado las deja vacías; la **categoría de ML** se teclea y
+aplica a todo el archivo.
 
 **Otros pendientes menores:** logo real de RELUVSA (hoy es un placeholder de texto).
 
@@ -763,6 +770,7 @@ Imagen 1–10; el legado las deja vacías; la **categoría de ML** se teclea y a
 | `docs/envio-gratis-precio-final.md` | 🔴 Antes de tocar `generador_plantilla.py`, las 36 columnas, Precio o Envío Gratis |
 | `docs/master-kg-categorias-producto.md` | ⭐ Antes de tocar detección del master KG, `Producto`, `por_linea` o el filtro por categoría |
 | `docs/master-cauplas-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master CAUPLAS en Publicaciones Masivas |
+| `docs/master-kims-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master KIMS en Publicaciones Masivas |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |

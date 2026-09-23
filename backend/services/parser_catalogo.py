@@ -34,6 +34,15 @@ CAUPLAS_EQUIVALENCIAS = (
     ("Tepeyac", "tepeyac"),
 )
 
+KIMS_HEADERS = (
+    "original", "alterna_1", "alterna_2", "alterna_3", "alterna_4",
+    "armadora", "modelo", "version", "Año Inicio", "Año final", "motor",
+    "combustible", "comentarios", "posicion_1", "posicion_2", "posicion_3",
+    "posicion_4", "descripcion", "cantidad", "marca", "sistema", "PRECIO",
+    "FOTO 1", "FOTO 2", "FOTO 3", "FOTO 4",
+)
+KIMS_ANCLAS = ("original", "armadora", "modelo", "descripcion", "cantidad", "marca", "sistema", "PRECIO")
+
 
 def _texto(val) -> str:
     if val is None: return ""
@@ -182,6 +191,137 @@ def _hoja_cauplas(wb):
         return completas[0]
     incompletas = [ws for ws in wb.worksheets if _parece_cauplas(ws)]
     return incompletas[0] if incompletas else None
+
+
+def _headers_kims(ws):
+    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    mapa = {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
+    return all(_normalizar(h) in mapa for h in KIMS_HEADERS), mapa
+
+
+def _parece_kims(ws):
+    _, columnas = _headers_kims(ws)
+    return sum(_normalizar(h) in columnas for h in KIMS_ANCLAS) >= 6
+
+
+def _hoja_kims(wb):
+    completas = [ws for ws in wb.worksheets if _headers_kims(ws)[0]]
+    if completas:
+        return completas[0]
+    incompletas = [ws for ws in wb.worksheets if _parece_kims(ws)]
+    return incompletas[0] if incompletas else None
+
+
+def _numero_positivo(valor):
+    if isinstance(valor, bool):
+        return None
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    return numero if numero > 0 else None
+
+
+def _leer_master_kims(ws) -> ResultadoCatalogo:
+    valido, columnas = _headers_kims(ws)
+    if not valido:
+        faltan = [h for h in KIMS_HEADERS if _normalizar(h) not in columnas]
+        raise ValueError(
+            f"La hoja «{ws.title}» parece ser el master KIMS, pero le faltan "
+            "los encabezados requeridos: " + ", ".join(faltan)
+        )
+
+    def val(fila, nombre):
+        i = columnas.get(_normalizar(nombre))
+        return fila[i] if i is not None and i < len(fila) else None
+
+    registros, filas_master, observados = {}, 0, set()
+    max_col = max(columnas.values()) + 1
+    for numero, fila in enumerate(ws.iter_rows(min_row=2, max_col=max_col, values_only=True), 2):
+        if not any(_texto(x) for x in fila):
+            continue
+        filas_master += 1
+        sku = _texto(val(fila, "original"))
+        if sku:
+            observados.add(sku.upper())
+        registro = {
+            "fila": numero, "clave": sku, "producto": _producto_canonico(val(fila, "descripcion")),
+            "marca": _texto(val(fila, "marca")), "sistema": _texto(val(fila, "sistema")),
+            "stock_raw": val(fila, "cantidad"), "precio_raw": val(fila, "PRECIO"),
+            "armadora": _texto(val(fila, "armadora")), "modelo": _texto(val(fila, "modelo")),
+            "version": _texto(val(fila, "version")), "motor": _texto(val(fila, "motor")),
+            "inicio_raw": val(fila, "Año Inicio"), "fin_raw": val(fila, "Año final"),
+            "combustible": _texto(val(fila, "combustible")),
+            "comentarios": _texto(val(fila, "comentarios")),
+            "posiciones": [_texto(val(fila, f"posicion_{i}")) for i in range(1, 5)],
+            # `original` es el SKU de KIMS; los OEM equivalentes viven en B:E.
+            "oems": [_texto(val(fila, f"alterna_{i}")) for i in range(1, 5)],
+            "imagenes": [_texto(val(fila, f"FOTO {i}")) for i in range(1, 5)],
+        }
+        registros.setdefault(sku.upper(), []).append(registro)
+
+    piezas, errores, validas, invalidas, duplicados = [], [], 0, 0, 0
+    excluidos_precio_stock = excluidos_marca = excluidos_producto = excluidos_estructura = 0
+    for clave, filas in registros.items():
+        primera = filas[0]
+        def err(motivo, fila=primera):
+            errores.append(_error_cauplas(fila["fila"], fila["clave"], {
+                "armadora": fila["armadora"], "modelo": fila["modelo"],
+                "inicio": fila["inicio_raw"], "fin": fila["fin_raw"],
+            }, motivo))
+
+        if not clave or any(not f["sistema"] for f in filas):
+            excluidos_estructura += 1; err("Falta un campo estructural obligatorio"); continue
+        stocks = [_stock_entero(f["stock_raw"])[0] for f in filas]
+        precios = [_numero_positivo(f["precio_raw"]) for f in filas]
+        marcas = {_normalizar(f["marca"]) for f in filas if f["marca"]}
+        productos = {_normalizar(f["producto"]) for f in filas if f["producto"]}
+        problema_precio_stock = (any(s is None or s <= 0 for s in stocks) or len(set(stocks)) != 1 or
+                                 any(p is None for p in precios) or len(set(precios)) != 1)
+        problema_marca = any(not f["marca"] for f in filas) or len(marcas) != 1
+        problema_producto = any(not f["producto"] for f in filas) or len(productos) != 1
+        # Las métricas son independientes: un mismo SKU puede tener más de una
+        # causa. La exclusión se registra una sola vez con precedencia estable.
+        excluidos_precio_stock += int(problema_precio_stock)
+        excluidos_marca += int(problema_marca)
+        excluidos_producto += int(problema_producto)
+        if problema_precio_stock:
+            err("Stock o precio USD cero, negativo, inválido o inconsistente"); continue
+        if problema_marca:
+            err("Marca vacía o conflictiva dentro del SKU"); continue
+        if problema_producto:
+            err("Producto vacío o contradictorio dentro del SKU"); continue
+
+        pieza = {"clave": primera["clave"], "linea": primera["producto"], "producto": primera["producto"],
+            "formato": "master_kims", "marca": primera["marca"], "stock": stocks[0],
+            "costo_usd": precios[0], "sistemas": [], "compatibilidades": [], "oems": [],
+            "combustibles": [], "comentarios": [], "posiciones": [], "imagenes": ["", "", "", ""],
+            "filas_origen": [f["fila"] for f in filas]}
+        vistos = set()
+        for f in filas:
+            _agregar_unico(pieza["sistemas"], f["sistema"])
+            for nombre, valores in (("oems", f["oems"]), ("combustibles", [f["combustible"]]),
+                                    ("comentarios", [f["comentarios"]]), ("posiciones", f["posiciones"])):
+                for valor in valores: _agregar_unico(pieza[nombre], valor)
+            for i, imagen in enumerate(f["imagenes"]):
+                if imagen and not pieza["imagenes"][i]: pieza["imagenes"][i] = imagen
+            inicio, fin = _anio_entero(f["inicio_raw"]), _anio_entero(f["fin_raw"])
+            if inicio is None or fin is None or not (1900 <= inicio <= 2100 and 1900 <= fin <= 2100) or inicio > fin:
+                invalidas += 1; err("Años inválidos o invertidos", f); continue
+            firma = tuple([_normalizar(f[x]) for x in ("armadora", "modelo", "version", "motor")] + [inicio, fin])
+            if firma in vistos:
+                duplicados += 1; continue
+            vistos.add(firma); validas += 1
+            pieza["compatibilidades"].append({"armadora": f["armadora"], "modelo": f["modelo"],
+                "version": f["version"], "motor": f["motor"], "inicio": inicio, "fin": fin, "fila": f["fila"]})
+        piezas.append(pieza)
+
+    resultado = ResultadoCatalogo(piezas, "master_kims", filas_master, validas, invalidas,
+                                  duplicados, True, 0, 0, errores, len(observados))
+    resultado.metricas_kims = {"sku_excluidos_precio_stock": excluidos_precio_stock,
+        "sku_excluidos_marca": excluidos_marca, "sku_excluidos_producto": excluidos_producto,
+        "sku_excluidos_estructura": excluidos_estructura}
+    return resultado
 
 
 def _partes_codigos(valor):
@@ -494,6 +634,11 @@ def _leer_legado(wb, perfil):
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     try:
+        hoja_kims = _hoja_kims(wb)
+        if hoja_kims is not None:
+            return _leer_master_kims(hoja_kims)
+        if perfil.codigo_bodega == "KIM":
+            raise ValueError("El archivo no tiene la estructura esperada del master KIMS")
         hoja_cauplas = _hoja_cauplas(wb)
         if hoja_cauplas is not None:
             return _leer_master_cauplas(hoja_cauplas)
