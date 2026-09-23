@@ -14,7 +14,7 @@ se guarda el body crudo para diagnóstico.
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from database import get_db
 from routers.auth import require_admin
@@ -24,6 +24,21 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 # Tópicos suscritos en el DevCenter (docs/configuracion-app-ml.md §4). Cualquier
 # otro se guarda pero se marca procesada=1 (descartado) para que el sync no lo lea.
 TOPICS_SUSCRITOS = {"orders_v2", "payments", "invoices", "shipments"}
+
+
+@router.api_route(
+    "/mercadolibre",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+def verificar_webhook_ml():
+    """Verificación pública e inerte de disponibilidad del callback.
+
+    El DevCenter puede comprobar la URL por GET o HEAD antes de aceptarla.
+    Esta ruta no lee ni expone datos y el POST de notificaciones permanece
+    separado abajo.
+    """
+    return Response(status_code=200)
 
 
 @router.post("/mercadolibre")
