@@ -62,3 +62,17 @@ bodegas quedan en cero.
 
 Pruebas obligatorias: `test_publicaciones_kims.py`, las suites KG/CAUPLAS e
 imágenes, build del frontend y checklist completo de `api-seguridad`.
+
+## Mapa de implementación
+
+- Lector y detección: `backend/services/parser_catalogo.py`.
+- Perfil, código `KIM` y host autorizado: `backend/services/perfiles_catalogo.py`.
+- Títulos, descripción, precio y XLSX de 36 columnas:
+  `backend/services/generador_plantilla.py`.
+- Contrato HTTP, métricas y filtros: `backend/routers/publicaciones.py`.
+- Selector, tipo de cambio y marca por catálogo: `frontend/src/pages/Publicaciones.jsx`.
+- Regresión reproducible: `backend/scripts/test_publicaciones_kims.py`.
+
+Al cerrar cambios, actualizar también la regla breve en `CLAUDE.md` y el relato en
+`docs/bitacora-sesiones.md`; este documento debe permanecer como referencia técnica,
+no como bitácora cronológica.

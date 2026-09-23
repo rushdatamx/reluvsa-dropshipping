@@ -667,6 +667,16 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 > **`docs/validacion-imagenes-catalogo.md` completo**.
 > Antes de tocar KIMS, leer **`docs/master-kims-publicaciones-masivas.md` completo**.
 
+### Regla operativa de documentación del Módulo 2
+
+- Las reglas vigentes que impiden romper el flujo se guardan aquí, en `CLAUDE.md`.
+- El relato de una implementación, sus decisiones, cifras y verificaciones se guarda en
+  `docs/bitacora-sesiones.md`.
+- El contrato técnico reutilizable de cada formato se guarda en un documento específico
+  dentro de `docs/` (para KIMS: `docs/master-kims-publicaciones-masivas.md`).
+- Si una futura sesión modifica KIMS, debe actualizar las tres capas sin duplicar la
+  historia en este archivo y sin sobrescribir cambios locales existentes.
+
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
 plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
 Módulo 1**. Excepción acotada: si un catálogo aporta URLs de imagen, se aceptan sólo desde los

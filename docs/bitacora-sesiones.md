@@ -2738,3 +2738,11 @@ SKU utilizables, 7 compatibilidades con años inválidos y 10,799 variantes fina
 
 Se agregó `test_publicaciones_kims.py`; el contrato detallado vive en
 `docs/master-kims-publicaciones-masivas.md`.
+
+### Ubicación operativa de la documentación
+
+La regla vigente de dónde mantener esta información quedó en `CLAUDE.md` §9: reglas
+que protegen el módulo allí; relato y decisiones de esta sesión aquí; contrato técnico
+reutilizable en `docs/master-kims-publicaciones-masivas.md`. Esta separación evita que
+la próxima sesión tenga que reconstruir el diseño desde el diff o mezcle historia con
+instrucciones normativas.
