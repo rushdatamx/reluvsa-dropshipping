@@ -128,7 +128,7 @@ export default function PublicacionesAutozur() {
   return (
     <div>
       <PageHeader title="Publicaciones Autozur"
-        subtitle="Cruza publicaciones existentes con el catálogo vehicular y revisa los casos ambiguos" />
+        subtitle="Cruza publicaciones existentes con el catálogo vehicular y revisa sólo los casos ambiguos" />
 
       {error && <div className="mb-4 p-3 bg-red-50 text-danger rounded-lg text-sm flex gap-2">
         <AlertTriangle size={16} className="shrink-0 mt-0.5" /> {error}
@@ -211,7 +211,7 @@ export default function PublicacionesAutozur() {
                       <span className="text-xs text-notion-text-secondary">ID {r.user_product_id} · SKU {r.sku}</span>
                     </div>
                     <p className="text-sm font-semibold">{r.titulo}</p>
-                    {r.motivo && <p className="text-xs text-amber-800 mt-1">{r.motivo}</p>}
+                    {r.motivo && <p className={`text-xs mt-1 ${r.estado === 'lista' ? 'text-green-700' : 'text-amber-800'}`}>{r.motivo}</p>}
                   </div>
                   <div className="flex gap-2 shrink-0">
                     {r.estado === 'revision' && r.compatibilidades > 0 && detalleCompleto &&
@@ -277,7 +277,7 @@ export default function PublicacionesAutozur() {
             <span className="w-6 h-6 rounded-full bg-reluvsa-black text-reluvsa-yellow text-xs font-bold flex items-center justify-center">3</span>
             <h3 className="font-semibold">Descarga la plantilla</h3>
           </div>
-          <p className="text-xs text-notion-text-secondary mb-4">Incluye las coincidencias claras y las revisiones aprobadas. Excluye automáticamente los casos pendientes.</p>
+          <p className="text-xs text-notion-text-secondary mb-4">Incluye las coincidencias claras —también las autoaprobadas por fabricante inferido— y las revisiones aprobadas. Excluye automáticamente los casos pendientes.</p>
           <button onClick={generar} disabled={generando || (analisis.listas === 0 && !Object.values(decisiones).includes('aprobada'))}
             className="px-4 py-2 bg-reluvsa-yellow text-reluvsa-black rounded-lg text-sm font-bold hover:brightness-95 disabled:opacity-50 flex items-center gap-2">
             {generando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

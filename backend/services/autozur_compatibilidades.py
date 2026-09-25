@@ -200,6 +200,7 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
     }
     fabricante = ""
     fabricante_inferido = False
+    modelo_ambiguo = False
     resto = cabeza
     opciones_fabricante = sorted(set(catalogo.fabricantes) | set(alias_fabricante), key=len, reverse=True)
     for opcion in opciones_fabricante:
@@ -215,9 +216,9 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
                 modelo = opcion
                 break
 
-    # Si el título omite fabricante (p. ej. "P/ Spark 1.2 2017"), una
-    # coincidencia de modelo global sirve como propuesta, nunca como aprobación
-    # automática. Si el mismo modelo vive en varias marcas se conserva ambiguo.
+    # Si el título omite fabricante (p. ej. "P/ Spark 1.2 2017"), sólo se puede
+    # inferir cuando el modelo pertenece a una única marca. Si el mismo modelo
+    # vive en varias marcas se conserva ambiguo.
     if not fabricante:
         modelos_globales = sorted(catalogo.fabricantes_por_modelo, key=len, reverse=True)
         for opcion in modelos_globales:
@@ -227,6 +228,9 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
                     fabricante, modelo = marcas[0], opcion
                     resto = cabeza
                     fabricante_inferido = True
+                else:
+                    modelo = opcion
+                    modelo_ambiguo = True
                 break
 
     detalle_modelo = resto[len(modelo):].strip(" -/") if modelo and _empieza_con(resto, modelo) else ""
@@ -242,6 +246,7 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
         "modelo_detectado": resto,
         "detalle_modelo": detalle_modelo,
         "fabricante_inferido": fabricante_inferido,
+        "modelo_ambiguo": modelo_ambiguo,
     }
 
 
@@ -280,34 +285,44 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
     for posicion, fila in enumerate(publicaciones):
         parsed = interpretar_titulo(fila[1], catalogo)
         candidatos = _filtrar_candidatos(parsed, catalogo)
-        motivos = []
+        bloqueos = []
+        observaciones = []
         if parsed["fabricante_inferido"]:
-            motivos.append("El fabricante no viene en el título; se propone por el modelo y requiere confirmación.")
+            observaciones.append(
+                f"Fabricante inferido como {parsed['fabricante']} porque {parsed['modelo']} "
+                "sólo corresponde a esta marca en el catálogo."
+            )
         elif not parsed["fabricante"]:
-            motivos.append("No se identificó un fabricante al inicio de la sección P/.")
+            if parsed["modelo_ambiguo"]:
+                bloqueos.append("El modelo aparece asociado a varias marcas en el catálogo.")
+            else:
+                bloqueos.append("No se identificó un fabricante al inicio de la sección P/.")
         if parsed["fabricante"] and not parsed["modelo"]:
-            motivos.append("El modelo del título no coincide exactamente con el catálogo.")
+            bloqueos.append("El modelo del título no coincide exactamente con el catálogo.")
         if parsed["anio_desde"] is None:
-            motivos.append("El título no contiene un año utilizable.")
+            bloqueos.append("El título no contiene un año utilizable.")
         if not parsed["litros"]:
-            motivos.append("El título no contiene la cilindrada en litros.")
+            bloqueos.append("El título no contiene la cilindrada en litros.")
         if parsed["detalle_modelo"]:
-            motivos.append(
+            bloqueos.append(
                 f"El título agrega «{parsed['detalle_modelo']}» después del modelo; revisa submodelo o carrocería."
             )
         if not candidatos and parsed["fabricante"] and parsed["modelo"]:
             propuestas = _filtrar_candidatos({**parsed, "litros": "", "cilindros": ""}, catalogo)
             if propuestas:
                 candidatos = propuestas
-                motivos.append(
+                bloqueos.append(
                     "El motor exacto no aparece en el catálogo; se muestran opciones del mismo modelo y años."
                 )
-            elif not motivos:
-                motivos.append("No se encontraron vehículos con la combinación exacta del título.")
+            elif not bloqueos:
+                bloqueos.append("No se encontraron vehículos con la combinación exacta del título.")
 
-        # Sólo el conjunto determinado por fabricante + modelo + año + litros se
-        # aprueba automáticamente. Cilindros es un filtro adicional cuando existe.
-        estado = "lista" if candidatos and not motivos else ("revision" if candidatos else "sin_coincidencia")
+        # La lista automática exige fabricante/modelo/años/cilindrada exactos.
+        # Cilindros/configuración sólo restringen cuando aparecen explícitamente.
+        # Las variantes de submodelo son candidatas válidas: se exportan todas.
+        estado = "lista" if candidatos and not bloqueos else (
+            "revision" if candidatos or parsed["modelo_ambiguo"] else "sin_coincidencia"
+        )
         conteos[estado] += 1
         if estado == "lista":
             compatibilidades += len(candidatos)
@@ -318,7 +333,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
             "titulo": fila[1],
             "sku": fila[2],
             "estado": estado,
-            "motivo": " ".join(motivos),
+            "motivo": " ".join(observaciones + bloqueos),
             "extraido": parsed,
             "candidatos": candidatos,
         })

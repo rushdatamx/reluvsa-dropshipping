@@ -2632,10 +2632,14 @@ con los campos extraídos.
 
 Los estados son:
 
-- **Lista:** fabricante, modelo, años y litros están presentes y producen coincidencias
-  coherentes.
-- **A revisión:** falta un dato, el fabricante fue inferido, el título contiene un
-  submodelo adicional o el motor exacto no aparece pero hay opciones cercanas.
+- **Lista:** fabricante, modelo, años y cilindrada están presentes y producen coincidencias
+  exactas. Si el fabricante no aparece en el título, también puede quedar lista cuando el
+  modelo sólo existe para una marca en el catálogo: el sistema muestra la inferencia y
+  autoaprueba todas las variantes de submodelo que coincidan.
+- **A revisión:** falta un dato, el modelo pertenece a varias marcas, el título contiene un
+  submodelo o versión adicional no resoluble, o el motor exacto no aparece pero hay opciones
+  cercanas. La cilindrada es el dato principal del motor; cilindros/configuración sólo son
+  requisito adicional cuando aparecen explícitamente en el título.
 - **Sin coincidencia:** no hay una propuesta segura que mostrar.
 
 Las revisiones con más de cinco candidatos se cargan bajo demanda. Gaby debe abrir la
@@ -2655,18 +2659,20 @@ El núcleo está en `backend/services/autozur_compatibilidades.py`:
 - reconoce rangos `1975/1979`, `1975-1979`, listas de años, litros con o sin `L` y
   motores como `L4`, `V6` y `V8`;
 - admite alias controlados como `VW → VOLKSWAGEN`;
-- puede proponer el fabricante cuando el modelo sólo existe en una marca, pero siempre
-  manda ese caso a revisión;
+- puede inferir y autoaprobar el fabricante cuando el modelo sólo existe en una marca,
+  siempre que coincidan exactamente años y cilindrada; la explicación queda visible en la
+  pantalla;
 - filtra por año, litros y cilindros cuando aparecen explícitamente;
 - si el motor exacto no existe, muestra opciones del mismo modelo y años como propuestas,
   nunca como aprobación automática;
 - conserva todos los campos originales y genera las 17 columnas en el mismo orden.
 
-El parser no intenta adivinar fabricante, años, litros, submodelo ni atributos ausentes.
-Esto es especialmente importante para títulos abreviados como `P/ Spark 1.2 2017`,
-`P/ Silverado 1500 V8 5.3 2018-2019` o títulos que mezclan versión y modelo. Esos casos
-quedan visibles para revisión en lugar de producir una compatibilidad silenciosamente
-incorrecta.
+El parser no adivina fabricantes compartidos, años, cilindrada, submodelo ni atributos
+ausentes. Un fabricante omitido sólo se infiere cuando el modelo pertenece a una única
+marca; por ejemplo, `P/ Spark 1.2 2017` puede quedar listo si la coincidencia es exacta.
+Los títulos que mezclan una versión no resoluble, como `P/ Silverado 1500 V8 5.3
+2018-2019`, quedan visibles para revisión en lugar de producir una compatibilidad
+silenciosamente incorrecta.
 
 El backend expone únicamente endpoints internos del portal:
 
