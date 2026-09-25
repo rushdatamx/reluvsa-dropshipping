@@ -26,7 +26,7 @@ Las reglas fijas son:
 8. La columna O se ignora porque sólo contiene nombres `.png`; las imágenes llegan
    exclusivamente del CSV obligatorio de ImageKit y se cruzan por SKU.
 9. `stock` es obligatorio en el master, se valida por SKU y la plantilla conserva
-   exactamente 36 columnas; `Cantidad` y sólo CAUPLAS reciben ese stock.
+   exactamente 37 columnas; `Cantidad` y sólo CAUPLAS reciben ese stock.
 10. No se crean tablas ni migraciones. La única red permitida es la validación
     controlada de `https://ik.imagekit.io` descrita en §11.
 
@@ -230,8 +230,8 @@ futuro trae la fórmula sin caché, el costo y Precio quedan vacíos.
 - desde 299.00 → `Si`;
 - precio vacío → Envío Gratis vacío.
 
-La salida mantiene las 36 columnas canónicas. `Cantidad` y la columna CAUPLAS
-reciben el stock del SKU; AG, KG, KIM, MATRIZ y VAZLO reciben cero. Para otro
+La salida mantiene las 37 columnas canónicas. `Cantidad` y la columna CAUPLAS
+reciben el stock del SKU; AG, KG, KIM, MATRIZ, VAZLO y GONHER reciben cero. Para otro
 proveedor, sólo cambia la bodega que recibe el valor; no se usa un stock global.
 
 ## 11. Imágenes

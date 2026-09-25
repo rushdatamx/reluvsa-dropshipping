@@ -1,7 +1,7 @@
 """
 Generador de la plantilla de publicaciones masivas para Mercado Libre.
 
-Convierte el catálogo de un proveedor en el .xlsx de 36 columnas que Gaby sube a
+Convierte el catálogo de un proveedor en el .xlsx de 37 columnas que Gaby sube a
 ML — el mismo formato de 'PENDIENTES ACDELCO.xlsx', que es la plantilla real que
 ella usa hoy.
 
@@ -34,7 +34,7 @@ from services.aplicaciones_kg import Aplicacion, parse_aplicaciones
 from services.perfiles_catalogo import PerfilCatalogo
 from services.precio_publicacion import ParametrosPrecio, calcular_precio
 
-# Las 36 columnas de la plantilla, en el orden EXACTO que espera Mercado Libre.
+# Las 37 columnas de la plantilla, en el orden EXACTO que espera Mercado Libre.
 # 🔴 No reordenar ni renombrar: ML lee por posición y encabezado.
 COLUMNAS = [
     "Titulo", "Categoria", "Precio", "Moneda(MXN,ARS,COP)", "Cantidad",
@@ -46,11 +46,11 @@ COLUMNAS = [
     "Imagen6", "Imagen7", "Imagen8", "Imagen9", "Imagen10",
     "UPC", "Marca", "Talla", "Color", "Modelo",
     "Canal(mercadolibre,mshops,ambos)",
-    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO",
+    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER",
 ]
 
-# Las 6 bodegas del final: el stock va en la columna del proveedor, 0 en las demás.
-BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO"]
+# Las 7 bodegas del final: el stock va en la columna del proveedor, 0 en las demás.
+BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER"]
 
 # Las constantes que Gaby marcó en AMARILLO PURO: siempre van iguales.
 # "Envio Gratis" no pertenece aquí: se deriva del precio final de cada fila.
@@ -92,7 +92,7 @@ class FilaPublicacion:
     truncada: bool = False
     imagenes: List[str] = field(default_factory=list)
     fila_origen: Optional[int] = None
-    stock: int = 0
+    stock: Optional[int] = 0
     marca: str = ""
 
 
@@ -306,6 +306,37 @@ def _titulo_kims(producto, compat) -> Optional[str]:
     return None
 
 
+def _motor_gonher_reducido(motor):
+    texto = " ".join(str(motor or "").split())
+    arquitectura = re.search(r"\b(?:L|V|H|I|B|W)\s*\d{1,2}\b", texto, re.IGNORECASE)
+    cilindrada = re.search(r"\b\d+(?:[.,]\d+)?\s*L\b", texto, re.IGNORECASE)
+    partes = []
+    for coincidencia in (arquitectura, cilindrada):
+        if coincidencia:
+            valor = re.sub(r"\s+", "", coincidencia.group(0)).replace(",", ".").upper()
+            if valor not in partes:
+                partes.append(valor)
+    return " ".join(partes)
+
+
+def _titulo_gonher(producto, compat) -> Optional[str]:
+    producto = " ".join(str(producto or "").split())
+    marca = " ".join(str(compat.get("armadora") or "").split())
+    modelo = " ".join(str(compat.get("modelo") or "").split())
+    motor = " ".join(str(compat.get("motor") or "").split())
+    anios = " ".join(str(compat.get("anios") or "").split())
+    intentos = [
+        (producto, "P/", marca, modelo, motor, anios),
+        (producto, "P/", marca, modelo, _motor_gonher_reducido(motor), anios),
+        (producto, "P/", modelo, _motor_gonher_reducido(motor), anios),
+    ]
+    for partes in intentos:
+        titulo = re.sub(r"\s+", " ", " ".join(x for x in partes if x)).strip()
+        if titulo and len(titulo) <= MAX_TITULO:
+            return titulo
+    return None
+
+
 def _titular(nombre_pieza: str, app: Aplicacion) -> str:
     """Arma el título como lo escribe Gaby: 'Pieza P/ Coche Motor Años'.
 
@@ -433,9 +464,63 @@ def _describir_kims(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _describir_gonher(pieza, config):
+    productos = pieza.get("productos", []) or [pieza.get("producto", "")]
+    encabezado = " y ".join(productos)
+    tipos = pieza.get("tipos", [])
+    if tipos:
+        encabezado += " y " + " | ".join(tipos)
+    partes = [encabezado]
+    if pieza.get("codigos_actuales"):
+        partes += ["", "Código actual: " + " | ".join(pieza["codigos_actuales"])]
+    partes += ["Número de parte: " + str(pieza.get("clave", ""))]
+    if pieza.get("roscas"):
+        partes += ["Rosca: " + " | ".join(pieza["roscas"])]
+    medidas = [(nombre, valores) for nombre, valores in pieza.get("medidas", {}).items() if valores]
+    if medidas:
+        partes += ["Medidas:"]
+        partes += [f"{nombre}: {' | '.join(str(v) + (' cm' if not re.search(r'[a-zA-Z]', str(v)) else '') for v in valores)}"
+                   for nombre, valores in medidas]
+    if pieza.get("oems"):
+        partes += ["OEM: " + " | ".join(pieza["oems"])]
+    for marca, codigos in pieza.get("equivalencias", {}).items():
+        if codigos:
+            partes += [f"{marca}: {' | '.join(codigos)}"]
+    compatibilidades = []
+    for c in pieza.get("compatibilidades", []):
+        texto = " ".join(x for x in (c.get("armadora"), c.get("modelo"), c.get("motor"), c.get("anios")) if x)
+        if _sin_acentos(texto) not in {_sin_acentos(x) for x in compatibilidades}:
+            compatibilidades.append(texto)
+    if compatibilidades:
+        partes += ["", "Compatibilidades:"] + compatibilidades
+    if config.descripcion_base:
+        partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
+        if pieza.get("formato") == "master_gonher":
+            descripcion = _describir_gonher(pieza, config)
+            precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
+            for compat in pieza.get("compatibilidades", []):
+                titulo = _titulo_gonher(compat.get("producto"), compat)
+                if not titulo:
+                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                        "anio": compat.get("anios"), "inicio": compat.get("inicio"), "fin": compat.get("fin"),
+                        "motivo": "Título excede 60 caracteres"})
+                    continue
+                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                if par in vistos:
+                    deduplicadas += 1
+                    continue
+                vistos.add(par)
+                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
+                    compat.get("linea", ""), precio, descripcion, compat.get("anios", ""), False,
+                    [], compat.get("fila"), stock=None))
+            continue
         if pieza.get("formato") == "master_kims":
             descripcion = _describir_kims(pieza, config)
             precio = calcular_precio(pieza.get("costo_usd") * config.tipo_cambio_usd,
@@ -510,7 +595,7 @@ def generar_filas_con_reporte(piezas, config):
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
-    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims"}:
+    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
         return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 
@@ -542,7 +627,7 @@ def generar_filas(piezas, config: ConfiguracionProveedor,
 
 def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
                   destino) -> int:
-    """Escribe el .xlsx con las 36 columnas listo para subir a ML."""
+    """Escribe el .xlsx con las 37 columnas listo para subir a ML."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Publicaciones"
@@ -575,10 +660,13 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
 
         for nombre, valor in CONSTANTES.items():
             ws.cell(f, idx[nombre], valor)
-        ws.cell(f, idx["Cantidad"], fila.stock)
+        if fila.stock is not None:
+            ws.cell(f, idx["Cantidad"], fila.stock)
 
         # Stock en la bodega del proveedor, 0 en las demás.
         for b in BODEGAS:
+            if fila.stock is None and b == bodega:
+                continue
             ws.cell(f, idx[b], fila.stock if b == bodega else 0)
 
         # KG conserva Imagen1..5; CAUPLAS puede usar la galería completa de 10.

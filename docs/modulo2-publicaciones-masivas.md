@@ -8,13 +8,14 @@
 > leer también `docs/master-kg-categorias-producto.md` completo.
 > Para tocar el master CAUPLAS, su validación, títulos, descripción o métricas,
 > leer también `docs/master-cauplas-publicaciones-masivas.md` completo.
-> Para tocar Precio, `Envio Gratis(si,no)`, las 36 columnas o `CONSTANTES`, leer
+> Para tocar Precio, `Envio Gratis(si,no)`, las 37 columnas o `CONSTANTES`, leer
 > también `docs/envio-gratis-precio-final.md` completo.
 > Para tocar URLs, red, resolución o columnas Imagen 1–10, leer también
 > `docs/validacion-imagenes-catalogo.md` completo.
 
 **Qué es:** un transformador **Excel → Excel**. Toma el catálogo de un proveedor
-y devuelve la plantilla de 36 columnas que Gaby sube a Mercado Libre.
+y devuelve la plantilla de 37 columnas que Gaby sube a Mercado Libre. GONHER se
+agregó al final sin mover las 36 posiciones anteriores.
 🔴 **No toca la API de ML ni ningún dato del Módulo 1**. Cuando el catálogo o el
 CSV auxiliar aporta URLs, existe una excepción controlada: las valida contra los hosts
 exactos declarados en su perfil, confirma que respondan como imagen y que ambos
@@ -58,6 +59,10 @@ de Excel se acepta como `10`; vacío, texto, negativo o decimal se rechaza. Si
 un SKU repetido trae stocks distintos, se excluye el SKU completo. Todas las
 exclusiones se devuelven con fila, clave y motivo para mostrarlas en la interfaz.
 Stock `0` es válido y se publica como agotado.
+
+GONHER es la excepción explícita: su master no aporta stock operativo. Sus filas
+usan `stock=None`, por lo que `Cantidad` y la bodega GONHER quedan vacías y las
+demás bodegas reciben cero. Ver `docs/master-gonher-publicaciones-masivas.md`.
 
 En el XLSX de salida, `Cantidad` y la columna de bodega del proveedor reciben el
 stock del SKU; las otras bodegas reciben `0`. El endpoint `/api/publicaciones/generar`

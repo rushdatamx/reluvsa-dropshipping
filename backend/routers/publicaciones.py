@@ -84,7 +84,8 @@ def _leer_o_400(ruta, perfil):
                     f"{perfil.codigo_bodega}? Esperamos la clave en la columna "
                     f"{chr(65 + perfil.col_clave)}."),
         )
-    formato_esperado = {"CAUPLAS": "master_cauplas", "KIM": "master_kims"}.get(perfil.codigo_bodega)
+    formato_esperado = {"CAUPLAS": "master_cauplas", "KIM": "master_kims",
+                        "GONHER": "master_gonher"}.get(perfil.codigo_bodega)
     if formato_esperado and resultado.formato != formato_esperado:
         raise HTTPException(
             status_code=400,
@@ -98,6 +99,9 @@ def _leer_o_400(ruta, perfil):
     if resultado.formato == "master_kims" and perfil.codigo_bodega != "KIM":
         raise HTTPException(status_code=400,
                             detail="Este archivo parece ser el master de KIMS; selecciona KIMS como proveedor.")
+    if resultado.formato == "master_gonher" and perfil.codigo_bodega != "GONHER":
+        raise HTTPException(status_code=400,
+                            detail="Este archivo parece ser el master de GONHER; selecciona GONHER como proveedor.")
     return resultado
 
 
@@ -148,7 +152,7 @@ async def analizar(
         publicados = set()
         if ruta_pub:
             try:
-                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims"}
+                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}
                               else leer_skus_publicados(ruta_pub))
             except Exception:
                 raise HTTPException(
@@ -158,7 +162,7 @@ async def analizar(
                 )
 
         cfg = ConfiguracionProveedor(codigo_bodega=codigo_bodega)
-        if lectura.formato in {"master_kg", "master_cauplas", "master_kims"}:
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
             candidatos, reporte = generar_filas_con_reporte(piezas, cfg)
             cruce_v = cruzar_variantes(candidatos, publicados)
             filas = cruce_v["pendientes"]
@@ -174,7 +178,8 @@ async def analizar(
                 por_producto.append({"linea": producto, "producto": producto, "piezas": len(pp),
                     "compatibilidades": (sum(len(p["compatibilidades"]) for p in pp)
                         if lectura.formato in {"master_kg", "master_kims"} else
-                        sum(1 for p in pp for c in p["compatibilidades"] if c.get("producto") == producto)),
+                        sum(1 for p in pp for c in p["compatibilidades"]
+                            if c.get("producto" if lectura.formato == "master_cauplas" else "linea") == producto)),
                     "publicaciones": len(cand), "publicaciones_faltantes": len(pend)})
             errores = lectura.errores + reporte["exclusiones"]
             por_sistema = []
@@ -254,7 +259,7 @@ async def generar(
     solo_faltantes: bool = Form(True),
     _=Depends(require_admin),
 ):
-    """Genera el .xlsx con las 36 columnas listo para subir a Mercado Libre."""
+    """Genera el .xlsx con las 37 columnas listo para subir a Mercado Libre."""
     perfil = _perfil_o_400(codigo_bodega)
     if perfil.codigo_bodega == "CAUPLAS" and not imagenes_cauplas:
         raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
@@ -289,11 +294,12 @@ async def generar(
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="El filtro de líneas no es una lista válida.")
             if elegidas:
-                if lectura.formato == "master_cauplas":
+                if lectura.formato in {"master_cauplas", "master_gonher"}:
                     filtradas = []
                     for pieza in piezas:
+                        campo = "producto" if lectura.formato == "master_cauplas" else "linea"
                         compatibilidades = [c for c in pieza.get("compatibilidades", [])
-                                            if (c.get("producto") or "").upper() in elegidas]
+                                            if (c.get(campo) or "").upper() in elegidas]
                         if compatibilidades:
                             copia = dict(pieza)
                             copia["compatibilidades"] = compatibilidades
@@ -336,7 +342,7 @@ async def generar(
         filas = generar_filas(piezas, config)
         if galerias_cauplas is not None:
             asignar_imagenes_cauplas(filas, galerias_cauplas)
-        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims"}:
+        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas:
             raise HTTPException(

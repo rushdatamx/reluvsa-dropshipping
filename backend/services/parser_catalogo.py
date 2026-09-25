@@ -43,6 +43,14 @@ KIMS_HEADERS = (
 )
 KIMS_ANCLAS = ("original", "armadora", "modelo", "descripcion", "cantidad", "marca", "sistema", "PRECIO")
 
+GONHER_HEADERS = (
+    "Producto", "Línea", "Código Actual", "Filtro", "Marca", "Modelo", "Motor", "Año",
+    "Tipo", "Rosca", "Altura cm", "Ø Ext. cm", "Ø Int. cm", "Largo. cm", "Ancho. cm",
+    "OEM 1", "OEM 2", "Parte FRAM", "Parte Interfill", "Precio",
+)
+GONHER_ANCLAS = ("Producto", "Línea", "Código Actual", "Filtro", "Marca", "Modelo", "Año", "Precio")
+GONHER_PLACEHOLDERS = {"", "^^", "- na -", "n/a", "na", "nd", "-"}
+
 
 def _texto(val) -> str:
     if val is None: return ""
@@ -197,6 +205,35 @@ def _headers_kims(ws):
     valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     mapa = {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
     return all(_normalizar(h) in mapa for h in KIMS_HEADERS), mapa
+
+
+def _headers_gonher(ws):
+    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    ocurrencias = {}
+    for i, valor in enumerate(valores):
+        if _texto(valor):
+            ocurrencias.setdefault(_normalizar(valor), []).append(i)
+    completo = all(_normalizar(h) in ocurrencias for h in GONHER_HEADERS)
+    completo = completo and len(ocurrencias.get(_normalizar("Ø Int. cm"), [])) >= 2
+    return completo, ocurrencias
+
+
+def _parece_gonher(ws):
+    _, columnas = _headers_gonher(ws)
+    return sum(_normalizar(h) in columnas for h in GONHER_ANCLAS) >= 5
+
+
+def _hoja_gonher(wb):
+    canonica = wb["Gonher"] if "Gonher" in wb.sheetnames else None
+    if canonica is not None and _headers_gonher(canonica)[0]:
+        return canonica
+    completas = [ws for ws in wb.worksheets if ws.title not in {"Hoja1", "GC"} and _headers_gonher(ws)[0]]
+    if completas:
+        return completas[0]
+    if canonica is not None and _parece_gonher(canonica):
+        return canonica
+    incompletas = [ws for ws in wb.worksheets if ws.title not in {"Hoja1", "GC"} and _parece_gonher(ws)]
+    return incompletas[0] if incompletas else None
 
 
 def _parece_kims(ws):
@@ -488,6 +525,124 @@ def _leer_master_cauplas(ws) -> ResultadoCatalogo:
     )
 
 
+def _gonher_valido(valor):
+    texto = _texto(valor)
+    return "" if _normalizar(texto) in GONHER_PLACEHOLDERS else texto
+
+
+def _validar_anios_gonher(valor):
+    texto = _texto(valor)
+    anios = [int(x) for x in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", texto)]
+    if len(anios) not in (1, 2) or any(not 1900 <= x <= 2100 for x in anios):
+        return None, None, "Año debe contener uno o dos años de cuatro dígitos entre 1900 y 2100"
+    if len(anios) == 2 and anios[0] > anios[1]:
+        return anios[0], anios[1], "Rango de años invertido"
+    # No aceptar texto con cifras/años adicionales escondidos.
+    resto = re.sub(r"(?<!\d)(?:19|20)\d{2}(?!\d)", "", texto)
+    if re.search(r"\d{3,}", resto):
+        return None, None, "Año contiene un formato no reconocido"
+    return anios[0], anios[-1], None
+
+
+def _leer_master_gonher(ws) -> ResultadoCatalogo:
+    valido, columnas = _headers_gonher(ws)
+    if not valido:
+        faltan = [h for h in GONHER_HEADERS if _normalizar(h) not in columnas]
+        if len(columnas.get(_normalizar("Ø Int. cm"), [])) < 2:
+            faltan.append("Ø Int. cm (segunda ocurrencia)")
+        raise ValueError(
+            f"La hoja «{ws.title}» parece ser el master GONHER, pero le faltan "
+            "los encabezados requeridos: " + ", ".join(faltan)
+        )
+
+    def val(fila, nombre, ocurrencia=0):
+        indices = columnas.get(_normalizar(nombre), [])
+        if len(indices) <= ocurrencia:
+            return None
+        i = indices[ocurrencia]
+        return fila[i] if i < len(fila) else None
+
+    grupos, errores, observados = {}, [], set()
+    filas_master = validas = invalidas = duplicados = 0
+    max_col = max(i for indices in columnas.values() for i in indices) + 1
+    for numero, fila in enumerate(ws.iter_rows(min_row=2, max_col=max_col, values_only=True), 2):
+        if not any(_texto(x) for x in fila):
+            continue
+        filas_master += 1
+        sku = _texto(val(fila, "Filtro"))
+        linea = _texto(val(fila, "Línea")).upper()
+        producto_base = _texto(val(fila, "Producto"))
+        producto = " ".join(x for x in (producto_base.capitalize(), "de", linea.lower()) if x)
+        datos = {"clave": sku, "armadora": val(fila, "Marca"), "modelo": val(fila, "Modelo"),
+                 "anio": val(fila, "Año")}
+        if not sku:
+            errores.append(_error(numero, datos, "Filtro/SKU vacío"))
+            continue
+        observados.add(sku.upper())
+        inicio, fin, motivo = _validar_anios_gonher(val(fila, "Año"))
+        if motivo:
+            invalidas += 1
+            errores.append(_error(numero, datos, motivo))
+            continue
+        validas += 1
+        g = grupos.setdefault(sku.upper(), {
+            "clave": sku, "linea": linea, "lineas": [], "producto": producto,
+            "formato": "master_gonher", "compatibilidades": [], "productos": [],
+            "codigos_actuales": [], "tipos": [], "roscas": [],
+            "medidas": {"Altura": [], "Diámetro exterior": [], "Diámetro interior 1": [],
+                        "Diámetro interior 2": [], "Largo": [], "Ancho": []},
+            "oems": [], "equivalencias": {"FRAM": [], "Interfill": []},
+            "imagenes": [], "stock": None, "_costos": set(), "filas_origen": [],
+        })
+        g["filas_origen"].append(numero)
+        _agregar_unico(g["lineas"], linea)
+        _agregar_unico(g["productos"], producto)
+        _agregar_unico(g["codigos_actuales"], _gonher_valido(val(fila, "Código Actual")))
+        _agregar_unico(g["tipos"], _gonher_valido(val(fila, "Tipo")))
+        _agregar_unico(g["roscas"], _gonher_valido(val(fila, "Rosca")))
+        for etiqueta, encabezado, ocurrencia in (
+            ("Altura", "Altura cm", 0), ("Diámetro exterior", "Ø Ext. cm", 0),
+            ("Diámetro interior 1", "Ø Int. cm", 0), ("Diámetro interior 2", "Ø Int. cm", 1),
+            ("Largo", "Largo. cm", 0), ("Ancho", "Ancho. cm", 0),
+        ):
+            _agregar_unico(g["medidas"][etiqueta], _gonher_valido(val(fila, encabezado, ocurrencia)))
+        for encabezado in ("OEM 1", "OEM 2"):
+            _agregar_unico(g["oems"], _gonher_valido(val(fila, encabezado)))
+        _agregar_unico(g["equivalencias"]["FRAM"], _gonher_valido(val(fila, "Parte FRAM")))
+        _agregar_unico(g["equivalencias"]["Interfill"], _gonher_valido(val(fila, "Parte Interfill")))
+        costo = _numero_positivo(val(fila, "Precio"))
+        if costo is not None:
+            g["_costos"].add(costo)
+        compat = {"producto": producto, "linea": linea, "armadora": _texto(val(fila, "Marca")),
+                  "modelo": _texto(val(fila, "Modelo")), "motor": _texto(val(fila, "Motor")),
+                  "anios": _texto(val(fila, "Año")), "inicio": inicio, "fin": fin, "fila": numero}
+        firma = tuple(_normalizar(compat[x]) for x in ("producto", "armadora", "modelo", "motor", "anios"))
+        existentes = {tuple(_normalizar(c[x]) for x in ("producto", "armadora", "modelo", "motor", "anios"))
+                     for c in g["compatibilidades"]}
+        if firma in existentes:
+            duplicados += 1
+        else:
+            g["compatibilidades"].append(compat)
+
+    sin_precio = inconsistentes = 0
+    for g in grupos.values():
+        if len(g["_costos"]) == 1:
+            g["costo"] = next(iter(g["_costos"]))
+        else:
+            g["costo"] = None
+            motivo = "Costo inválido o sin valor positivo"
+            if len(g["_costos"]) > 1:
+                inconsistentes += 1
+                motivo = "Precios diferentes dentro del SKU"
+            else:
+                sin_precio += 1
+            errores.append(_error(g["filas_origen"][0], {"clave": g["clave"]}, motivo))
+        del g["_costos"]
+    return ResultadoCatalogo(list(grupos.values()), "master_gonher", filas_master, validas,
+                             invalidas, duplicados, True, sin_precio, inconsistentes,
+                             errores, len(observados))
+
+
 def _leer_master(ws) -> ResultadoCatalogo:
     valido, columnas, encabezado_costo = _headers_master(ws)
     if not valido or STOCK_HEADER not in columnas:
@@ -634,6 +789,11 @@ def _leer_legado(wb, perfil):
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     try:
+        hoja_gonher = _hoja_gonher(wb)
+        if hoja_gonher is not None:
+            return _leer_master_gonher(hoja_gonher)
+        if perfil.codigo_bodega == "GONHER":
+            raise ValueError("El archivo no tiene la estructura esperada del master GONHER")
         hoja_kims = _hoja_kims(wb)
         if hoja_kims is not None:
             return _leer_master_kims(hoja_kims)

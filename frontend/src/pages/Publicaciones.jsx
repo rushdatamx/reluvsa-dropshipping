@@ -298,6 +298,13 @@ export default function Publicaciones() {
             </div>
           )}
 
+          {analisis.formato === 'master_gonher' && (
+            <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
+              GONHER procesa únicamente la hoja de aplicaciones Gonher; la hoja GC no se procesa.
+              El stock y las imágenes se completan manualmente después de generar la plantilla.
+            </div>
+          )}
+
           {analisis.fotos && (
             <div className="mb-3 p-3 bg-blue-50 text-blue-900 rounded-lg text-xs">
               <strong>Fotos CAUPLAS:</strong> {analisis.fotos.skus_con_fotos.toLocaleString('es-MX')} SKU con fotos,
@@ -438,6 +445,9 @@ export default function Publicaciones() {
             ) : analisis.formato === 'master_kims' ? (
               <><strong>KIMS conserva FOTO 1–4 en su posición original.</strong> Sólo se acepta HTTPS
               desde www.kimsauto.com.mx y cada imagen debe medir al menos 1200×1200.</>
+            ) : analisis.formato === 'master_gonher' ? (
+              <><strong>GONHER deja vacíos el stock y las imágenes.</strong> Se completan manualmente;
+              la hoja GC no forma parte de este proceso.</>
             ) : (
               <><strong>Imagen 1–5 se conservan desde el catálogo cuando existan</strong> y sólo pasan si el dominio está autorizado, responden y miden al menos 1200×1200.
               Imagen 6–10 permanecen vacías.</>

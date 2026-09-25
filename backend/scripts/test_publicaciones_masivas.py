@@ -157,7 +157,7 @@ check("las compatibilidades listan TODAS las aplicaciones, no sólo la de su fil
 check("todas las filas de una pieza comparten descripción",
       len({x.descripcion for x in generar_filas(piezas, cfg_desc)}) == 1)
 
-print("\n=== 8. PLANTILLA: las 36 columnas de Mercado Libre ===")
+print("\n=== 8. PLANTILLA: las 37 columnas de Mercado Libre ===")
 columnas_esperadas = [
     "Titulo", "Categoria", "Precio", "Moneda(MXN,ARS,COP)", "Cantidad",
     "Tipo Publicacion (clasica,premium)", "Condición(nuevo,usado)",
@@ -167,15 +167,15 @@ columnas_esperadas = [
     "Imagen1", "Imagen2", "Imagen3", "Imagen4", "Imagen5", "Imagen6",
     "Imagen7", "Imagen8", "Imagen9", "Imagen10", "UPC", "Marca", "Talla",
     "Color", "Modelo", "Canal(mercadolibre,mshops,ambos)",
-    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO",
+    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER",
 ]
-check("conserva exactamente las 36 columnas y su orden esperado",
+check("conserva exactamente las 37 columnas y su orden esperado",
       COLUMNAS == columnas_esperadas, COLUMNAS)
-check("no hay columnas repetidas", len(set(COLUMNAS)) == 36)
+check("no hay columnas repetidas", len(set(COLUMNAS)) == 37)
 check("el orden arranca con Titulo/Categoria/Precio",
       COLUMNAS[:3] == ["Titulo", "Categoria", "Precio"])
-check("las 6 bodegas van al final",
-      COLUMNAS[-6:] == ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO"])
+check("las 7 bodegas van al final",
+      COLUMNAS[-7:] == ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER"])
 check("Imagen1..10 existen (van vacías, Gaby las pega)",
       all(f"Imagen{i}" in COLUMNAS for i in range(1, 11)))
 
@@ -194,7 +194,7 @@ wb_umbral = openpyxl.load_workbook(salida_umbral.name, data_only=True)
 ws_umbral = wb_umbral.active
 encabezados_umbral = [c.value for c in ws_umbral[1]]
 idx_umbral = {nombre: posicion + 1 for posicion, nombre in enumerate(encabezados_umbral)}
-check("el xlsx conserva exactamente sus 36 encabezados en orden",
+check("el xlsx conserva exactamente sus 37 encabezados en orden",
       encabezados_umbral == columnas_esperadas, encabezados_umbral)
 check("$298.99 produce Envío Gratis = No",
       ws_umbral.cell(2, idx_umbral["Envio Gratis(si,no)"]).value == "No")

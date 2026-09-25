@@ -2752,3 +2752,34 @@ que protegen el módulo allí; relato y decisiones de esta sesión aquí; contra
 reutilizable en `docs/master-kims-publicaciones-masivas.md`. Esta separación evita que
 la próxima sesión tenga que reconstruir el diseño desde el diff o mezcle historia con
 instrucciones normativas.
+
+## 2026-09-25 — GONHER en Publicaciones masivas
+
+Se incorporó GONHER como `master_gonher`, limitado a la hoja Gonher y sin tocar API ni
+base de datos. El lector detecta encabezados normalizados, conserva por ocurrencia los dos
+diámetros interiores, agrupa por Filtro y valida cada aplicación de años de forma aislada.
+Consolida código actual, tipo, rosca, medidas, OEM, FRAM e Interfill; el costo inválido deja
+Precio vacío. Stock e imágenes quedan para captura manual y la hoja GC se ignora.
+
+La plantilla agregó GONHER al final y pasó de 36 a 37 columnas sin mover las anteriores.
+Para este proveedor `Cantidad` y GONHER quedan vacías, mientras las demás bodegas reciben
+cero. La interfaz ofrece filtros por Línea y muestra la nota operativa de stock, imágenes y
+GC. El contrato técnico quedó en `docs/master-gonher-publicaciones-masivas.md` y la regresión
+autocontenida en `backend/scripts/test_publicaciones_gonher.py`.
+
+La validación contra el master disponible dio 20,054 filas, 861 SKU, 4 años inválidos,
+26 SKU sin costo, 71 duplicados, 131 títulos excluidos y 19,848 publicaciones. La cifra
+previa esperaba 130/19,849; la única diferencia es un título mínimo de 61 caracteres.
+Se conservó la regla fijada de no recortar ni abreviar el modelo, en vez de ocultar la
+diferencia mediante un corte especial.
+
+### Regla que queda para las siguientes sesiones
+
+Este formato debe mantenerse como lector local y aislado. Antes de tocarlo, se debe leer
+la referencia técnica y preservar: (1) la huella por encabezados y el descarte de `GC`,
+(2) las dos ocurrencias de `Ø Int. cm`, (3) años válidos por fila, (4) deduplicación por
+SKU+título normalizado, (5) exclusión explícita de títulos mayores a 60 sin recortar
+modelo/años y (6) stock e imágenes manuales. La plantilla conserva las 36 columnas
+existentes y agrega `GONHER` sólo al final. La prueba de contrato es
+`backend/scripts/test_publicaciones_gonher.py`; cualquier cambio de estas reglas debe
+actualizar también este relato y `docs/master-gonher-publicaciones-masivas.md`.

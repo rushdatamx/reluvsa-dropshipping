@@ -31,6 +31,17 @@ class PerfilCatalogo:
 
 
 PERFILES: Dict[str, PerfilCatalogo] = {
+    "GONHER": PerfilCatalogo(
+        codigo_bodega="GONHER",
+        nombre_hoja=None,
+        fila_header=1,
+        col_clave=3,
+        col_linea=1,
+        col_aplicaciones=8,
+        col_precio_costo=23,
+        anclas_header=("producto", "linea", "codigo actual", "filtro", "marca", "modelo", "ano", "precio"),
+        marca_ml="GONHER",
+    ),
     "KIM": PerfilCatalogo(
         codigo_bodega="KIM",
         nombre_hoja=None,

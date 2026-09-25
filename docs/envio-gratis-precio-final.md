@@ -50,10 +50,10 @@ de la fila es el contrato entre el cálculo y el Excel.
 
 ## Plantilla y presentación
 
-La plantilla conserva exactamente 36 columnas. `Envio Gratis(si,no)` permanece en la
+La plantilla conserva exactamente 37 columnas. `Envio Gratis(si,no)` permanece en la
 posición 11, entre Dimensiones y SKU. Al dejar de ser constante también deja de recibir el
 relleno amarillo reservado para constantes; esto es intencional porque su valor cambia por
-fila.
+fila. GONHER se agregó como columna final sin mover las 36 posiciones anteriores.
 
 ## Regresiones obligatorias
 
@@ -69,7 +69,7 @@ La suite debe generar y volver a leer el Excel para verificar:
 2. `$299.00` produce `Si`.
 3. Un precio superior produce `Si`.
 4. `None` deja vacíos Precio y Envío Gratis.
-5. Los 36 encabezados conservan exactamente su nombre y orden.
+5. Los 37 encabezados conservan exactamente su nombre y orden.
 
 Línea base al implementar esta regla: **77/77**. El cambio original corresponde al commit
 `1503b55`, desplegado en producción el 2026-08-28.

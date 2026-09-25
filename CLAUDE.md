@@ -383,7 +383,7 @@ dropshipping-reluvsa/
 │   │   │                        #   ⬜ ENVIO_POR_LINEA vacío: el precio sale SIN envío
 │   │   ├── parser_catalogo.py   # ⭐ MÓDULO 2: lee el catálogo + cruza contra la col Q
 │   │   │                        #   de Publicaciones ML (⚠️ los paquetes traen '&')
-│   │   ├── generador_plantilla.py # ⭐ MÓDULO 2: escribe el .xlsx de 36 columnas de ML
+│   │   ├── generador_plantilla.py # ⭐ MÓDULO 2: escribe el .xlsx de 37 columnas de ML
 │   │   ├── envio_pack.py        # ⭐ ENVIO_CUBRE_VENTA: el envío del carrito cubre a las N
 │   │   │                        #   ventas del pack (BUG A). 🔴 pack_id contra pack_id,
 │   │   │                        #   NUNCA contra num_venta (268 números ambiguos)
@@ -666,6 +666,7 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
 > Antes de tocar imágenes de catálogo, sus URLs, la red o Imagen 1–10, leer
 > **`docs/validacion-imagenes-catalogo.md` completo**.
 > Antes de tocar KIMS, leer **`docs/master-kims-publicaciones-masivas.md` completo**.
+> Antes de tocar GONHER, leer **`docs/master-gonher-publicaciones-masivas.md` completo**.
 
 ### Regla operativa de documentación del Módulo 2
 
@@ -678,7 +679,7 @@ importe el *por qué* de una decisión o qué ya se descartó — para no volver
   historia en este archivo y sin sobrescribir cambios locales existentes.
 
 **Qué es:** un transformador **Excel → Excel** — el catálogo del proveedor entra y sale la
-plantilla de 36 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
+plantilla de 37 columnas lista para subir a ML. 🔴 **NO toca la API de ML ni los datos del
 Módulo 1**. Excepción acotada: si un catálogo aporta URLs de imagen, se aceptan sólo desde los
 hosts exactos declarados en su perfil, con HTTPS, sin redirecciones y con resolución confirmada
 de al menos 1200×1200. Usa un GET parcial, no es un cliente HTTP genérico ni autoriza llamadas
@@ -692,6 +693,24 @@ filas inválidas**. El catálogo anterior de 3,676 piezas sigue aceptado como fo
 19,289 filas / 7,945 SKU observados / 4,852 utilizables / 10,799 variantes. Convierte USD
 con tipo de cambio editable, usa marca por SKU, filtra sistema → producto y valida FOTO 1–4
 sólo desde `www.kimsauto.com.mx`. Contrato en `docs/master-kims-publicaciones-masivas.md`.
+
+**GONHER:** formato `master_gonher`, código y marca `GONHER`. Procesa sólo la hoja
+Gonher (o su huella renombrada), agrupa por Filtro y deja stock e imágenes para captura
+manual. `Cantidad` y GONHER quedan vacías; la plantilla suma GONHER al final sin mover
+las 36 columnas anteriores. Contrato en `docs/master-gonher-publicaciones-masivas.md`.
+
+### Regla operativa nueva — GONHER
+
+El master GONHER es un flujo aislado de lectura local: no se debe conectar con la API de
+Mercado Libre, crear tablas ni inferir stock o imágenes. La hoja válida es `Gonher` (o una
+hoja renombrada que conserve la huella completa); `Hoja1` y `GC` quedan fuera. Cualquier
+ajuste futuro debe conservar la lectura posicional de las dos columnas `Ø Int. cm`, la
+validación independiente de cada rango de años y la cascada de títulos sin recortar modelo
+ni años. Si una variante no cabe en 60 caracteres, se reporta y se excluye; no se permite
+resolverlo cortando texto, inventando abreviaturas o publicando un título incompleto.
+Stock e imágenes se completan manualmente: `Cantidad` y `GONHER` deben quedar vacías y las
+otras bodegas en cero. Antes de modificar este comportamiento hay que actualizar el contrato
+técnico, la bitácora y `test_publicaciones_gonher.py` juntos.
 
 **⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de
 Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "Aplicaciones
@@ -777,10 +796,11 @@ aplica a todo el archivo.
 | `docs/cauplas-factura-anterior-a-la-venta.md` | ⭐ Antes de tocar `_orden_candidatas` / `_filtro_fecha` del matcher |
 | `docs/kit-varios-conceptos.md` | ⭐ Antes de tocar `_match_por_kit` / `_tokens_pieza` / `_componente_ya_cubierto` |
 | `docs/modulo2-publicaciones-masivas.md` | ⭐ Antes de tocar CUALQUIER cosa del Módulo 2 (publicaciones masivas) |
-| `docs/envio-gratis-precio-final.md` | 🔴 Antes de tocar `generador_plantilla.py`, las 36 columnas, Precio o Envío Gratis |
+| `docs/envio-gratis-precio-final.md` | 🔴 Antes de tocar `generador_plantilla.py`, las 37 columnas, Precio o Envío Gratis |
 | `docs/master-kg-categorias-producto.md` | ⭐ Antes de tocar detección del master KG, `Producto`, `por_linea` o el filtro por categoría |
 | `docs/master-cauplas-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master CAUPLAS en Publicaciones Masivas |
 | `docs/master-kims-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master KIMS en Publicaciones Masivas |
+| `docs/master-gonher-publicaciones-masivas.md` | ⭐ Antes de tocar cualquier parte del master GONHER en Publicaciones Masivas |
 | `docs/hallazgo-cruce-factura-venta.md` | Las 3 hipótesis descartadas del cruce |
 | `docs/limpieza-cruces-falsos-persistidos.md` | El método para corregir cruces persistidos |
 | `docs/correccion-cruces-num-venta-kim.md` | Los 110 cruces corregidos con el # del PDF |

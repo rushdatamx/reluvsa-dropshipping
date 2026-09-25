@@ -63,8 +63,8 @@ def guardar(wb):
 
 
 print("\n=== 1. PERFIL Y DETECCIÓN ===")
-check("CAUPLAS, KIMS y KG son proveedores soportados",
-      proveedores_soportados() == ["CAUPLAS", "KG", "KIM"])
+check("CAUPLAS, GONHER, KIMS y KG son proveedores soportados",
+      proveedores_soportados() == ["CAUPLAS", "GONHER", "KG", "KIM"])
 check("la marca predeterminada de CAUPLAS es editable desde CAUPLAS",
       perfil_de("CAUPLAS").marca_ml == "CAUPLAS")
 check("CAUPLAS sólo autoriza fotos de ImageKit",
@@ -183,7 +183,7 @@ check("genera rango y bloques cronológicos", any("2010/2014" in t for t in alia
 check("todos los títulos respetan estrictamente 60 caracteres", all(len(f.titulo) <= 60 for f in fa))
 check("deduplica por SKU + título normalizado", sum(f.sku == "DUP" for f in fa) == 1)
 
-print("\n=== 4. CRUCE Y PLANTILLA DE 36 COLUMNAS ===")
+print("\n=== 4. CRUCE Y PLANTILLA DE 37 COLUMNAS ===")
 pub = openpyxl.Workbook(); ps = pub.active; ps.append([""] * 17)
 row = [""] * 17; row[1] = f500.titulo.upper(); row[16] = "OTRO&500"; ps.append(row)
 publicados = leer_publicaciones(guardar(pub)); cruce = cruzar_variantes(filas, publicados)
@@ -200,7 +200,7 @@ check("las variantes del mismo SKU conservan idéntica galería",
 escribir_xlsx(filas, cfg, salida.name)
 wo = openpyxl.load_workbook(salida.name, data_only=True); so = wo.active
 encabezados = [c.value for c in so[1]]; idx = {h: i + 1 for i, h in enumerate(encabezados)}
-check("plantilla conserva exactamente 36 columnas", encabezados == COLUMNAS and len(encabezados) == 36)
+check("plantilla conserva exactamente 37 columnas", encabezados == COLUMNAS and len(encabezados) == 37)
 check("CAUPLAS escribe hasta diez imágenes y conserva posición",
       so.cell(2, idx["Imagen1"]).value == "https://ik.imagekit.io/cauplas/500.jpg" and
       so.cell(2, idx["Imagen2"]).value == "https://ik.imagekit.io/cauplas/500-2.jpg" and
@@ -210,7 +210,7 @@ check("el Excel conserva las unidades de las medidas en descripción",
       "Diámetro 1: 32 mm" in so.cell(2, idx["Descripcion"]).value)
 check("stock queda exclusivamente en CAUPLAS",
       so.cell(2, idx["Cantidad"]).value == 10 and so.cell(2, idx["CAUPLAS"]).value == 10 and
-      all(so.cell(2, idx[b]).value == 0 for b in ("AG", "KG", "KIM", "MATRIZ", "VAZLO")))
+      all(so.cell(2, idx[b]).value == 0 for b in ("AG", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER")))
 
 print("\n=== 4B. STOCK POR SKU ===")
 stocks = openpyxl.Workbook(); ss = stocks.active; ss.append(HEADERS)

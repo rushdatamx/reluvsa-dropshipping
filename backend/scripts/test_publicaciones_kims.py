@@ -68,10 +68,10 @@ check("marca propia viaja por fila", filas[0].marca == "KIMS PRO")
 tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tmp.close()
 escribir_xlsx(filas, cfg, tmp.name)
 wb = openpyxl.load_workbook(tmp.name, data_only=True); ws = wb.active
-check("XLSX conserva las 36 columnas", ws.max_column == 36 and [c.value for c in ws[1]] == COLUMNAS)
+check("XLSX conserva las 37 columnas", ws.max_column == 37 and [c.value for c in ws[1]] == COLUMNAS)
 indices = {c.value: c.column for c in ws[1]}
 check("XLSX escribe marca del catálogo", ws.cell(2, indices["Marca"]).value == "KIMS PRO")
-check("stock sólo va en KIM", ws.cell(2, indices["Cantidad"]).value == 7 and ws.cell(2, indices["KIM"]).value == 7 and all(ws.cell(2, indices[b]).value == 0 for b in ("AG", "CAUPLAS", "KG", "MATRIZ", "VAZLO")))
+check("stock sólo va en KIM", ws.cell(2, indices["Cantidad"]).value == 7 and ws.cell(2, indices["KIM"]).value == 7 and all(ws.cell(2, indices[b]).value == 0 for b in ("AG", "CAUPLAS", "KG", "MATRIZ", "VAZLO", "GONHER")))
 check("fotos conservan posición sin desplazarse", ws.cell(2, indices["Imagen1"]).value.endswith("a.png") and ws.cell(2, indices["Imagen2"]).value is None and ws.cell(2, indices["Imagen3"]).value.endswith("c.png"))
 os.unlink(tmp.name)
 

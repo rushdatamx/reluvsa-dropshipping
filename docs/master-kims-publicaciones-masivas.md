@@ -67,7 +67,7 @@ imágenes, build del frontend y checklist completo de `api-seguridad`.
 
 - Lector y detección: `backend/services/parser_catalogo.py`.
 - Perfil, código `KIM` y host autorizado: `backend/services/perfiles_catalogo.py`.
-- Títulos, descripción, precio y XLSX de 36 columnas:
+- Títulos, descripción, precio y XLSX de 37 columnas:
   `backend/services/generador_plantilla.py`.
 - Contrato HTTP, métricas y filtros: `backend/routers/publicaciones.py`.
 - Selector, tipo de cambio y marca por catálogo: `frontend/src/pages/Publicaciones.jsx`.
