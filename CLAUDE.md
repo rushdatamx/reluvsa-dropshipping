@@ -709,8 +709,10 @@ validación independiente de cada rango de años y la cascada de títulos sin re
 ni años. Si una variante no cabe en 60 caracteres, se reporta y se excluye; no se permite
 resolverlo cortando texto, inventando abreviaturas o publicando un título incompleto.
 Stock e imágenes se completan manualmente: `Cantidad` y `GONHER` deben quedar vacías y las
-otras bodegas en cero. Antes de modificar este comportamiento hay que actualizar el contrato
-técnico, la bitácora y `test_publicaciones_gonher.py` juntos.
+otras bodegas en cero. El cruce anual filtra por SKU y exige compatibilidad de producto,
+marca, modelo, motor y año; un rango histórico sólo cubre los años que contiene. Antes de
+modificar este comportamiento hay que actualizar el contrato técnico, la bitácora y
+`test_publicaciones_gonher.py` juntos.
 
 **⭐ UNA PIEZA GENERA N PUBLICACIONES.** Es lo que lo vuelve masivo: en la plantilla real de
 Gaby **83 filas salieron de 22 SKUs (×3.8)**. Cada aplicación de la columna "Aplicaciones

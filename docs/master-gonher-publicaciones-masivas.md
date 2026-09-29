@@ -16,7 +16,9 @@ Excel → Excel: no usa base de datos, imágenes ni API de Mercado Libre.
   `N/A`, `ND` y `-` se omiten. Las medidas se expresan en cm.
 - Año contiene uno o dos años completos entre 1900 y 2100; un rango invertido se
   excluye por fila sin eliminar otras aplicaciones del SKU.
-- Cada fila válida produce una variante con su año/rango original. El título
+- Cada fila válida expande su año o rango a una publicación por año. El título
+  siempre lleva un solo año (`2018-2020` produce `2018`, `2019` y `2020`). La
+  deduplicación es por SKU + vehículo + motor + año.
   intenta producto + marca + modelo + motor; después reduce el motor a
   arquitectura/cilindrada; después omite marca. Nunca recorta. Si no cabe en 60,
   la variante se excluye con fila, SKU y motivo.
@@ -55,7 +57,10 @@ frontend. Con el master real, repetir la línea base anterior.
 ## Regla de mantenimiento
 
 GONHER no debe mezclarse con lectores legado, KG, CAUPLAS o KIMS ni activar llamadas
-externas. La cascada del título sólo puede quitar marca después de reducir el motor a
+externas. El cruce con el reporte de publicaciones filtra primero por SKU y después
+exige producto, marca, modelo, motor y año; un rango histórico cubre sólo los años que
+contiene. Si no se identifica la compatibilidad completa, queda pendiente. La cascada
+del título sólo puede quitar marca después de reducir el motor a
 arquitectura/cilindrada; modelo y años son obligatorios y nunca se recortan. Los casos
 que sigan sobre 60 caracteres se conservan como exclusiones visibles. La discrepancia
 histórica de una fila de 61 caracteres no autoriza una abreviatura especial: si se cambia

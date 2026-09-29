@@ -2783,3 +2783,15 @@ modelo/años y (6) stock e imágenes manuales. La plantilla conserva las 36 colu
 existentes y agrega `GONHER` sólo al final. La prueba de contrato es
 `backend/scripts/test_publicaciones_gonher.py`; cualquier cambio de estas reglas debe
 actualizar también este relato y `docs/master-gonher-publicaciones-masivas.md`.
+
+## 2026-09-29 — GONHER: variantes anuales y cruce semántico
+
+Se ajustó GONHER para expandir cada rango válido a una publicación por año. La identidad
+de la variante ahora es SKU + vehículo + motor + año, de modo que un SKU publicado para un
+modelo o año distinto queda pendiente. El cruce contra el reporte de Mercado Libre filtra
+por `Att_SellerSKU` y compara producto, marca, modelo, motor y año; acepta títulos históricos
+con diferencias de acentos, separadores, `P/`, palabras de enlace y rangos anuales, pero no
+marca como publicada una compatibilidad que no puede identificar con seguridad.
+
+La regresión de GONHER quedó en 23/23. También pasaron las suites de Publicaciones masivas,
+CAUPLAS (38/38), KIMS (19/19) y la compilación de los módulos modificados.

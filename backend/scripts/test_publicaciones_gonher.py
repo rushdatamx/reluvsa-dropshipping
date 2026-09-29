@@ -9,7 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from services.generador_plantilla import (COLUMNAS, ConfiguracionProveedor,
     escribir_xlsx, generar_filas_con_reporte)
-from services.parser_catalogo import leer_catalogo_detallado
+from services.parser_catalogo import (cruzar_variantes, leer_catalogo_detallado,
+                                      leer_publicaciones)
 from services.perfiles_catalogo import perfil_de
 
 TOTAL = OK = 0
@@ -52,7 +53,8 @@ check("costo inválido queda vacío y advertido", r.sku_sin_precio == 1 and next
 cfg = ConfiguracionProveedor("GONHER", descripcion_base="BASE RELUVSA", marca="GONHER")
 filas, reporte = generar_filas_con_reporte(r.piezas, cfg)
 primera = next(f for f in filas if f.sku == "G-1048")
-check("título reduce motor antes de quitar marca", primera.titulo == "Filtro de gasolina P/ F-250 Super Duty V8 6.4L 2008-2010", primera.titulo)
+check("expande el rango a un título anual", primera.titulo == "Filtro de gasolina P/ Ford F-250 Super Duty V8 6.4L 2008", primera.titulo)
+check("rango GONHER produce una fila por año", sorted(f.titulo.rsplit(" ", 1)[-1] for f in filas if f.sku == "G-1048" and "F-250" in f.titulo) == ["2008", "2009", "2010"])
 check("descripción consolida sin barras ni SAT", all(x in primera.descripcion for x in ("Código actual: 1000201", "Altura: 12.11 cm", "OEM: 8C3Z-9N184-A | 8C3Z-9N184-C", "FRAM: CS10263A", "Interfill: FGI-338D", "BASE RELUVSA")) and "744926" not in primera.descripcion and "40161513" not in primera.descripcion)
 check("precio válido se calcula y el inválido queda vacío", primera.precio is not None and next(f for f in filas if f.sku == "SIN-PRECIO").precio is None)
 
@@ -84,6 +86,36 @@ except ValueError as exc:
     mensaje = str(exc)
 os.unlink(ruta)
 check("huella incompleta enumera faltantes", "Precio" in mensaje and "faltan" in mensaje)
+
+# Regresiones del cruce semántico: SKU solo no basta; los rangos históricos sí.
+cruce = openpyxl.Workbook(); cs = cruce.active; cs.append(HEADERS)
+cs.append(fila(sku="GP409", linea="ACEITE", marca="Chevrolet", modelo="Beat", motor="L4 1.2L", anio="2018-2020"))
+cs.append(fila(sku="GP409", linea="ACEITE", marca="Chevrolet", modelo="Spark", motor="L4 1.2L", anio="2019"))
+cs.append(fila(sku="GPS409", linea="ACEITE", marca="Chevrolet", modelo="Beat", motor="L4 1.2L", anio="2018"))
+rc = guardar(cruce); catalogo_cruce = leer_catalogo_detallado(rc, perfil_de("GONHER")); os.unlink(rc)
+fc, _ = generar_filas_con_reporte(catalogo_cruce.piezas, cfg)
+gp = [f for f in fc if f.sku == "GP409" and f.compatibilidad["modelo"] == "Beat"]
+check("GP409 2018-2020 genera exactamente tres publicaciones", len(gp) == 3)
+check("no conserva el rango como una sola fila", all(f.aplicacion in {"2018", "2019", "2020"} for f in gp))
+
+pub = openpyxl.Workbook(); ps = pub.active; ps.append(HEADERS)
+def pubrow(sku, titulo):
+    row = [None] * 25; row[1] = titulo; row[16] = sku; ps.append(row)
+pubrow("GP409", "Filtro De Aceite Chevrolet Beat 1.2l 2018")
+pubrow("GP409", "Filtro Aceite Sintético Gonher P/ Chevrolet Beat 1.2l 2018")
+rp = guardar(pub); publicados = leer_publicaciones(rp); os.unlink(rp)
+cruzado = cruzar_variantes([f for f in fc if f.sku == "GP409"], publicados)
+check("títulos históricos reconocen la variante correspondiente", len(cruzado["existentes"]) == 1 and cruzado["existentes"][0].aplicacion == "2018")
+check("un SKU publicado en 2018 no cubre 2019 ni 2020", {f.aplicacion for f in cruzado["pendientes"]} == {"2019", "2020"})
+check("otro modelo con el mismo SKU permanece pendiente", any(f.compatibilidad["modelo"] == "Spark" for f in cruzado["pendientes"]))
+gps = [f for f in fc if f.sku == "GPS409"]
+check("GP409 y GPS409 siguen siendo SKUs distintos", len(gps) == 1 and gps[0].sku != gp[0].sku)
+
+pub_rango = openpyxl.Workbook(); prs = pub_rango.active; prs.append(HEADERS)
+row = [None] * 25; row[1] = "Filtro de aceite P/ Chevrolet Beat L4 1.2L 2018-2020"; row[16] = "GP409"; prs.append(row)
+rr = guardar(pub_rango); publicados_rango = leer_publicaciones(rr); os.unlink(rr)
+cruzado_rango = cruzar_variantes(gp, publicados_rango)
+check("un rango existente cubre cada año contenido", {f.aplicacion for f in cruzado_rango["existentes"]} == {"2018", "2019", "2020"})
 
 print(f"\nGONHER: {OK}/{TOTAL}")
 if OK != TOTAL: raise SystemExit(1)

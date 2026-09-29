@@ -94,6 +94,9 @@ class FilaPublicacion:
     fila_origen: Optional[int] = None
     stock: Optional[int] = 0
     marca: str = ""
+    # Metadatos estructurados para cruces conservadores. Sólo GONHER los usa;
+    # los demás proveedores siguen cruzando por SKU + título normalizado.
+    compatibilidad: dict = field(default_factory=dict)
 
 
 # Alias aprobados para las líneas reales del master. Sólo se usan si el nombre
@@ -337,6 +340,14 @@ def _titulo_gonher(producto, compat) -> Optional[str]:
     return None
 
 
+def _anios_gonher(compat):
+    """Expande el rango de la hoja en años publicables individuales."""
+    inicio, fin = compat.get("inicio"), compat.get("fin")
+    if not isinstance(inicio, int) or not isinstance(fin, int) or inicio > fin:
+        return []
+    return list(range(inicio, fin + 1))
+
+
 def _titular(nombre_pieza: str, app: Aplicacion) -> str:
     """Arma el título como lo escribe Gaby: 'Pieza P/ Coche Motor Años'.
 
@@ -505,21 +516,29 @@ def generar_filas_con_reporte(piezas, config):
             descripcion = _describir_gonher(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
             for compat in pieza.get("compatibilidades", []):
-                titulo = _titulo_gonher(compat.get("producto"), compat)
-                if not titulo:
-                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
-                        "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "anio": compat.get("anios"), "inicio": compat.get("inicio"), "fin": compat.get("fin"),
-                        "motivo": "Título excede 60 caracteres"})
-                    continue
-                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
-                if par in vistos:
-                    deduplicadas += 1
-                    continue
-                vistos.add(par)
-                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
-                    compat.get("linea", ""), precio, descripcion, compat.get("anios", ""), False,
-                    [], compat.get("fila"), stock=None))
+                for anio in _anios_gonher(compat):
+                    compat_anual = dict(compat, anios=str(anio), inicio=anio, fin=anio)
+                    titulo = _titulo_gonher(compat.get("producto"), compat_anual)
+                    if not titulo:
+                        exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                            "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                            "anio": str(anio), "inicio": anio, "fin": anio,
+                            "motivo": "Título excede 60 caracteres"})
+                        continue
+                    # La identidad de una variante no depende de cómo se
+                    # escriba el título: vehículo + motor + año son obligatorios.
+                    par = (str(pieza.get("clave")).upper(),
+                           _sin_acentos(str(compat.get("armadora") or "")).strip().casefold(),
+                           _sin_acentos(str(compat.get("modelo") or "")).strip().casefold(),
+                           _sin_acentos(str(compat.get("motor") or "")).strip().casefold(),
+                           anio)
+                    if par in vistos:
+                        deduplicadas += 1
+                        continue
+                    vistos.add(par)
+                    filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
+                        compat.get("linea", ""), precio, descripcion, str(anio), False,
+                        [], compat.get("fila"), stock=None, compatibilidad=compat_anual))
             continue
         if pieza.get("formato") == "master_kims":
             descripcion = _describir_kims(pieza, config)

@@ -67,6 +67,76 @@ def normalizar_titulo(val) -> str:
     return _normalizar(val)
 
 
+_PALABRAS_TITULO_IGNORABLES = {"de", "del", "la", "el", "para", "por", "p",
+                               "con", "sintetico", "sintetica", "gonher"}
+
+
+def _tokens_semanticos(valor):
+    texto = _normalizar(valor)
+    return [t for t in re.split(r"[^a-z0-9]+", texto) if t]
+
+
+def _contiene_frase(titulo, valor, ignorables=()):
+    esperados = [t for t in _tokens_semanticos(valor) if t not in ignorables]
+    presentes = set(_tokens_semanticos(titulo))
+    return bool(esperados) and all(t in presentes for t in esperados)
+
+
+def _anios_en_titulo(titulo):
+    """Devuelve años explícitos, expandiendo rangos como 2018-2020."""
+    texto = _normalizar(titulo)
+    encontrados = []
+    for inicio, fin in re.findall(r"(?<!\d)((?:19|20)\d{2})\s*(?:-|a|al|/|–)\s*((?:19|20)\d{2})(?!\d)", texto):
+        a, b = int(inicio), int(fin)
+        if a <= b:
+            encontrados.extend(range(a, b + 1))
+    ocupados = set(encontrados)
+    for anio in re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", texto):
+        ocupados.add(int(anio))
+    return ocupados
+
+
+def _motor_en_titulo(titulo):
+    texto = _normalizar(titulo)
+    cilindradas = {m.replace(",", ".") for m in re.findall(r"\b\d+(?:[.,]\d+)?\s*l\b", texto)}
+    arquitecturas = {m.replace(" ", "") for m in re.findall(r"\b(?:l|v|h|i|b|w)\s*\d{1,2}\b", texto)}
+    return cilindradas, arquitecturas
+
+
+def _titulo_cubre_gonher(titulo, compat) -> bool:
+    """Cruce semántico conservador para una compatibilidad anual GONHER.
+
+    No intenta adivinar campos ausentes: exige producto, marca, modelo, motor
+    identificable y año. La única tolerancia histórica es omitir ``P/``,
+    palabras de enlace, ``GONHER`` y la arquitectura L4/V6 cuando sí aparece
+    la cilindrada.
+    """
+    titulo_normalizado = _normalizar(titulo)
+    anio = compat.get("inicio")
+    if not isinstance(anio, int) or anio not in _anios_en_titulo(titulo):
+        return False
+    if not _contiene_frase(titulo_normalizado, compat.get("producto", ""), _PALABRAS_TITULO_IGNORABLES):
+        return False
+    for campo in ("armadora", "modelo"):
+        valor = compat.get(campo, "")
+        if not valor or not _contiene_frase(titulo_normalizado, valor):
+            return False
+
+    cilindradas, arquitecturas = _motor_en_titulo(titulo)
+    motor = _normalizar(compat.get("motor", ""))
+    esperadas_cil = {m.replace(",", ".") for m in re.findall(r"\b\d+(?:[.,]\d+)?\s*l\b", motor)}
+    esperadas_arq = {m.replace(" ", "") for m in re.findall(r"\b(?:l|v|h|i|b|w)\s*\d{1,2}\b", motor)}
+    if esperadas_cil and not esperadas_cil.issubset(cilindradas):
+        return False
+    if not esperadas_cil and esperadas_arq and not esperadas_arq.issubset(arquitecturas):
+        return False
+    # Si el histórico sí escribió una arquitectura, no permitimos que contradiga
+    # la del catálogo; pero su ausencia es válida en títulos antiguos.
+    if esperadas_arq and arquitecturas and not esperadas_arq.intersection(arquitecturas):
+        return False
+    return True
+
+
 @dataclass
 class ResultadoCatalogo:
     piezas: List[Dict]
@@ -831,9 +901,24 @@ def leer_skus_publicados(ruta): return {sku for sku, _ in leer_publicaciones(rut
 def cruzar_variantes(filas, publicados):
     pendientes, existentes, vistos, deduplicadas = [], [], set(), 0
     for fila in filas:
-        par = (fila.sku.upper(), normalizar_titulo(fila.titulo))
-        if par in vistos: deduplicadas += 1; continue
-        vistos.add(par); (existentes if par in publicados else pendientes).append(fila)
+        if fila.compatibilidad:
+            # GONHER no depende de que el título nuevo sea idéntico al histórico:
+            # una publicación con 2018-2020 cubre cada año del rango, pero sólo
+            # si conserva la compatibilidad completa de ese SKU.
+            par = (fila.sku.upper(), normalizar_titulo(fila.titulo))
+            if par in vistos:
+                deduplicadas += 1
+                continue
+            vistos.add(par)
+            publicada = any(
+                sku == fila.sku.upper() and _titulo_cubre_gonher(titulo, fila.compatibilidad)
+                for sku, titulo in publicados
+            )
+            (existentes if publicada else pendientes).append(fila)
+        else:
+            par = (fila.sku.upper(), normalizar_titulo(fila.titulo))
+            if par in vistos: deduplicadas += 1; continue
+            vistos.add(par); (existentes if par in publicados else pendientes).append(fila)
     return {"pendientes": pendientes, "existentes": existentes, "deduplicadas": deduplicadas}
 
 
