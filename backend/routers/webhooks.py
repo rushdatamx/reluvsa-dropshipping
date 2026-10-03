@@ -12,6 +12,7 @@ Cualquier payload inválido igual responde 200 para no disparar el fallback de M
 se guarda el body crudo para diagnóstico.
 """
 import json
+import sqlite3
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -68,39 +69,45 @@ async def _recibir_notificacion_ml(request: Request, cuenta_ml: str):
     topic = data.get("topic")
     user_id = str(data.get("user_id")) if data.get("user_id") is not None else None
 
-    with get_db() as conn:
-        # Regla de seguridad (configuracion-app-ml §6.5): validar el user_id esperado
-        # y descartar tópicos no suscritos. Igual respondemos 200 (requisito de ML) y
-        # guardamos todo para diagnóstico; "descartar" = marcar procesada=1 para que
-        # el sync nunca lo procese.
-        seller_row = (conn.execute("SELECT valor FROM ml_config WHERE clave = 'seller_id'").fetchone()
-                      if cuenta_ml == "principal" else conn.execute(
-                          "SELECT valor FROM ml_config_cuentas WHERE cuenta_ml=? AND clave='seller_id'", (cuenta_ml,)).fetchone())
-        seller_esperado = seller_row["valor"] if seller_row else None
-        descartada = (
-            (topic not in TOPICS_SUSCRITOS)
-            # Sin ambos IDs no existe evidencia de pertenencia: se conserva para
-            # diagnóstico pero jamás entra al worker de la otra cuenta.
-            or not seller_esperado or not user_id or user_id != seller_esperado
-        )
+    try:
+        with get_db() as conn:
+            # Regla de seguridad (configuracion-app-ml §6.5): validar el user_id esperado
+            # y descartar tópicos no suscritos. Igual respondemos 200 (requisito de ML) y
+            # guardamos todo para diagnóstico; "descartar" = marcar procesada=1 para que
+            # el sync nunca lo procese.
+            seller_row = (conn.execute("SELECT valor FROM ml_config WHERE clave = 'seller_id'").fetchone()
+                          if cuenta_ml == "principal" else conn.execute(
+                              "SELECT valor FROM ml_config_cuentas WHERE cuenta_ml=? AND clave='seller_id'", (cuenta_ml,)).fetchone())
+            seller_esperado = seller_row["valor"] if seller_row else None
+            descartada = (
+                (topic not in TOPICS_SUSCRITOS)
+                # Sin ambos IDs no existe evidencia de pertenencia: se conserva para
+                # diagnóstico pero jamás entra al worker de la otra cuenta.
+                or not seller_esperado or not user_id or user_id != seller_esperado
+            )
 
-        conn.execute(
-            """INSERT INTO ml_notificaciones
-               (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en, procesada, cuenta_ml)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(data.get("_id")) if data.get("_id") is not None else None,
-                topic,
-                data.get("resource"),
-                user_id,
-                data.get("attempts"),
-                data.get("sent"),
-                raw,
-                datetime.now().isoformat(timespec="seconds"),
-                1 if descartada else 0, cuenta_ml,
-            ),
-        )
-
+            conn.execute(
+                """INSERT INTO ml_notificaciones
+                   (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en, procesada, cuenta_ml)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(data.get("_id")) if data.get("_id") is not None else None,
+                    topic,
+                    data.get("resource"),
+                    user_id,
+                    data.get("attempts"),
+                    data.get("sent"),
+                    raw,
+                    datetime.now().isoformat(timespec="seconds"),
+                    1 if descartada else 0, cuenta_ml,
+                )
+            )
+    except sqlite3.OperationalError as exc:
+        # ML exige 200 rápido. Una contención momentánea de SQLite no debe
+        # convertir el webhook en una cascada de reintentos/500 ni bloquear el
+        # portal; la sync incremental reconciliará el evento por polling.
+        if "locked" not in str(exc).lower():
+            raise
     return {"ok": True}
 
 

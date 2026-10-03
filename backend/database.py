@@ -521,6 +521,12 @@ def _migrar_multi_cuenta(cursor):
             llave = "num_venta" if tabla == "ventas_ml" else "num_envio"
             cursor.execute(f"UPDATE {tabla} SET {origen} = {llave} WHERE {origen} IS NULL")
         cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {indice} ON {tabla}(cuenta_ml, {origen})")
+    # Índices de los JOIN multi-cuenta. Sin ellos, el nuevo guard
+    # ``e.cuenta_ml = v.cuenta_ml`` obliga a SQLite a recorrer todos los envíos
+    # por cada venta durante la carga del portal.
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_cuenta_venta_ml ON envios_colecta(cuenta_ml, num_venta_ml)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_cuenta_pack ON envios_colecta(cuenta_ml, pack_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_cuenta_pack ON ventas_ml(cuenta_ml, pack_id)")
     cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ml_sync_runs)").fetchall()}
     if "cuenta_ml" not in cols:
         cursor.execute("ALTER TABLE ml_sync_runs ADD COLUMN cuenta_ml TEXT NOT NULL DEFAULT 'principal'")
