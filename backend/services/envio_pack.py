@@ -83,13 +83,20 @@ caen en las dos hermanas en vez de pelearse por una.
 # se desincronicen: hoy la usan el listado y el CSV de Ventas, el matcher (sus 5
 # pasos), el detalle de venta y las incidencias.
 #
+# El vínculo directo usa la llave interna global: principal conserva el ID de ML y
+# una cuenta adicional usa ``<cuenta>::<id>``. Por eso no necesita (ni debe llevar)
+# el guard de cuenta: añadirlo antes del OR hace que SQLite deje de usar
+# idx_envios_venta_ml para el caso normal. El pack_id sí puede repetirse entre
+# cuentas y por eso queda delimitado por cuenta.
+#
 # El orden de los OR no cambia el resultado, pero se deja el cruce directo primero
-# porque es el caso normal (~97% de los envíos) y SQLite corta antes.
+# porque es el caso normal (~97% de los envíos) y SQLite puede resolverlo con su
+# índice directo.
 ENVIO_CUBRE_VENTA = """(
-    e.cuenta_ml = v.cuenta_ml AND (
-      e.num_venta_ml = v.num_venta
-      OR (e.pack_id IS NOT NULL AND v.pack_id IS NOT NULL AND e.pack_id = v.pack_id)
-    )
+    e.num_venta_ml = v.num_venta
+    OR (e.cuenta_ml = v.cuenta_ml
+        AND e.pack_id IS NOT NULL AND v.pack_id IS NOT NULL
+        AND e.pack_id = v.pack_id)
 )"""
 
 
@@ -101,7 +108,8 @@ def envio_cubre_venta(alias_envio: str = "e", alias_venta: str = "v") -> str:
     del exterior más que los nombres de alias que le pasa el propio código.
     """
     return (
-        f"({alias_envio}.cuenta_ml = {alias_venta}.cuenta_ml AND ({alias_envio}.num_venta_ml = {alias_venta}.num_venta"
-        f" OR ({alias_envio}.pack_id IS NOT NULL AND {alias_venta}.pack_id IS NOT NULL"
-        f" AND {alias_envio}.pack_id = {alias_venta}.pack_id)))"
+        f"({alias_envio}.num_venta_ml = {alias_venta}.num_venta"
+        f" OR ({alias_envio}.cuenta_ml = {alias_venta}.cuenta_ml"
+        f" AND {alias_envio}.pack_id IS NOT NULL AND {alias_venta}.pack_id IS NOT NULL"
+        f" AND {alias_envio}.pack_id = {alias_venta}.pack_id))"
     )

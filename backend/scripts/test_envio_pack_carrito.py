@@ -154,6 +154,10 @@ ok("e.pack_id=v.pack_id" in sql,
 ok("e.pack_id=v.num_venta" not in sql and "e.num_venta_ml=v.pack_id" not in sql,
    "⚠️ y NUNCA mezcla las dos llaves (en prod 268 números son order.id de una venta "
    "y pack_id de otra)")
+ok("e.num_venta_ml=v.num_venta" in sql,
+   "el vínculo directo usa la identidad interna global")
+ok(sql.startswith("(e.num_venta_ml=v.num_ventaOR("),
+   "el guard de cuenta NO envuelve el vínculo directo (conserva idx_envios_venta_ml)")
 
 # La prueba de comportamiento, no sólo de texto: una venta cuyo num_venta es el pack_id
 # de OTRA no debe heredar su envío.
@@ -272,6 +276,47 @@ with get_db() as conn:
     ).fetchone()["pack_id"]
 ok(recuperado == PACK,
    f"un envío sin pack_id lo recupera de su venta al arrancar (got {recuperado})")
+
+# --------------------------------------------- 10. aislamiento multi-cuenta
+print("\n[10] Multi-cuenta: identidad interna directa y pack aislado")
+
+# ML puede repetir order.id, shipment.id y pack_id entre cuentas. Los IDs internos
+# namespaceados impiden el cruce directo; pack_id no está namespaced y por eso debe
+# conservar el guard explícito de cuenta.
+with get_db() as conn:
+    principal = "ORDER-COMPARTIDA"
+    secundaria = "secundaria::ORDER-COMPARTIDA"
+    pack_compartido = "PACK-COMPARTIDO"
+    _venta(conn, principal, "PRI-1", pack_id=pack_compartido)
+    _venta(conn, secundaria, "SEC-1", pack_id=pack_compartido)
+    conn.execute("UPDATE ventas_ml SET cuenta_ml='secundaria', num_venta_origen=? WHERE num_venta=?",
+                 ("ORDER-COMPARTIDA", secundaria))
+    _envio(conn, "SHIP-COMPARTIDO", principal, cauplas, pack_id=pack_compartido)
+    _envio(conn, "secundaria::SHIP-COMPARTIDO", secundaria, kim, pack_id=pack_compartido)
+    conn.execute("UPDATE envios_colecta SET cuenta_ml='secundaria', num_envio_origen=? WHERE num_envio=?",
+                 ("SHIP-COMPARTIDO", "secundaria::SHIP-COMPARTIDO"))
+    conn.commit()
+
+with get_db() as conn:
+    cruces = conn.execute(f"""
+        SELECT v.num_venta, e.num_envio
+        FROM ventas_ml v
+        JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
+        WHERE v.num_venta IN (?, ?)
+        ORDER BY v.num_venta, e.num_envio
+    """, (principal, secundaria)).fetchall()
+    plan = conn.execute(f"""
+        EXPLAIN QUERY PLAN
+        SELECT e.num_envio FROM envios_colecta e
+        WHERE {ENVIO_CUBRE_VENTA.replace('v.num_venta', '?').replace('v.cuenta_ml', '?').replace('v.pack_id', '?')}
+    """, (principal, "principal", pack_compartido, pack_compartido)).fetchall()
+
+pares = [(r["num_venta"], r["num_envio"]) for r in cruces]
+ok(pares == [(principal, "SHIP-COMPARTIDO"), (secundaria, "secundaria::SHIP-COMPARTIDO")],
+   f"IDs y packs repetidos no cruzan cuentas (got {pares})")
+plan_texto = " ".join(str(tuple(r)) for r in plan)
+ok("idx_envios_venta_ml" in plan_texto and "idx_envios_cuenta_pack" in plan_texto,
+   f"SQLite usa los índices directo y de pack, no explora envíos (got {plan_texto})")
 
 print("\n" + "=" * 62)
 if FALLOS:

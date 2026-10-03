@@ -2795,3 +2795,20 @@ marca como publicada una compatibilidad que no puede identificar con seguridad.
 
 La regresión de GONHER quedó en 23/23. También pasaron las suites de Publicaciones masivas,
 CAUPLAS (38/38), KIMS (19/19) y la compilación de los módulos modificados.
+
+## 2026-10-03 — Recuperación de Ventas tras multi-cuenta
+
+Se corrigió la condición canónica `ENVIO_CUBRE_VENTA`: el vínculo directo vuelve a
+comparar la identidad interna global (`e.num_venta_ml = v.num_venta`), mientras que
+el vínculo por `pack_id` conserva el límite `e.cuenta_ml = v.cuenta_ml`. Principal
+mantiene sus IDs y secundaria usa el prefijo interno `secundaria::`, por lo que el
+cruce directo no puede mezclar cuentas; `pack_id`, que puede repetirse, permanece
+aislado por cuenta.
+
+La regresión de carritos ahora simula IDs de orden, envío y paquete repetidos en las
+dos cuentas y comprueba que no hay cruces. `EXPLAIN QUERY PLAN` confirma el uso de
+`idx_envios_venta_ml` y `idx_envios_cuenta_pack`, evitando la exploración masiva que
+impedía cargar Ventas. Pasaron Ventas/filtros, métricas, carritos, sync automática,
+sync end-to-end y el guardián de solo lectura de ML; la auditoría `api-guardian`
+aprobó el diff. No se modificaron tokens, webhooks, datos ni se hicieron escrituras
+hacia Mercado Libre; la sync automática sigue configurada con su intervalo de 30 min.
