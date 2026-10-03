@@ -128,6 +128,10 @@ export const mlSync = (tipo = 'incremental') => api.post('/ml/sync', { tipo });
 export const mlSyncAuto = (payload) => api.post('/ml/sync-auto', payload);
 export const mlNotificaciones = (limit = 20) =>
   api.get('/webhooks/mercadolibre/recientes', { params: { limit } });
+export const mlCuentas = () => api.get('/ml/cuentas');
+export const mlIniciarOauthCuenta = (cuenta) => api.post(`/ml/cuentas/${encodeURIComponent(cuenta)}/oauth/iniciar`);
+export const mlSyncCuenta = (cuenta, tipo = 'incremental') =>
+  api.post(`/ml/cuentas/${encodeURIComponent(cuenta)}/sync`, { tipo });
 
 // Módulo 2 — Publicaciones masivas (admin). Excel -> Excel, no toca la API de ML.
 export const pubProveedores = () => api.get('/publicaciones/proveedores');

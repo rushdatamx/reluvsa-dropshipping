@@ -43,6 +43,20 @@ def verificar_webhook_ml():
 
 @router.post("/mercadolibre")
 async def recibir_notificacion_ml(request: Request):
+    return await _recibir_notificacion_ml(request, "principal")
+
+
+@router.post("/mercadolibre/secundaria")
+async def recibir_notificacion_ml_secundaria(request: Request):
+    return await _recibir_notificacion_ml(request, "secundaria")
+
+
+@router.api_route("/mercadolibre/secundaria", methods=["GET", "HEAD"], include_in_schema=False)
+def verificar_webhook_ml_secundaria():
+    return Response(status_code=200)
+
+
+async def _recibir_notificacion_ml(request: Request, cuenta_ml: str):
     raw = (await request.body()).decode("utf-8", errors="replace")
     try:
         data = json.loads(raw) if raw else {}
@@ -59,19 +73,21 @@ async def recibir_notificacion_ml(request: Request):
         # y descartar tópicos no suscritos. Igual respondemos 200 (requisito de ML) y
         # guardamos todo para diagnóstico; "descartar" = marcar procesada=1 para que
         # el sync nunca lo procese.
-        seller_row = conn.execute(
-            "SELECT valor FROM ml_config WHERE clave = 'seller_id'"
-        ).fetchone()
+        seller_row = (conn.execute("SELECT valor FROM ml_config WHERE clave = 'seller_id'").fetchone()
+                      if cuenta_ml == "principal" else conn.execute(
+                          "SELECT valor FROM ml_config_cuentas WHERE cuenta_ml=? AND clave='seller_id'", (cuenta_ml,)).fetchone())
         seller_esperado = seller_row["valor"] if seller_row else None
         descartada = (
             (topic not in TOPICS_SUSCRITOS)
-            or (seller_esperado is not None and user_id is not None and user_id != seller_esperado)
+            # Sin ambos IDs no existe evidencia de pertenencia: se conserva para
+            # diagnóstico pero jamás entra al worker de la otra cuenta.
+            or not seller_esperado or not user_id or user_id != seller_esperado
         )
 
         conn.execute(
             """INSERT INTO ml_notificaciones
-               (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en, procesada)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (notif_id, topic, resource, user_id, attempts, sent, raw_body, recibido_en, procesada, cuenta_ml)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(data.get("_id")) if data.get("_id") is not None else None,
                 topic,
@@ -81,7 +97,7 @@ async def recibir_notificacion_ml(request: Request):
                 data.get("sent"),
                 raw,
                 datetime.now().isoformat(timespec="seconds"),
-                1 if descartada else 0,
+                1 if descartada else 0, cuenta_ml,
             ),
         )
 

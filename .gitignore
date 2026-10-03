@@ -39,3 +39,5 @@ kits/
 
 # Config local de Claude Code (permisos por máquina, no compartible)
 .claude/settings.local.json
+.vercel
+.env*

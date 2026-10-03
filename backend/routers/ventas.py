@@ -140,6 +140,7 @@ def _construir_filtros(
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
     albaran: Optional[str] = None,
+    cuenta_ml: Optional[str] = None,
 ):
     """Arma la cláusula WHERE + JOINs compartida por el listado y el export.
 
@@ -172,6 +173,9 @@ def _construir_filtros(
     where = ["1=1"]
     params: list = []
     join_factura = ""
+    if cuenta_ml in ("principal", "secundaria"):
+        where.append("v.cuenta_ml = ?")
+        params.append(cuenta_ml)
 
     if proveedor_id:
         where.append("e.proveedor_id = ?")
@@ -302,7 +306,7 @@ def _construir_filtros(
 
 
 _SELECT_VENTAS = """
-    SELECT v.num_venta, v.pack_id, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
+    SELECT v.num_venta, v.num_venta_origen, v.cuenta_ml, v.pack_id, v.sku, v.deposito, v.fecha_venta, v.estado, v.titulo, v.unidades,
            v.total, v.total_neto, v.albaran, v.comprador_estado, v.forma_entrega,
            e.num_envio, e.lugar_indicado, e.lugar_real, e.lugar_override, e.cumplio_sla,
            e.logistic_type,
@@ -321,7 +325,7 @@ _SELECT_VENTAS = """
            -- no 0: el subquery no cuenta filas cuando pack_id es NULL y un "0 productos"
            -- en el CSV se leería como un dato roto.
            MAX(1, (SELECT COUNT(*) FROM ventas_ml v2
-                   WHERE v.pack_id IS NOT NULL AND v2.pack_id = v.pack_id)) as pack_ventas,
+                   WHERE v.pack_id IS NOT NULL AND v2.cuenta_ml=v.cuenta_ml AND v2.pack_id = v.pack_id)) as pack_ventas,
            -- Cuántas PIEZAS van en el paquete físico = la suma de las unidades de las N
            -- ventas del carrito. Es distinto de pack_ventas: el carrito de KIMS que reportó
            -- Gaby trae 2 productos (pack_ventas=2) pero 3 piezas (2 birlos + 1 tuerca).
@@ -333,7 +337,7 @@ _SELECT_VENTAS = """
            -- IFNULL/COALESCE: SUM() sobre NULL da NULL y así debe salir (en el CSV se
            -- convierte en celda vacía, igual que Unidades).
            (SELECT SUM(v4.unidades) FROM ventas_ml v4
-            WHERE v4.pack_id = v.pack_id AND v.pack_id IS NOT NULL) as pack_piezas,
+            WHERE v4.cuenta_ml=v.cuenta_ml AND v4.pack_id = v.pack_id AND v.pack_id IS NOT NULL) as pack_piezas,
            -- Facturas cruzadas a esta venta: cada una como 'serie|folio|codigo_bodega',
            -- separadas por coma (group_concat DISTINCT usa coma fija). DISTINCT porque una
            -- factura puede tener varios conceptos cruzando a la misma venta. Se formatea por
@@ -387,6 +391,7 @@ def listar(
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
     albaran: Optional[str] = None,
+    cuenta_ml: Optional[str] = None,
     q: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
@@ -397,7 +402,7 @@ def listar(
 
     where, params, join_factura = _construir_filtros(
         user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
-        deposito, logistica, albaran
+        deposito, logistica, albaran, cuenta_ml
     )
 
     offset = (page - 1) * limit
@@ -448,6 +453,7 @@ def export_csv(
     deposito: Optional[str] = None,
     logistica: Optional[str] = None,
     albaran: Optional[str] = None,
+    cuenta_ml: Optional[str] = None,
     q: Optional[str] = None,
 ):
     """Exporta a CSV TODAS las filas que cumplen los filtros (sin paginar).
@@ -455,7 +461,7 @@ def export_csv(
     """
     where, params, join_factura = _construir_filtros(
         user, proveedor_id, estado, q, facturada, sla, cruce, fecha_desde, fecha_hasta,
-        deposito, logistica, albaran
+        deposito, logistica, albaran, cuenta_ml
     )
     sql = _SELECT_VENTAS.format(join_factura=join_factura, where=" AND ".join(where))
 
@@ -471,7 +477,7 @@ def export_csv(
         # "Num venta" = el número tal como lo ve Gaby en el portal de ML (pack_id si
         # existe, si no el order.id). "Num venta interno" se conserva porque es la
         # llave con la que cruzan factura, albarán y envío.
-        "Num venta", "Num venta interno",
+        "Cuenta ML", "Num venta", "Num venta interno",
         # "Ingresos por productos" es el precio del producto (total_amount de ML) — es
         # el nombre que ML le da en su reporte. "Total (MXN)" es el neto que RELUVSA
         # recibe ya descontados cargos, envíos e impuestos (pedido de Gaby 2026-08-10).
@@ -500,7 +506,7 @@ def export_csv(
     ])
     for r in rows:
         w.writerow([
-            r["pack_id"] or r["num_venta"], r["num_venta"],
+            r["cuenta_ml"], r["pack_id"] or r["num_venta_origen"] or r["num_venta"], r["num_venta"],
             r["albaran"] or "", r["sku"] or "", r["deposito"] or "", _fecha_corta(r["fecha_venta"]),
             r["estado"] or "",
             r["titulo"] or "", r["unidades"] if r["unidades"] is not None else "",
@@ -542,7 +548,7 @@ def detalle(num_venta: str, user: UserInfo = Depends(get_current_user)):
                 JOIN ventas_ml v ON v.num_venta = ?
                 WHERE {ENVIO_CUBRE_VENTA}
                 ORDER BY (e.proveedor_id IS NOT NULL) DESC,
-                         (e.num_venta_ml = v.num_venta) DESC
+                         (e.num_venta_ml = v.num_venta AND e.cuenta_ml = v.cuenta_ml) DESC
                 LIMIT 1""",
             (num_venta,),
         ).fetchone()

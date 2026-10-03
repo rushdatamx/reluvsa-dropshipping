@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 
 const FILTROS_VACIOS = {
   q: '',
+  cuenta_ml: '',       // vacío = Todas (vista unificada)
   facturada: '',        // '' = todas | 'true' | 'false'
   albaran: '',          // '' = todas | 'con_albaran' | 'sin_albaran'
   sla: '',              // '' = todas | 'a_tiempo' | 'tarde'
@@ -168,6 +169,12 @@ export default function Ventas() {
 
       <div className="bg-white rounded-xl border border-notion-border p-4 mb-4 space-y-3">
         <div className="flex gap-3 flex-wrap items-end">
+          <div className="min-w-[145px]">
+            <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Cuenta ML</label>
+            <select value={filtros.cuenta_ml} onChange={(e) => set('cuenta_ml', e.target.value)} className="w-full px-3 py-2 border border-notion-border rounded-lg text-sm">
+              <option value="">Todas</option><option value="principal">Principal</option><option value="secundaria">Secundaria</option>
+            </select>
+          </div>
           <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-semibold text-notion-text-secondary mb-1">Buscar</label>
             <div className="relative">
@@ -294,6 +301,7 @@ export default function Ventas() {
             <thead className="bg-notion-bg-subtle border-b border-notion-border">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Venta</th>
+                <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Cuenta ML</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Albarán</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Fecha</th>
                 <th className="text-left px-4 py-3 font-semibold text-notion-text-secondary">Estado</th>
@@ -321,7 +329,7 @@ export default function Ventas() {
                         justo lo que ML muestra en esas). El interno queda en el title
                         para soporte, sin cargar la tabla. */}
                     <span title={v.pack_id ? `Nº interno del portal: ${v.num_venta}` : undefined}>
-                      {v.pack_id || v.num_venta}
+                      {v.pack_id || v.num_venta_origen || v.num_venta}
                     </span>
                     {/* Carrito: las N ventas del paquete muestran el MISMO número (el que
                         ML enseña) y comparten envío, proveedor y SLA, así que sin esta
@@ -349,6 +357,7 @@ export default function Ventas() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-xs font-medium capitalize">{v.cuenta_ml || 'principal'}</td>
                   <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
                     {v.albaran ? v.albaran : <span className="text-notion-text-secondary">—</span>}
                   </td>

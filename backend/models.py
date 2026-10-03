@@ -142,3 +142,12 @@ class MLSyncAutoRequest(BaseModel):
     solo lo que venga (permite cambiar el intervalo sin tocar el interruptor)."""
     activo: Optional[bool] = None
     intervalo_minutos: Optional[int] = None
+
+
+class MLDepositoProveedorRequest(BaseModel):
+    proveedor_id: Optional[int] = None
+
+
+class MLSyncCuentaAutoRequest(BaseModel):
+    activo: Optional[bool] = None
+    intervalo_minutos: Optional[int] = None

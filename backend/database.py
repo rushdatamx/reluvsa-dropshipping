@@ -378,6 +378,53 @@ CREATE TABLE IF NOT EXISTS ml_api_log (
     ts     TEXT NOT NULL
 );
 
+-- Catálogo explícito de cuentas ML. Las credenciales nunca se guardan aquí: viven
+-- exclusivamente en variables de entorno y los tokens en ml_tokens_cuentas.
+CREATE TABLE IF NOT EXISTS ml_cuentas (
+    clave TEXT PRIMARY KEY CHECK(clave IN ('principal', 'secundaria')),
+    etiqueta TEXT NOT NULL,
+    nickname TEXT,
+    seller_id TEXT,
+    activo INTEGER NOT NULL DEFAULT 1,
+    sync_activo INTEGER NOT NULL DEFAULT 0,
+    sync_intervalo_minutos INTEGER NOT NULL DEFAULT 30,
+    creado_en TEXT NOT NULL,
+    actualizado_en TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ml_tokens_cuentas (
+    cuenta_ml TEXT PRIMARY KEY REFERENCES ml_cuentas(clave),
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_type TEXT DEFAULT 'Bearer',
+    scope TEXT,
+    ml_user_id TEXT,
+    expira_en TEXT NOT NULL,
+    obtenido_en TEXT NOT NULL,
+    actualizado_en TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ml_config_cuentas (
+    cuenta_ml TEXT NOT NULL REFERENCES ml_cuentas(clave),
+    clave TEXT NOT NULL,
+    valor TEXT,
+    actualizado_en TEXT NOT NULL,
+    PRIMARY KEY (cuenta_ml, clave)
+);
+
+CREATE TABLE IF NOT EXISTS ml_deposito_proveedor (
+    cuenta_ml TEXT NOT NULL REFERENCES ml_cuentas(clave),
+    store_id TEXT NOT NULL,
+    description TEXT,
+    network_node_id TEXT,
+    proveedor_id INTEGER REFERENCES proveedores(id) ON DELETE SET NULL,
+    actualizado_en TEXT NOT NULL,
+    PRIMARY KEY (cuenta_ml, store_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ml_deposito_proveedor_node
+    ON ml_deposito_proveedor(cuenta_ml, network_node_id);
+
 CREATE INDEX IF NOT EXISTS idx_mlstores_node ON ml_stores(network_node_id);
 CREATE INDEX IF NOT EXISTS idx_mlruns_estado ON ml_sync_runs(estado);
 CREATE INDEX IF NOT EXISTS idx_mlapilog_ts ON ml_api_log(ts);
@@ -435,6 +482,7 @@ def init_database():
         _migrar_ocupacion_unica_factura(cursor)
         _migrar_envio_pack_id(cursor)
         _migrar_cargas_erp(cursor)
+        _migrar_multi_cuenta(cursor)
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:
@@ -445,6 +493,43 @@ def init_database():
 
         _bootstrap_admin(cursor)
         _bootstrap_proveedores(cursor)
+
+
+def _migrar_multi_cuenta(cursor):
+    """Prepara multi-cuenta sin alterar las llaves legacy usadas por facturas.
+
+    Principal conserva sus claves actuales. Para una cuenta adicional la llave
+    interna se namespacéa (``secundaria::123``) y el valor original queda en
+    ``num_venta_origen``/``num_envio_origen``; así ningún ID repetido puede
+    sobrescribir relaciones históricas mientras se mantiene el folio visible.
+    """
+    ahora = __import__('datetime').datetime.utcnow().isoformat(timespec="seconds")
+    cursor.executemany(
+        """INSERT INTO ml_cuentas (clave, etiqueta, creado_en, actualizado_en)
+           VALUES (?, ?, ?, ?) ON CONFLICT(clave) DO NOTHING""",
+        [("principal", "Principal", ahora, ahora), ("secundaria", "Secundaria", ahora, ahora)],
+    )
+    for tabla, origen, indice in (
+        ("ventas_ml", "num_venta_origen", "idx_ventas_cuenta_origen"),
+        ("envios_colecta", "num_envio_origen", "idx_envios_cuenta_origen"),
+    ):
+        cols = {c["name"] for c in cursor.execute(f"PRAGMA table_info({tabla})").fetchall()}
+        if "cuenta_ml" not in cols:
+            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN cuenta_ml TEXT NOT NULL DEFAULT 'principal'")
+        if origen not in cols:
+            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN {origen} TEXT")
+            llave = "num_venta" if tabla == "ventas_ml" else "num_envio"
+            cursor.execute(f"UPDATE {tabla} SET {origen} = {llave} WHERE {origen} IS NULL")
+        cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {indice} ON {tabla}(cuenta_ml, {origen})")
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ml_sync_runs)").fetchall()}
+    if "cuenta_ml" not in cols:
+        cursor.execute("ALTER TABLE ml_sync_runs ADD COLUMN cuenta_ml TEXT NOT NULL DEFAULT 'principal'")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mlruns_cuenta_estado ON ml_sync_runs(cuenta_ml, estado)")
+    cols = {c["name"] for c in cursor.execute("PRAGMA table_info(ml_notificaciones)").fetchall()}
+    if "cuenta_ml" not in cols:
+        cursor.execute("ALTER TABLE ml_notificaciones ADD COLUMN cuenta_ml TEXT NOT NULL DEFAULT 'principal'")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mlnotif_cuenta_procesada ON ml_notificaciones(cuenta_ml, procesada)")
+
 
 
 # Dominio interno para usuarios proveedor que entran con username (no email real).

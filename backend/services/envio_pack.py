@@ -86,8 +86,10 @@ caen en las dos hermanas en vez de pelearse por una.
 # El orden de los OR no cambia el resultado, pero se deja el cruce directo primero
 # porque es el caso normal (~97% de los envíos) y SQLite corta antes.
 ENVIO_CUBRE_VENTA = """(
-    e.num_venta_ml = v.num_venta
-    OR (e.pack_id IS NOT NULL AND v.pack_id IS NOT NULL AND e.pack_id = v.pack_id)
+    e.cuenta_ml = v.cuenta_ml AND (
+      e.num_venta_ml = v.num_venta
+      OR (e.pack_id IS NOT NULL AND v.pack_id IS NOT NULL AND e.pack_id = v.pack_id)
+    )
 )"""
 
 
@@ -99,7 +101,7 @@ def envio_cubre_venta(alias_envio: str = "e", alias_venta: str = "v") -> str:
     del exterior más que los nombres de alias que le pasa el propio código.
     """
     return (
-        f"({alias_envio}.num_venta_ml = {alias_venta}.num_venta"
+        f"({alias_envio}.cuenta_ml = {alias_venta}.cuenta_ml AND ({alias_envio}.num_venta_ml = {alias_venta}.num_venta"
         f" OR ({alias_envio}.pack_id IS NOT NULL AND {alias_venta}.pack_id IS NOT NULL"
-        f" AND {alias_envio}.pack_id = {alias_venta}.pack_id))"
+        f" AND {alias_envio}.pack_id = {alias_venta}.pack_id)))"
     )

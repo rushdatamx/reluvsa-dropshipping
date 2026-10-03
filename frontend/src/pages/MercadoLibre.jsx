@@ -3,7 +3,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, Copy, Link2, RefreshCw, Store, XCircle, Zap,
 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto } from '../services/api';
+import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto, mlCuentas, mlIniciarOauthCuenta, mlSyncCuenta } from '../services/api';
 
 const INTERVALOS = [15, 30, 60, 120, 240];
 
@@ -23,6 +23,7 @@ function Badge({ ok, children }) {
 
 export default function MercadoLibre() {
   const [estado, setEstado] = useState(null);
+  const [cuentas, setCuentas] = useState([]);
   const [notifs, setNotifs] = useState([]);
   const [authUrl, setAuthUrl] = useState(null);
   const [aviso, setAviso] = useState(null);
@@ -32,9 +33,10 @@ export default function MercadoLibre() {
 
   const cargar = useCallback(async () => {
     try {
-      const [{ data: est }, { data: nots }] = await Promise.all([mlEstado(), mlNotificaciones(15)]);
+      const [{ data: est }, { data: nots }, { data: cuentasMl }] = await Promise.all([mlEstado(), mlNotificaciones(15), mlCuentas()]);
       setEstado(est);
       setNotifs(nots.notificaciones || []);
+      setCuentas(cuentasMl.cuentas || []);
       return est;
     } catch {
       return null;
@@ -58,6 +60,22 @@ export default function MercadoLibre() {
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudo iniciar la autorización');
     }
+  };
+
+  const conectarCuenta = async (cuenta) => {
+    setError(null);
+    try {
+      const { data } = await mlIniciarOauthCuenta(cuenta);
+      setAuthUrl(data.authorization_url);
+      setAviso(data.aviso);
+      window.open(data.authorization_url, '_blank', 'noopener');
+    } catch (err) { setError(err.response?.data?.detail || 'No se pudo iniciar la autorización'); }
+  };
+
+  const sincronizarCuenta = async (cuenta, tipo) => {
+    setError(null);
+    try { await mlSyncCuenta(cuenta, tipo); cargar(); }
+    catch (err) { setError(err.response?.data?.detail || 'No se pudo iniciar la sincronización'); }
   };
 
   const copiarUrl = async () => {
@@ -113,6 +131,21 @@ export default function MercadoLibre() {
           <XCircle size={16} /> {String(error)}
         </div>
       )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {cuentas.map((cuenta) => (
+          <div key={cuenta.clave} className="bg-white rounded-xl border border-notion-border p-5">
+            <div className="flex justify-between gap-3 items-center mb-2"><h3 className="font-semibold">Cuenta ML · {cuenta.etiqueta}</h3><Badge ok={cuenta.conectado}>{cuenta.conectado ? 'Conectada' : 'Pendiente'}</Badge></div>
+            <p className="text-sm text-notion-text-secondary">{cuenta.nickname || 'Sin autorización'}{cuenta.seller_id ? ` · seller ${cuenta.seller_id}` : ''}</p>
+            <p className="text-xs text-notion-text-secondary mt-2">{(cuenta.stores || []).map((s) => s.description).filter(Boolean).join(' · ') || 'Sin depósitos leídos'}</p>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => conectarCuenta(cuenta.clave)} className="px-3 py-1.5 border border-notion-border rounded-lg text-sm">{cuenta.conectado ? 'Reautorizar' : 'Conectar'}</button>
+              <button disabled={!cuenta.conectado} onClick={() => sincronizarCuenta(cuenta.clave, 'incremental')} className="px-3 py-1.5 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm disabled:opacity-50">Sincronizar</button>
+              {cuenta.clave === 'secundaria' && <button disabled={!cuenta.conectado} onClick={() => sincronizarCuenta(cuenta.clave, 'backfill')} className="px-3 py-1.5 border border-notion-border rounded-lg text-sm disabled:opacity-50">Cargar 5 días</button>}
+            </div>
+          </div>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* ─── Tarjeta: conexión ─── */}

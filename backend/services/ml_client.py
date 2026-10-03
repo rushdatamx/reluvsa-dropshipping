@@ -55,7 +55,13 @@ MAX_REINTENTOS_RED = 2
 # este proyecto no llevan secretos en query, pero se filtra igual).
 _CLAVES_SENSIBLES = {"access_token", "refresh_token", "code", "client_secret", "token"}
 
-_refresh_lock = threading.Lock()
+_refresh_locks = {"principal": threading.Lock(), "secundaria": threading.Lock()}
+
+
+def _cuenta(cuenta_ml: str = "principal") -> str:
+    if cuenta_ml not in _refresh_locks:
+        raise ValueError("Cuenta ML inválida")
+    return cuenta_ml
 
 
 class MLError(Exception):
@@ -78,26 +84,36 @@ class MLNoConfigurado(MLError):
     """Faltan ML_CLIENT_ID / ML_CLIENT_SECRET en el entorno."""
 
 
-def _client_id() -> str:
-    val = (os.getenv("ML_CLIENT_ID") or "").strip()
+def _client_id(cuenta_ml: str = "principal") -> str:
+    cuenta_ml = _cuenta(cuenta_ml)
+    nombre = "ML_CLIENT_ID" if cuenta_ml == "principal" else "ML_SECUNDARIA_CLIENT_ID"
+    val = (os.getenv(nombre) or "").strip()
     if not val:
         raise MLNoConfigurado("ML_CLIENT_ID no está configurado en el entorno")
     return val
 
 
-def _client_secret() -> str:
-    val = (os.getenv("ML_CLIENT_SECRET") or "").strip()
+def _client_secret(cuenta_ml: str = "principal") -> str:
+    cuenta_ml = _cuenta(cuenta_ml)
+    nombre = "ML_CLIENT_SECRET" if cuenta_ml == "principal" else "ML_SECUNDARIA_CLIENT_SECRET"
+    val = (os.getenv(nombre) or "").strip()
     if not val:
         raise MLNoConfigurado("ML_CLIENT_SECRET no está configurado en el entorno")
     return val
 
 
-def _redirect_uri() -> str:
+def _redirect_uri(cuenta_ml: str = "principal") -> str:
+    if _cuenta(cuenta_ml) == "secundaria":
+        return (os.getenv("ML_SECUNDARIA_REDIRECT_URI") or
+                "https://reluvsa-dropshipping-production.up.railway.app/api/ml/cuentas/secundaria/oauth/callback").strip()
     return (os.getenv("ML_REDIRECT_URI") or REDIRECT_URI_DEFAULT).strip()
 
 
-def esta_configurado() -> bool:
-    return bool((os.getenv("ML_CLIENT_ID") or "").strip() and (os.getenv("ML_CLIENT_SECRET") or "").strip())
+def esta_configurado(cuenta_ml: str = "principal") -> bool:
+    try:
+        return bool(_client_id(cuenta_ml) and _client_secret(cuenta_ml))
+    except MLNoConfigurado:
+        return False
 
 
 def _utcnow() -> datetime:
@@ -205,7 +221,7 @@ def _request(metodo: str, url: str, params: Optional[dict] = None,
 # Tokens (persistencia atómica + refresh serializado)
 # ---------------------------------------------------------------------------
 
-def _guardar_tokens(data: dict) -> None:
+def _guardar_tokens(data: dict, cuenta_ml: str = "principal") -> None:
     """Persiste access+refresh nuevos JUNTOS en una sola sentencia (atómico).
 
     Usa el expires_in REAL de la respuesta (la doc de ML muestra ejemplos con 3 h
@@ -214,6 +230,18 @@ def _guardar_tokens(data: dict) -> None:
     ahora = _utcnow()
     expira_en = ahora + timedelta(seconds=int(data["expires_in"]))
     with get_db() as conn:
+        if cuenta_ml != "principal":
+            conn.execute(
+                """INSERT INTO ml_tokens_cuentas (cuenta_ml, access_token, refresh_token, token_type, scope,
+                    ml_user_id, expira_en, obtenido_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(cuenta_ml) DO UPDATE SET access_token=excluded.access_token,
+                    refresh_token=excluded.refresh_token, token_type=excluded.token_type, scope=excluded.scope,
+                    ml_user_id=excluded.ml_user_id, expira_en=excluded.expira_en, actualizado_en=excluded.actualizado_en""",
+                (cuenta_ml, data["access_token"], data["refresh_token"], data.get("token_type", "Bearer"),
+                 data.get("scope"), str(data.get("user_id")) if data.get("user_id") is not None else None,
+                 expira_en.isoformat(timespec="seconds"), ahora.isoformat(timespec="seconds"), ahora.isoformat(timespec="seconds")),
+            )
+            return
         conn.execute(
             """INSERT INTO ml_tokens (id, access_token, refresh_token, token_type, scope,
                                       ml_user_id, expira_en, obtenido_en, actualizado_en)
@@ -240,9 +268,12 @@ def _guardar_tokens(data: dict) -> None:
         )
 
 
-def _leer_tokens() -> Optional[dict]:
+def _leer_tokens(cuenta_ml: str = "principal") -> Optional[dict]:
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM ml_tokens WHERE id = 1").fetchone()
+        if cuenta_ml == "principal":
+            row = conn.execute("SELECT * FROM ml_tokens WHERE id = 1").fetchone()
+        else:
+            row = conn.execute("SELECT * FROM ml_tokens_cuentas WHERE cuenta_ml = ?", (cuenta_ml,)).fetchone()
     return dict(row) if row else None
 
 
@@ -279,12 +310,13 @@ def _post_oauth_token(form: dict) -> dict:
     return resp.json()
 
 
-def _refrescar(access_que_fallo: Optional[str] = None) -> str:
+def _refrescar(access_que_fallo: Optional[str] = None, cuenta_ml: str = "principal") -> str:
     """Renueva el access token. Serializado con lock + double-check contra BD:
     si dos hilos llegan con el token vencido, solo UNO hace el POST de refresh
     (crítico: el refresh token es de un solo uso)."""
-    with _refresh_lock:
-        tokens = _leer_tokens()
+    cuenta_ml = _cuenta(cuenta_ml)
+    with _refresh_locks[cuenta_ml]:
+        tokens = _leer_tokens(cuenta_ml)
         if not tokens:
             raise MLNoConectado("No hay cuenta de ML conectada")
         # ¿Otro hilo ya refrescó mientras esperábamos el lock?
@@ -293,20 +325,20 @@ def _refrescar(access_que_fallo: Optional[str] = None) -> str:
 
         data = _post_oauth_token({
             "grant_type": "refresh_token",
-            "client_id": _client_id(),
-            "client_secret": _client_secret(),
+            "client_id": _client_id(cuenta_ml),
+            "client_secret": _client_secret(cuenta_ml),
             "refresh_token": tokens["refresh_token"],
         })
-        _guardar_tokens(data)
+        _guardar_tokens(data, cuenta_ml)
         return data["access_token"]
 
 
-def _token_valido() -> str:
-    tokens = _leer_tokens()
+def _token_valido(cuenta_ml: str = "principal") -> str:
+    tokens = _leer_tokens(cuenta_ml)
     if not tokens:
         raise MLNoConectado("No hay cuenta de ML conectada")
     if _expirado(tokens):
-        return _refrescar(tokens["access_token"])
+        return _refrescar(tokens["access_token"], cuenta_ml)
     return tokens["access_token"]
 
 
@@ -314,15 +346,15 @@ def _token_valido() -> str:
 # API pública del cliente (solo lectura)
 # ---------------------------------------------------------------------------
 
-def get(path: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> dict:
+def get(path: str, params: Optional[dict] = None, headers: Optional[dict] = None, cuenta_ml: str = "principal") -> dict:
     """GET autenticado a la API de ML. Ante 401 refresca el token y reintenta UNA vez."""
-    access = _token_valido()
+    access = _token_valido(cuenta_ml)
     hdrs = dict(headers or {})
     hdrs["Authorization"] = f"Bearer {access}"
     resp = _request("GET", API_BASE + path, params=params, headers=hdrs)
 
     if resp.status_code == 401:
-        access = _refrescar(access)
+        access = _refrescar(access, cuenta_ml)
         hdrs["Authorization"] = f"Bearer {access}"
         resp = _request("GET", API_BASE + path, params=params, headers=hdrs)
 
@@ -331,15 +363,15 @@ def get(path: str, params: Optional[dict] = None, headers: Optional[dict] = None
     raise MLError(f"GET {path} respondió {resp.status_code}")
 
 
-def get_opcional(path: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> Optional[dict]:
+def get_opcional(path: str, params: Optional[dict] = None, headers: Optional[dict] = None, cuenta_ml: str = "principal") -> Optional[dict]:
     """Como get(), pero 404 devuelve None (p.ej. /sla no aplica a cancelados/fulfillment)."""
-    access = _token_valido()
+    access = _token_valido(cuenta_ml)
     hdrs = dict(headers or {})
     hdrs["Authorization"] = f"Bearer {access}"
     resp = _request("GET", API_BASE + path, params=params, headers=hdrs)
 
     if resp.status_code == 401:
-        access = _refrescar(access)
+        access = _refrescar(access, cuenta_ml)
         hdrs["Authorization"] = f"Bearer {access}"
         resp = _request("GET", API_BASE + path, params=params, headers=hdrs)
 
@@ -354,29 +386,29 @@ def get_opcional(path: str, params: Optional[dict] = None, headers: Optional[dic
 # OAuth (canje inicial)
 # ---------------------------------------------------------------------------
 
-def build_authorization_url(state: str) -> str:
+def build_authorization_url(state: str, cuenta_ml: str = "principal") -> str:
     """URL de autorización que debe abrir el TITULAR de la cuenta ML en su navegador.
     SIN PKCE (deshabilitado en el panel): no se manda code_challenge."""
     query = urlencode({
         "response_type": "code",
-        "client_id": _client_id(),
-        "redirect_uri": _redirect_uri(),
+        "client_id": _client_id(cuenta_ml),
+        "redirect_uri": _redirect_uri(cuenta_ml),
         "state": state,
     })
     return f"{AUTH_URL}?{query}"
 
 
-def canjear_code(code: str) -> dict:
+def canjear_code(code: str, cuenta_ml: str = "principal") -> dict:
     """Canjea el authorization code por tokens y los persiste atómicamente.
     Devuelve metadatos NO sensibles: {ml_user_id, scope}."""
     data = _post_oauth_token({
         "grant_type": "authorization_code",
-        "client_id": _client_id(),
-        "client_secret": _client_secret(),
+        "client_id": _client_id(cuenta_ml),
+        "client_secret": _client_secret(cuenta_ml),
         "code": code,
-        "redirect_uri": _redirect_uri(),
+        "redirect_uri": _redirect_uri(cuenta_ml),
     })
-    _guardar_tokens(data)
+    _guardar_tokens(data, cuenta_ml)
     return {
         "ml_user_id": str(data.get("user_id")) if data.get("user_id") is not None else None,
         "scope": data.get("scope"),
@@ -387,13 +419,13 @@ def canjear_code(code: str) -> dict:
 # Estado (sin exponer tokens jamás)
 # ---------------------------------------------------------------------------
 
-def hay_conexion() -> bool:
-    return _leer_tokens() is not None
+def hay_conexion(cuenta_ml: str = "principal") -> bool:
+    return _leer_tokens(cuenta_ml) is not None
 
 
-def estado_conexion() -> dict:
+def estado_conexion(cuenta_ml: str = "principal") -> dict:
     """Metadatos de la conexión para la UI. NUNCA incluye los tokens."""
-    tokens = _leer_tokens()
+    tokens = _leer_tokens(cuenta_ml)
     if not tokens:
         return {"conectado": False}
     try:

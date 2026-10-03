@@ -90,12 +90,20 @@ class SyncEnCurso(Exception):
 # Config clave-valor
 # ---------------------------------------------------------------------------
 
-def get_config(conn, clave: str) -> Optional[str]:
+def get_config(conn, clave: str, cuenta_ml: str = "principal") -> Optional[str]:
+    if cuenta_ml != "principal":
+        row = conn.execute("SELECT valor FROM ml_config_cuentas WHERE cuenta_ml=? AND clave=?", (cuenta_ml, clave)).fetchone()
+        return row["valor"] if row else None
     row = conn.execute("SELECT valor FROM ml_config WHERE clave = ?", (clave,)).fetchone()
     return row["valor"] if row else None
 
 
-def set_config(conn, clave: str, valor: Optional[str]) -> None:
+def set_config(conn, clave: str, valor: Optional[str], cuenta_ml: str = "principal") -> None:
+    if cuenta_ml != "principal":
+        conn.execute("""INSERT INTO ml_config_cuentas (cuenta_ml, clave, valor, actualizado_en) VALUES (?, ?, ?, ?)
+            ON CONFLICT(cuenta_ml, clave) DO UPDATE SET valor=excluded.valor, actualizado_en=excluded.actualizado_en""",
+            (cuenta_ml, clave, valor, datetime.utcnow().isoformat(timespec="seconds")))
+        return
     conn.execute(
         """INSERT INTO ml_config (clave, valor, actualizado_en) VALUES (?, ?, ?)
            ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=excluded.actualizado_en""",
@@ -107,20 +115,22 @@ def set_config(conn, clave: str, valor: Optional[str]) -> None:
 # Bootstrap post-conexión: identidad del seller + catálogo de depósitos
 # ---------------------------------------------------------------------------
 
-def _bootstrap_post_conexion() -> dict:
+def _bootstrap_post_conexion(cuenta_ml: str = "principal") -> dict:
     """GET /users/me (identidad + tags multi-origen) y catálogo de depósitos.
     Lo llama el callback OAuth y el inicio de cada sync (idempotente)."""
-    me = ml_client.get("/users/me")
+    me = ml_client.get("/users/me", cuenta_ml=cuenta_ml)
     seller_id = str(me["id"])
     nickname = me.get("nickname")
     tags = me.get("tags") or []
 
     with get_db() as conn:
-        set_config(conn, "seller_id", seller_id)
-        set_config(conn, "nickname", nickname)
-        set_config(conn, "tags_json", json.dumps(tags))
+        set_config(conn, "seller_id", seller_id, cuenta_ml)
+        set_config(conn, "nickname", nickname, cuenta_ml)
+        set_config(conn, "tags_json", json.dumps(tags), cuenta_ml)
+        conn.execute("UPDATE ml_cuentas SET seller_id=?, nickname=?, actualizado_en=? WHERE clave=?",
+                     (seller_id, nickname, datetime.utcnow().isoformat(timespec="seconds"), cuenta_ml))
 
-    stores_count = _sincronizar_stores(seller_id)
+    stores_count = _sincronizar_stores(seller_id, cuenta_ml)
     return {
         "seller_id": seller_id,
         "nickname": nickname,
@@ -132,11 +142,11 @@ def _bootstrap_post_conexion() -> dict:
     }
 
 
-def _sincronizar_stores(seller_id: str) -> int:
+def _sincronizar_stores(seller_id: str, cuenta_ml: str = "principal") -> int:
     """Catálogo de depósitos → ml_stores. description = lo que el Excel mostraba
     en 'Depósito' (MATRIZ/KIM/CAUPLAS/...); codigo_bodega vía LUGAR_A_BODEGA."""
     try:
-        data = ml_client.get(f"/users/{seller_id}/stores/search", params={"tags": "stock_location"})
+        data = ml_client.get(f"/users/{seller_id}/stores/search", params={"tags": "stock_location"}, cuenta_ml=cuenta_ml)
     except ml_client.MLError:
         # Cuenta sin multi-origen o permiso pendiente: no es fatal, el lugar
         # saldrá del shipment.origin en el sync.
@@ -164,13 +174,22 @@ def _sincronizar_stores(seller_id: str) -> int:
                     ahora,
                 ),
             )
+            conn.execute("""INSERT INTO ml_deposito_proveedor (cuenta_ml, store_id, description, network_node_id, proveedor_id, actualizado_en)
+                 VALUES (?, ?, ?, ?, (SELECT id FROM proveedores WHERE codigo_bodega=?), ?)
+                 ON CONFLICT(cuenta_ml, store_id) DO UPDATE SET description=excluded.description,
+                 network_node_id=excluded.network_node_id, actualizado_en=excluded.actualizado_en""",
+                 (cuenta_ml, str(st.get("id")), desc or None,
+                  str(st.get("network_node_id")) if st.get("network_node_id") is not None else None, codigo, ahora))
     return len(resultados)
 
 
-def _cargar_stores(conn) -> dict:
+def _cargar_stores(conn, cuenta_ml: str = "principal") -> dict:
     """{'por_store': {store_id: description}, 'por_node': {node_id: description}}"""
     por_store, por_node = {}, {}
-    for r in conn.execute("SELECT store_id, description, network_node_id FROM ml_stores").fetchall():
+    tabla = "ml_stores" if cuenta_ml == "principal" else "ml_deposito_proveedor"
+    for r in conn.execute(f"SELECT store_id, description, network_node_id FROM {tabla}" +
+                          (" WHERE cuenta_ml=?" if cuenta_ml != "principal" else ""),
+                          (cuenta_ml,) if cuenta_ml != "principal" else ()).fetchall():
         if r["store_id"]:
             por_store[r["store_id"]] = r["description"]
         if r["network_node_id"]:
@@ -182,18 +201,18 @@ def _cargar_stores(conn) -> dict:
 # Arranque / control de corridas
 # ---------------------------------------------------------------------------
 
-def iniciar_sync(tipo: str = "incremental") -> dict:
+def iniciar_sync(tipo: str = "incremental", cuenta_ml: str = "principal") -> dict:
     """Valida precondiciones, registra la corrida y la lanza en un thread daemon.
     Lanza SyncEnCurso si ya hay una corriendo con heartbeat fresco."""
     if tipo not in ("incremental", "backfill"):
         raise ValueError(f"tipo de sync inválido: {tipo}")
-    if not ml_client.hay_conexion():
+    if not ml_client.hay_conexion(cuenta_ml):
         raise ml_client.MLNoConectado("No hay cuenta de ML conectada")
 
     ahora = datetime.utcnow()
     with get_db() as conn:
         viva = conn.execute(
-            "SELECT * FROM ml_sync_runs WHERE estado='en_curso' ORDER BY id DESC LIMIT 1"
+            "SELECT * FROM ml_sync_runs WHERE cuenta_ml=? AND estado='en_curso' ORDER BY id DESC LIMIT 1", (cuenta_ml,)
         ).fetchone()
         if viva:
             try:
@@ -210,7 +229,7 @@ def iniciar_sync(tipo: str = "incremental") -> dict:
 
         # Sin ultima_sync (nunca se ha sincronizado) el incremental no tiene punto
         # de partida: degrada a backfill.
-        if tipo == "incremental" and not get_config(conn, "ultima_sync"):
+        if tipo == "incremental" and not get_config(conn, "ultima_sync", cuenta_ml):
             tipo = "backfill"
 
     if not _sync_lock.acquire(blocking=False):
@@ -223,33 +242,33 @@ def iniciar_sync(tipo: str = "incremental") -> dict:
     try:
         with get_db() as conn:
             cur = conn.execute(
-                """INSERT INTO ml_sync_runs (tipo, estado, iniciado_en, actualizado_en)
-                   VALUES (?, 'en_curso', ?, ?)""",
-                (tipo, ahora.isoformat(timespec="seconds"), ahora.isoformat(timespec="seconds")),
+                """INSERT INTO ml_sync_runs (tipo, estado, iniciado_en, actualizado_en, cuenta_ml)
+                   VALUES (?, 'en_curso', ?, ?, ?)""",
+                (tipo, ahora.isoformat(timespec="seconds"), ahora.isoformat(timespec="seconds"), cuenta_ml),
             )
             run_id = cur.lastrowid
     except Exception:
         _sync_lock.release()
         raise
 
-    hilo = threading.Thread(target=_ejecutar_sync, args=(run_id, tipo), daemon=True)
+    hilo = threading.Thread(target=_ejecutar_sync, args=(run_id, tipo, cuenta_ml), daemon=True)
     hilo.start()
-    return {"run_id": run_id, "tipo": tipo}
+    return {"run_id": run_id, "tipo": tipo, "cuenta_ml": cuenta_ml}
 
 
-def _ejecutar_sync(run_id: int, tipo: str) -> None:
+def _ejecutar_sync(run_id: int, tipo: str, cuenta_ml: str = "principal") -> None:
     """Cuerpo del thread. Libera el lock SIEMPRE y nunca deja la run en_curso."""
     try:
-        boot = _bootstrap_post_conexion()
+        boot = _bootstrap_post_conexion(cuenta_ml)
         seller_id = boot["seller_id"]
         inicio = datetime.utcnow()
         stats = {"ordenes_vistas": 0, "ventas_upsert": 0, "envios_upsert": 0,
                  "errores": 0, "detalle_errores": []}
 
         if tipo == "backfill":
-            _run_backfill(run_id, seller_id, inicio, stats)
+            _run_backfill(run_id, seller_id, inicio, stats, cuenta_ml)
         else:
-            _run_incremental(run_id, seller_id, inicio, stats)
+            _run_incremental(run_id, seller_id, inicio, stats, cuenta_ml)
     except Exception as e:
         with get_db() as conn:
             conn.execute(
@@ -263,15 +282,17 @@ def _ejecutar_sync(run_id: int, tipo: str) -> None:
         _sync_lock.release()
 
 
-def _run_backfill(run_id: int, seller_id: str, inicio: datetime, stats: dict) -> None:
-    desde = inicio - timedelta(days=BACKFILL_DIAS)
+def _run_backfill(run_id: int, seller_id: str, inicio: datetime, stats: dict, cuenta_ml: str = "principal") -> None:
+    # La segunda cuenta inicia deliberadamente con cinco días; principal conserva
+    # su histórico vigente de 12 meses.
+    desde = inicio - timedelta(days=5 if cuenta_ml == "secundaria" else BACKFILL_DIAS)
     with get_db() as conn:
         # Reanudar desde el checkpoint de un backfill previo que no terminó.
         prev = conn.execute(
             """SELECT cursor_fecha FROM ml_sync_runs
-               WHERE tipo='backfill' AND estado IN ('abortado','error') AND cursor_fecha IS NOT NULL
+               WHERE cuenta_ml=? AND tipo='backfill' AND estado IN ('abortado','error') AND cursor_fecha IS NOT NULL
                ORDER BY id DESC LIMIT 1"""
-        ).fetchone()
+        , (cuenta_ml,)).fetchone()
         if prev and prev["cursor_fecha"]:
             try:
                 desde = max(desde, datetime.fromisoformat(prev["cursor_fecha"]))
@@ -288,7 +309,7 @@ def _run_backfill(run_id: int, seller_id: str, inicio: datetime, stats: dict) ->
         _procesar_filtro(run_id, seller_id, {
             "order.date_created.from": _iso_ml(w0),
             "order.date_created.to": _iso_ml(w1),
-        }, stats)
+        }, stats, cuenta_ml)
         with get_db() as conn:
             conn.execute(
                 "UPDATE ml_sync_runs SET cursor_fecha=?, actualizado_en=? WHERE id=?",
@@ -297,12 +318,12 @@ def _run_backfill(run_id: int, seller_id: str, inicio: datetime, stats: dict) ->
             )
         w0 = w1
 
-    _finalizar(run_id, inicio, stats)
+    _finalizar(run_id, inicio, stats, cuenta_ml)
 
 
-def _run_incremental(run_id: int, seller_id: str, inicio: datetime, stats: dict) -> None:
+def _run_incremental(run_id: int, seller_id: str, inicio: datetime, stats: dict, cuenta_ml: str = "principal") -> None:
     with get_db() as conn:
-        ultima = get_config(conn, "ultima_sync")
+        ultima = get_config(conn, "ultima_sync", cuenta_ml)
     desde = datetime.fromisoformat(ultima) - timedelta(minutes=MARGEN_SOLAPE_MIN)
     with get_db() as conn:
         conn.execute(
@@ -311,8 +332,8 @@ def _run_incremental(run_id: int, seller_id: str, inicio: datetime, stats: dict)
         )
     _procesar_filtro(run_id, seller_id, {
         "order.date_last_updated.from": _iso_ml(desde),
-    }, stats)
-    _finalizar(run_id, inicio, stats)
+    }, stats, cuenta_ml)
+    _finalizar(run_id, inicio, stats, cuenta_ml)
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +345,7 @@ def _iso_ml(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
 
 
-def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict) -> None:
+def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict, cuenta_ml: str = "principal") -> None:
     """Pagina /orders/search con un filtro dado y upsertea cada orden.
     Las llamadas a la API van SIN conexión de BD abierta; los upserts de cada
     página se hacen juntos en una transacción corta."""
@@ -332,7 +353,7 @@ def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict) -> 
     while True:
         params = {"seller": seller_id, "limit": LIMIT, "offset": offset, "sort": "date_asc"}
         params.update(filtro)
-        page = ml_client.get("/orders/search", params=params)
+        page = ml_client.get("/orders/search", params=params, cuenta_ml=cuenta_ml)
         results = page.get("results") or []
 
         # 1) Traer de la API todo lo de esta página (sin BD abierta).
@@ -344,20 +365,20 @@ def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict) -> 
                 # (403/500 de /collections; get_opcional ya absorbe el 404) NO debe
                 # costar la venta ni el envío de esta orden, que son el dato de negocio.
                 try:
-                    total_neto = _traer_total_neto(order)
+                    total_neto = _traer_total_neto(order, cuenta_ml)
                 except Exception as e:
                     total_neto = None
                     _anotar_error(stats, f"neto orden {order.get('id')}: {type(e).__name__}: {e}")
-                paquete.append((order,) + _traer_envio(order) + (total_neto,))
+                paquete.append((order,) + _traer_envio(order, cuenta_ml) + (total_neto,))
             except Exception as e:
                 _anotar_error(stats, f"orden {order.get('id')}: {type(e).__name__}: {e}")
 
         # 2) Upsert de la página completa en una transacción corta.
         with get_db() as conn:
-            stores = _cargar_stores(conn)
+            stores = _cargar_stores(conn, cuenta_ml)
             for order, ship, sla, total_neto in paquete:
                 try:
-                    _procesar_orden(conn, order, ship, sla, stores, stats, total_neto)
+                    _procesar_orden(conn, order, ship, sla, stores, stats, total_neto, cuenta_ml)
                 except Exception as e:
                     _anotar_error(stats, f"upsert orden {order.get('id')}: {type(e).__name__}: {e}")
             _tocar_run(conn, run_id, stats)
@@ -371,17 +392,17 @@ def _procesar_filtro(run_id: int, seller_id: str, filtro: dict, stats: dict) -> 
             break
 
 
-def _traer_envio(order: dict) -> Tuple[Optional[dict], Optional[dict]]:
+def _traer_envio(order: dict, cuenta_ml: str = "principal") -> Tuple[Optional[dict], Optional[dict]]:
     """(shipment, sla) de una orden — o (None, None) si no tiene envío."""
     ship_id = (order.get("shipping") or {}).get("id")
     if not ship_id:
         return None, None
-    ship = ml_client.get(f"/orders/{order['id']}/shipments")
-    sla = ml_client.get_opcional(f"/shipments/{ship_id}/sla")
+    ship = ml_client.get(f"/orders/{order['id']}/shipments", cuenta_ml=cuenta_ml)
+    sla = ml_client.get_opcional(f"/shipments/{ship_id}/sla", cuenta_ml=cuenta_ml)
     return ship, sla
 
 
-def _traer_total_neto(order: dict) -> Optional[float]:
+def _traer_total_neto(order: dict, cuenta_ml: str = "principal") -> Optional[float]:
     """El "Total (MXN)" que Gaby ve en el portal de ML: lo que RELUVSA recibe ya
     descontados cargos por venta, envíos e impuestos.
 
@@ -403,7 +424,7 @@ def _traer_total_neto(order: dict) -> Optional[float]:
             continue
         # get_opcional: un pago sin collection (o ya archivado) no debe tumbar la
         # sincronización de la venta — el resto de sus datos sigue siendo válido.
-        col = ml_client.get_opcional(f"/collections/{pago_id}")
+        col = ml_client.get_opcional(f"/collections/{pago_id}", cuenta_ml=cuenta_ml)
         if col and col.get("net_received_amount") is not None:
             nets.append(col["net_received_amount"])
     return round(sum(nets), 2) if nets else None
@@ -453,17 +474,17 @@ def _mapear_estado(order: dict) -> Optional[str]:
 
 
 def _procesar_orden(conn, order: dict, ship: Optional[dict], sla: Optional[dict],
-                    stores: dict, stats: dict, total_neto: Optional[float] = None) -> None:
+                    stores: dict, stats: dict, total_neto: Optional[float] = None, cuenta_ml: str = "principal") -> None:
     receiver_name = None
     if ship:
         receiver_name = ((ship.get("receiver_address") or {}).get("receiver_name")
                          or (ship.get("destination") or {}).get("receiver_name"))
 
-    _upsert_venta_api(conn, order, stores, receiver_name, total_neto)
+    _upsert_venta_api(conn, order, stores, receiver_name, total_neto, cuenta_ml)
     stats["ventas_upsert"] += 1
 
     if ship and ship.get("id"):
-        _upsert_envio_api(conn, order, ship, sla, stores)
+        _upsert_envio_api(conn, order, ship, sla, stores, cuenta_ml)
         stats["envios_upsert"] += 1
 
 
@@ -477,11 +498,12 @@ def _deposito_de_orden(order: dict, stores: dict) -> Optional[str]:
 
 
 def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[str],
-                      total_neto: Optional[float] = None) -> None:
+                      total_neto: Optional[float] = None, cuenta_ml: str = "principal") -> None:
     """Upsert en ventas_ml con la misma semántica que parser_ventas_ml: UPDATE si
     existe / INSERT si no. NO toca `albaran` (viene del Excel de Gaby) y NO pisa
     `comprador` con NULL (COALESCE: la API enmascara datos tarde o temprano)."""
-    num_venta = str(order["id"])
+    num_venta_origen = str(order["id"])
+    num_venta = num_venta_origen if cuenta_ml == "principal" else f"{cuenta_ml}::{num_venta_origen}"
     items = order.get("order_items") or []
     primero = (items[0].get("item") or {}) if items else {}
     sku = primero.get("seller_sku") or primero.get("seller_custom_field")
@@ -498,7 +520,7 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
     pack_id = str(order["pack_id"]) if order.get("pack_id") else None
 
     existe = conn.execute(
-        "SELECT num_venta, fecha_creacion_ml FROM ventas_ml WHERE num_venta = ?", (num_venta,)
+        "SELECT num_venta, fecha_creacion_ml FROM ventas_ml WHERE cuenta_ml=? AND num_venta_origen=?", (cuenta_ml, num_venta_origen)
     ).fetchone()
     if existe:
         conn.execute(
@@ -515,16 +537,16 @@ def _upsert_venta_api(conn, order: dict, stores: dict, receiver_name: Optional[s
                                     titulo=?, unidades=?, total=?, comprador=COALESCE(?, comprador),
                                     pack_id=COALESCE(?, pack_id),
                                     total_neto=COALESCE(?, total_neto)
-               WHERE num_venta=?""",
+               WHERE cuenta_ml=? AND num_venta_origen=?""",
             (sku, deposito, fecha_efectiva, fecha_creacion, estado, titulo, unidades, total, receiver_name,
-             pack_id, total_neto, num_venta),
+             pack_id, total_neto, cuenta_ml, num_venta_origen),
         )
     else:
         conn.execute(
-            """INSERT INTO ventas_ml (num_venta, sku, deposito, fecha_venta, fecha_creacion_ml,
+            """INSERT INTO ventas_ml (num_venta, num_venta_origen, cuenta_ml, sku, deposito, fecha_venta, fecha_creacion_ml,
                                       estado, titulo, unidades, total, comprador, pack_id, total_neto)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (num_venta, sku, deposito, fecha_efectiva, fecha_creacion, estado, titulo, unidades, total, receiver_name,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (num_venta, num_venta_origen, cuenta_ml, sku, deposito, fecha_efectiva, fecha_creacion, estado, titulo, unidades, total, receiver_name,
              pack_id, total_neto),
         )
 
@@ -540,12 +562,14 @@ def _resolver_lugar(order: dict, ship: dict, stores: dict) -> Optional[str]:
     return _deposito_de_orden(order, stores)
 
 
-def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores: dict) -> None:
+def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores: dict, cuenta_ml: str = "principal") -> None:
     """Upsert en envios_colecta calcado de parser_colecta: respeta lugar_override
     (el override de Gaby manda sobre lo que diga la API) y no pisa cumplio_sla
     con NULL. El cruce a la venta es DIRECTO por ID (confianza 1.0)."""
-    num_envio = str(ship["id"])
-    num_venta = str(order["id"])
+    num_envio_origen = str(ship["id"])
+    num_envio = num_envio_origen if cuenta_ml == "principal" else f"{cuenta_ml}::{num_envio_origen}"
+    num_venta_origen = str(order["id"])
+    num_venta = num_venta_origen if cuenta_ml == "principal" else f"{cuenta_ml}::{num_venta_origen}"
     # El paquete al que pertenece el envío. ML crea UN solo envío por carrito y lo
     # cuelga de UNA sola de las N órdenes; guardarlo aquí es lo que permite que las
     # ventas HERMANAS del pack encuentren este envío (BUG A). Ver services/envio_pack.py.
@@ -569,11 +593,18 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
     else:
         cumplio_sla = None  # insuficient_info / sin SLA → conservar lo existente
 
-    proveedor_id = _resolver_proveedor(conn, lugar_indicado)
+    # La secundaria usa el mapeo persistente por depósito: una bodega desconocida
+    # queda sin proveedor hasta que un admin la asigne, nunca se adivina por texto.
+    if cuenta_ml == "secundaria":
+        mapa = conn.execute("SELECT proveedor_id FROM ml_deposito_proveedor WHERE cuenta_ml=? AND description=? LIMIT 1",
+                            (cuenta_ml, lugar_indicado)).fetchone()
+        proveedor_id = mapa["proveedor_id"] if mapa else None
+    else:
+        proveedor_id = _resolver_proveedor(conn, lugar_indicado)
 
     existente = conn.execute(
-        "SELECT num_envio, lugar_override, cumplio_sla FROM envios_colecta WHERE num_envio = ?",
-        (num_envio,),
+        "SELECT num_envio, lugar_override, cumplio_sla FROM envios_colecta WHERE cuenta_ml=? AND num_envio_origen=?",
+        (cuenta_ml, num_envio_origen),
     ).fetchone()
 
     if existente:
@@ -588,17 +619,17 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
                                          proveedor_id=?, cumplio_sla=?,
                                          logistic_type=COALESCE(?, logistic_type),
                                          pack_id=COALESCE(?, pack_id)
-               WHERE num_envio=?""",
+               WHERE cuenta_ml=? AND num_envio_origen=?""",
             (num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id, cumplio_sla,
-             logistic_type, pack_id, num_envio),
+             logistic_type, pack_id, cuenta_ml, num_envio_origen),
         )
     else:
         conn.execute(
             """INSERT INTO envios_colecta
-               (num_envio, num_venta, num_venta_ml, match_cruce_confianza, fecha_venta,
+               (num_envio, num_envio_origen, cuenta_ml, num_venta, num_venta_ml, match_cruce_confianza, fecha_venta,
                 titulo, lugar_indicado, proveedor_id, cumplio_sla, logistic_type, pack_id)
-               VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?, ?)""",
-            (num_envio, num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id,
+               VALUES (?, ?, ?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?, ?)""",
+            (num_envio, num_envio_origen, cuenta_ml, num_venta, num_venta, fecha, titulo, lugar_indicado, proveedor_id,
              cumplio_sla, logistic_type, pack_id),
         )
 
@@ -607,11 +638,12 @@ def _upsert_envio_api(conn, order: dict, ship: dict, sla: Optional[dict], stores
 # Cierre de la corrida
 # ---------------------------------------------------------------------------
 
-def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
+def _finalizar(run_id: int, inicio: datetime, stats: dict, cuenta_ml: str = "principal") -> None:
     with get_db() as conn:
-        # Cruce legacy (envíos del Excel sin ID directo) + cruce retroactivo de facturas.
-        cruce = resolver_cruce_ventas(conn)
-        recruce = recruzar_conceptos_sin_match(conn)
+        # Un folio legacy no identifica una cuenta; secundaria sólo admite los
+        # vínculos directos de la API y nunca adivina una factura/albarán ambiguo.
+        cruce = resolver_cruce_ventas(conn) if cuenta_ml == "principal" else 0
+        recruce = recruzar_conceptos_sin_match(conn) if cuenta_ml == "principal" else 0
 
         # Poda del buzón de webhooks: solo las YA procesadas (procesada=1) y viejas.
         # Va ANTES del marcado de abajo a propósito: así solo se borran las que ya
@@ -623,15 +655,15 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
             datetime.now() - timedelta(days=NOTIF_RETENCION_DIAS)
         ).isoformat(timespec="seconds")
         conn.execute(
-            "DELETE FROM ml_notificaciones WHERE procesada = 1 AND recibido_en < ?",
-            (corte_notif,),
+            "DELETE FROM ml_notificaciones WHERE cuenta_ml=? AND procesada = 1 AND recibido_en < ?",
+            (cuenta_ml, corte_notif),
         )
 
         # Las notificaciones pendientes quedan reconciliadas por el polling de esta
         # corrida (date_last_updated con solape); las que lleguen DURANTE la corrida
         # refieren updates posteriores a `inicio`, que el próximo incremental
         # (ultima_sync - 5 min) vuelve a cubrir. Por eso es seguro marcarlas todas.
-        conn.execute("UPDATE ml_notificaciones SET procesada=1 WHERE procesada=0")
+        conn.execute("UPDATE ml_notificaciones SET procesada=1 WHERE cuenta_ml=? AND procesada=0", (cuenta_ml,))
 
         # Poda de auditoría.
         corte = (datetime.utcnow() - timedelta(days=API_LOG_RETENCION_DIAS)).isoformat(timespec="seconds")
@@ -639,7 +671,7 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
 
         # ultima_sync = INICIO de la corrida (no el fin): lo actualizado durante la
         # corrida se re-consulta en la próxima. Solo avanza si terminó completa.
-        set_config(conn, "ultima_sync", inicio.isoformat(timespec="seconds"))
+        set_config(conn, "ultima_sync", inicio.isoformat(timespec="seconds"), cuenta_ml)
 
         resumen = {
             "ordenes_vistas": stats["ordenes_vistas"],
@@ -676,17 +708,24 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict) -> None:
 # varias réplicas cada una tendría su propio lock; la defensa que seguiría
 # valiendo es la corrida viva en BD.
 
-def sync_auto_activo(conn) -> bool:
+def sync_auto_activo(conn, cuenta_ml: str = "principal") -> bool:
     """Interruptor de apagado. Por defecto ENCENDIDO (el propósito de la feature)."""
-    valor = get_config(conn, "sync_auto_activo")
+    if cuenta_ml != "principal":
+        row = conn.execute("SELECT sync_activo FROM ml_cuentas WHERE clave=? AND activo=1", (cuenta_ml,)).fetchone()
+        return bool(row and row["sync_activo"])
+    valor = get_config(conn, "sync_auto_activo", cuenta_ml)
     if valor is None:
         return True
     return str(valor).strip().lower() in ("1", "true", "si", "sí", "on")
 
 
-def sync_auto_minutos(conn) -> int:
+def sync_auto_minutos(conn, cuenta_ml: str = "principal") -> int:
     """Intervalo configurable sin tocar código, acotado a un rango sano."""
-    valor = get_config(conn, "sync_auto_minutos")
+    if cuenta_ml != "principal":
+        row = conn.execute("SELECT sync_intervalo_minutos FROM ml_cuentas WHERE clave=?", (cuenta_ml,)).fetchone()
+        valor = row["sync_intervalo_minutos"] if row else None
+    else:
+        valor = get_config(conn, "sync_auto_minutos", cuenta_ml)
     try:
         minutos = int(str(valor).strip())
     except (TypeError, ValueError):
@@ -694,14 +733,14 @@ def sync_auto_minutos(conn) -> int:
     return max(SYNC_AUTO_MIN_MINUTOS, min(minutos, SYNC_AUTO_MAX_MINUTOS))
 
 
-def _ultimo_intento_auto(conn) -> Optional[datetime]:
+def _ultimo_intento_auto(conn, cuenta_ml: str = "principal") -> Optional[datetime]:
     """Cuándo se disparó por última vez (o se intentó disparar) la sync automática.
 
     Se guarda aparte de `ultima_sync` a propósito: `ultima_sync` solo avanza si la
     corrida TERMINA completa, así que usarla como reloj haría que una corrida
     fallida se reintentara en cada tick (cada minuto), martillando la API."""
     for clave in ("sync_auto_ultimo_intento", "ultima_sync"):
-        valor = get_config(conn, clave)
+        valor = get_config(conn, clave, cuenta_ml)
         if valor:
             try:
                 return datetime.fromisoformat(valor)
@@ -710,42 +749,46 @@ def _ultimo_intento_auto(conn) -> Optional[datetime]:
     return None
 
 
-def _toca_sincronizar(conn, ahora: datetime) -> bool:
-    if not sync_auto_activo(conn):
+def _toca_sincronizar(conn, ahora: datetime, cuenta_ml: str = "principal") -> bool:
+    if not sync_auto_activo(conn, cuenta_ml):
         return False
-    ultimo = _ultimo_intento_auto(conn)
+    ultimo = _ultimo_intento_auto(conn, cuenta_ml)
     if ultimo is None:
         # Nunca se ha sincronizado. NO disparamos solos: sin `ultima_sync` el
         # incremental degrada a backfill de 12 meses (~1 h), y esa corrida grande
         # debe ser una decisión explícita de un humano, no un efecto del arranque.
         return False
-    return (ahora - ultimo) >= timedelta(minutes=sync_auto_minutos(conn))
+    return (ahora - ultimo) >= timedelta(minutes=sync_auto_minutos(conn, cuenta_ml))
 
 
 def _tick_scheduler() -> Optional[dict]:
     """Un ciclo de evaluación. Devuelve la sync lanzada, o None si no tocaba."""
     ahora = datetime.utcnow()
     with get_db() as conn:
-        if not _toca_sincronizar(conn, ahora):
-            return None
+        cuentas = [r["clave"] for r in conn.execute("SELECT clave FROM ml_cuentas WHERE activo=1 ORDER BY clave").fetchall()]
+    for cuenta_ml in cuentas:
+      with get_db() as conn:
+        if not _toca_sincronizar(conn, ahora, cuenta_ml):
+            continue
         # Se marca ANTES de lanzar: si la corrida falla, el próximo intento espera
         # el intervalo completo en vez de reintentar cada minuto.
-        previo = get_config(conn, "sync_auto_ultimo_intento")
-        set_config(conn, "sync_auto_ultimo_intento", ahora.isoformat(timespec="seconds"))
+        previo = get_config(conn, "sync_auto_ultimo_intento", cuenta_ml)
+        set_config(conn, "sync_auto_ultimo_intento", ahora.isoformat(timespec="seconds"), cuenta_ml)
 
-    try:
-        return iniciar_sync("incremental")
-    except SyncEnCurso:
+      try:
+        return iniciar_sync("incremental") if cuenta_ml == "principal" else iniciar_sync("incremental", cuenta_ml)
+      except SyncEnCurso:
         # Ya hay una corriendo (p.ej. un backfill manual de ~1 h). No duplicamos,
         # y además DEVOLVEMOS el reloj: si consumiéramos el intento, al terminar
         # el backfill habría que esperar otro intervalo completo para la primera
         # incremental. Así el próximo tick (1 min) reintenta y entra en cuanto
         # la corrida larga libere.
         with get_db() as conn:
-            set_config(conn, "sync_auto_ultimo_intento", previo)
-        return None
-    except ml_client.MLError:
-        return None          # sin conexión/credenciales: se reintenta al próximo intervalo
+            set_config(conn, "sync_auto_ultimo_intento", previo, cuenta_ml)
+        continue
+      except ml_client.MLError:
+        continue          # sin conexión/credenciales: se reintenta al próximo intervalo
+    return None
 
 
 def _loop_scheduler() -> None:
