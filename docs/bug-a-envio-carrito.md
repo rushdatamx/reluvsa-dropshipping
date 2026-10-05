@@ -57,6 +57,52 @@ desde la venta ya cruzada) y una condición SQL compartida en
 
 Con eso los **5 pasos del matcher** ven las ventas hermanas sin tocar su lógica de cruce.
 
+### Regla vigente de multi-cuenta (hotfix 2026-10-03)
+
+La condición canónica vive en `backend/services/envio_pack.py::ENVIO_CUBRE_VENTA` y
+debe conservar exactamente dos ramas:
+
+```sql
+(
+    e.num_venta_ml = v.num_venta
+    OR (
+        e.cuenta_ml = v.cuenta_ml
+        AND e.pack_id IS NOT NULL
+        AND v.pack_id IS NOT NULL
+        AND e.pack_id = v.pack_id
+    )
+)
+```
+
+El vínculo directo **no** lleva `e.cuenta_ml = v.cuenta_ml`: `principal` conserva el
+ID original de Mercado Libre y las cuentas adicionales usan una llave interna con
+namespace, hoy `secundaria::<id>`. Esa identidad global es la que impide que dos
+cuentas con el mismo `order.id` se crucen y permite que SQLite use
+`idx_envios_venta_ml`.
+
+El vínculo por `pack_id` sí exige la cuenta porque ML puede repetir el mismo
+`pack_id` entre cuentas. Ambos `pack_id` deben ser no nulos. No sustituir esta
+condición por un `OR` que compare `pack_id` contra `num_venta`, ni envolver las dos
+ramas con el guard de cuenta: lo primero mezcla órdenes y carritos ambiguos; lo
+segundo vuelve a la exploración masiva de envíos que provocó la regresión de Ventas.
+
+Toda consulta nueva que relacione `ventas_ml` con `envios_colecta` debe importar
+`ENVIO_CUBRE_VENTA` o llamar `envio_cubre_venta(alias_envio, alias_venta)`; no se
+debe copiar una variante local. Si se modifica el parser/sync que escribe las
+llaves, se debe conservar:
+
+- `ventas_ml.num_venta` y `envios_colecta.num_envio` como IDs internos únicos;
+- `num_venta_origen`/`num_envio_origen` como el ID original de ML;
+- `cuenta_ml` en ambas tablas;
+- `pack_id` original de ML, sin namespace, porque el aislamiento lo aporta el
+  `cuenta_ml` del vínculo por paquete.
+
+La prueba contractual es `backend/scripts/test_envio_pack_carrito.py`, sección
+10: crea dos cuentas con el mismo `order.id`, `shipment.id` y `pack_id`, comprueba
+que sólo se cruzan sus identidades internas y verifica mediante `EXPLAIN QUERY PLAN`
+el uso de `idx_envios_venta_ml` e `idx_envios_cuenta_pack`. Cualquier cambio del
+parser o del sync debe ejecutar esa prueba antes de desplegar.
+
 ### 🔴 Por qué NO se duplicaron filas de envío
 
 La alternativa "obvia" era insertar un envío por venta del pack. **Eso rompe el SLA:** las

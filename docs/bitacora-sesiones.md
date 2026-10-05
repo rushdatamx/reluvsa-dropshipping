@@ -2798,12 +2798,27 @@ CAUPLAS (38/38), KIMS (19/19) y la compilación de los módulos modificados.
 
 ## 2026-10-03 — Recuperación de Ventas tras multi-cuenta
 
+### Síntoma y causa
+
+Después de introducir multi-cuenta, la pestaña Ventas dejó de responder dentro del
+timeout del frontend. La regresión no estaba en los datos: producción conservaba las
+ventas y envíos. La causa era el JOIN venta↔envío: añadir `e.cuenta_ml = v.cuenta_ml`
+antes del `OR` obligaba a SQLite a recorrer masivamente `envios_colecta` para cada
+venta, en vez de resolver el vínculo directo con su índice.
+
+### Resolución y regla nueva
+
 Se corrigió la condición canónica `ENVIO_CUBRE_VENTA`: el vínculo directo vuelve a
 comparar la identidad interna global (`e.num_venta_ml = v.num_venta`), mientras que
 el vínculo por `pack_id` conserva el límite `e.cuenta_ml = v.cuenta_ml`. Principal
 mantiene sus IDs y secundaria usa el prefijo interno `secundaria::`, por lo que el
 cruce directo no puede mezclar cuentas; `pack_id`, que puede repetirse, permanece
-aislado por cuenta.
+aislado por cuenta. La misma regla quedó documentada para futuros cambios del
+parser/sync en `docs/bug-a-envio-carrito.md`.
+
+También se confirmó que una corrida sólo se marca `abortado` al iniciar una nueva
+cuando su heartbeat ya superó el umbral de corrida muerta; no se borran ni revierten
+ventas, envíos, tokens o webhooks.
 
 La regresión de carritos ahora simula IDs de orden, envío y paquete repetidos en las
 dos cuentas y comprueba que no hay cruces. `EXPLAIN QUERY PLAN` confirma el uso de
