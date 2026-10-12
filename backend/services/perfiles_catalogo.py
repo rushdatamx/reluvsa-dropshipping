@@ -31,6 +31,12 @@ class PerfilCatalogo:
 
 
 PERFILES: Dict[str, PerfilCatalogo] = {
+    "AG": PerfilCatalogo(
+        codigo_bodega="AG", nombre_hoja=None, fila_header=1,
+        col_clave=1, col_linea=0, col_aplicaciones=8, col_precio_costo=12,
+        anclas_header=("producto", "codigo", "aplicacion", "desde", "hasta", "distribuidor", "stock"),
+        marca_ml="ARGENPARTS", dominios_imagenes=("apimagenes.s3.amazonaws.com",),
+    ),
     "GONHER": PerfilCatalogo(
         codigo_bodega="GONHER",
         nombre_hoja=None,

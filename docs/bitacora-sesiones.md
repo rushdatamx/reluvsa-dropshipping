@@ -2827,3 +2827,13 @@ impedía cargar Ventas. Pasaron Ventas/filtros, métricas, carritos, sync autom�
 sync end-to-end y el guardián de solo lectura de ML; la auditoría `api-guardian`
 aprobó el diff. No se modificaron tokens, webhooks, datos ni se hicieron escrituras
 hacia Mercado Libre; la sync automática sigue configurada con su intervalo de 30 min.
+
+## 2026-10-12 — ARGENPARTS en Publicaciones masivas
+
+Se agregó `master_ag` para ARGENPARTS (`AG`) y el segundo archivo obligatorio
+FOTOS AG.xlsx. El master consolida por Código, rechaza costo/stock inconsistentes,
+guarda equivalencias y compatibilidades en la descripción, y excluye títulos que no
+pueden cumplir 60 caracteres sin cortar palabras. FOTOS AG asigna principal y sufijos
+`_2`/`-2` hasta Imagen10; las URLs pasan el mismo candado HTTPS, host exacto, sin
+redirecciones y resolución mínima de 1200 px. La regresión nueva cubre lectura,
+títulos, fotos, host y XLSX; también pasaron KG, CAUPLAS, KIMS, GONHER y validación de imágenes.

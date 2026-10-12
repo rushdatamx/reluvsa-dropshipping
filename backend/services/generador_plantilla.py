@@ -135,6 +135,15 @@ ALIAS_PRODUCTO_CAUPLAS = {
     "refrigeracion": "Refrig.",
 }
 
+# Nombres aprobados por AG; se usan sólo para intentar cumplir el límite de ML.
+ALIAS_PRODUCTO_AG = {
+    "amortiguador": "Amort.", "amortiguador delantero": "Amort. Del.",
+    "amortiguador trasero": "Amort. Tras.", "base amortiguador": "Base Amort.",
+    "soporte amortiguador": "Soporte Amort.", "kit amortiguador": "Kit Amort.",
+    "resorte": "Resorte",
+}
+ALIAS_POSICION_AG = {"delantero": "Del.", "trasero": "Tras.", "izquierdo": "Izq.", "derecho": "Der."}
+
 
 def _sin_acentos(txt):
     import unicodedata
@@ -509,9 +518,61 @@ def _describir_gonher(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _titulo_ag(producto, compat):
+    producto = " ".join(str(producto or "").split())
+    posicion = " ".join(str(compat.get("posicion") or "").split())
+    marca = " ".join(str(compat.get("marca") or "").split())
+    aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
+    anios = str(compat["inicio"]) if compat["inicio"] == compat["fin"] else f"{compat['inicio']}-{compat['fin']}"
+    def armar(prod, pos, app): return " ".join(x for x in (prod, pos, "P/", marca, app, anios) if x)
+    intentos = [(producto, posicion, aplicacion),
+        (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto), posicion, aplicacion),
+        (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto),
+         " ".join(ALIAS_POSICION_AG.get(_sin_acentos(x), x) for x in posicion.split()), aplicacion)]
+    for prod, pos, app in intentos:
+        titulo = armar(prod, pos, app)
+        if len(titulo) <= MAX_TITULO: return titulo
+        # Las notas explicativas sólo se retiran para el título.
+        sin_parentesis = re.sub(r"\s*\([^)]*\)", "", app).strip()
+        titulo = armar(prod, pos, sin_parentesis)
+        if len(titulo) <= MAX_TITULO: return titulo
+    return None
+
+
+def _describir_ag(pieza, config):
+    partes = [pieza.get("producto", ""), "", "Número de parte: " + str(pieza.get("clave", ""))]
+    equivalencias = [(marca, codigos) for marca, codigos in pieza.get("equivalencias", {}).items() if codigos]
+    if equivalencias:
+        partes += ["", "Equivalencias:"] + [f"{marca}: {' | '.join(codigos)}" for marca, codigos in equivalencias]
+    compatibles = []
+    for c in pieza.get("compatibilidades", []):
+        anios = str(c["inicio"]) if c["inicio"] == c["fin"] else f"{c['inicio']}-{c['fin']}"
+        texto = " ".join(x for x in (c.get("marca"), c.get("aplicacion"), c.get("posicion"), anios) if x)
+        if _sin_acentos(texto) not in {_sin_acentos(x) for x in compatibles}: compatibles.append(texto)
+    if compatibles: partes += ["", "Compatibilidades:"] + compatibles
+    if config.descripcion_base: partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
+        if pieza.get("formato") == "master_ag":
+            descripcion = _describir_ag(pieza, config)
+            precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
+            for compat in pieza.get("compatibilidades", []):
+                titulo = _titulo_ag(pieza.get("producto"), compat)
+                if not titulo:
+                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
+                        "anio": f"{compat.get('inicio')}-{compat.get('fin')}", "motivo": "Título excede 60 caracteres"})
+                    continue
+                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                if par in vistos: deduplicadas += 1; continue
+                vistos.add(par)
+                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(), pieza.get("producto", ""),
+                    precio, descripcion, f"{compat['inicio']}-{compat['fin']}", False, [], compat.get("fila"), stock=pieza["stock"]))
+            continue
         if pieza.get("formato") == "master_gonher":
             descripcion = _describir_gonher(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
@@ -614,7 +675,7 @@ def generar_filas_con_reporte(piezas, config):
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
-    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
+    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
         return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 
@@ -673,7 +734,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
         ws.cell(f, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
         ws.cell(f, idx["Marca"], fila.marca or config.marca)
         ws.cell(f, idx["Modelo"], fila.sku)
-        limite_imagenes = 10 if bodega == "CAUPLAS" else 5
+        limite_imagenes = 10 if bodega in {"CAUPLAS", "AG"} else 5
         for numero, imagen in enumerate(fila.imagenes[:limite_imagenes], 1):
             if imagen: ws.cell(f, idx[f"Imagen{numero}"], imagen)
 

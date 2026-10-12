@@ -26,6 +26,7 @@ from services.generador_plantilla import (
     ConfiguracionProveedor, escribir_xlsx, generar_filas, generar_filas_con_reporte,
 )
 from services.imagenes_cauplas import asignar_imagenes_cauplas, leer_imagenes_cauplas
+from services.imagenes_ag import asignar_imagenes_ag, leer_imagenes_ag
 from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_detallado,
                                       leer_publicaciones, leer_skus_publicados)
 from services.perfiles_catalogo import perfil_de, proveedores_soportados
@@ -84,7 +85,7 @@ def _leer_o_400(ruta, perfil):
                     f"{perfil.codigo_bodega}? Esperamos la clave en la columna "
                     f"{chr(65 + perfil.col_clave)}."),
         )
-    formato_esperado = {"CAUPLAS": "master_cauplas", "KIM": "master_kims",
+    formato_esperado = {"AG": "master_ag", "CAUPLAS": "master_cauplas", "KIM": "master_kims",
                         "GONHER": "master_gonher"}.get(perfil.codigo_bodega)
     if formato_esperado and resultado.formato != formato_esperado:
         raise HTTPException(
@@ -96,6 +97,8 @@ def _leer_o_400(ruta, perfil):
             status_code=400,
             detail="Este archivo parece ser el master de CAUPLAS; selecciona CAUPLAS como proveedor.",
         )
+    if resultado.formato == "master_ag" and perfil.codigo_bodega != "AG":
+        raise HTTPException(status_code=400, detail="Este archivo parece ser el master de AG; selecciona ARGENPARTS.")
     if resultado.formato == "master_kims" and perfil.codigo_bodega != "KIM":
         raise HTTPException(status_code=400,
                             detail="Este archivo parece ser el master de KIMS; selecciona KIMS como proveedor.")
@@ -111,7 +114,7 @@ def listar_proveedores_soportados(_=Depends(require_admin)):
     return {
         "soportados": proveedores_soportados(),
         "marcas": {codigo: perfil_de(codigo).marca_ml for codigo in proveedores_soportados()},
-        "nombres": {**{codigo: codigo for codigo in proveedores_soportados()}, "KIM": "KIMS"},
+        "nombres": {**{codigo: codigo for codigo in proveedores_soportados()}, "KIM": "KIMS", "AG": "ARGENPARTS"},
         "envio_pendiente": envio_pendiente(),
     }
 
@@ -122,6 +125,7 @@ async def analizar(
     catalogo: UploadFile = File(...),
     publicaciones_ml: UploadFile = File(None),
     imagenes_cauplas: UploadFile = File(None),
+    imagenes_ag: UploadFile = File(None),
     _=Depends(require_admin),
 ):
     """Lee el catálogo y lo cruza contra lo ya publicado.
@@ -135,6 +139,10 @@ async def analizar(
         raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
     if perfil.codigo_bodega != "CAUPLAS" and imagenes_cauplas:
         raise HTTPException(status_code=400, detail="El archivo de imágenes sólo aplica para CAUPLAS.")
+    if perfil.codigo_bodega == "AG" and not imagenes_ag:
+        raise HTTPException(status_code=400, detail="ARGENPARTS requiere el Archivo de fotos AG (.xlsx).")
+    if perfil.codigo_bodega != "AG" and imagenes_ag:
+        raise HTTPException(status_code=400, detail="El archivo de fotos AG sólo aplica para ARGENPARTS.")
     ruta_cat = _guardar_tmp(catalogo)
     ruta_pub = _guardar_tmp(publicaciones_ml) if publicaciones_ml else None
 
@@ -148,11 +156,20 @@ async def analizar(
                     await imagenes_cauplas.read(), (p["clave"] for p in piezas))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+        fotos_ag = None
+        if perfil.codigo_bodega == "AG":
+            ruta_fotos_ag = _guardar_tmp(imagenes_ag)
+            try:
+                fotos_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            finally:
+                ruta_fotos_ag.unlink(missing_ok=True)
 
         publicados = set()
         if ruta_pub:
             try:
-                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}
+                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}
                               else leer_skus_publicados(ruta_pub))
             except Exception:
                 raise HTTPException(
@@ -162,22 +179,22 @@ async def analizar(
                 )
 
         cfg = ConfiguracionProveedor(codigo_bodega=codigo_bodega)
-        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
             candidatos, reporte = generar_filas_con_reporte(piezas, cfg)
             cruce_v = cruzar_variantes(candidatos, publicados)
             filas = cruce_v["pendientes"]
             sku_publicados = {sku for sku, _ in publicados}
             por_producto = []
-            productos = ({p["linea"] for p in piezas} if lectura.formato in {"master_kg", "master_kims"} else
+            productos = ({p["linea"] for p in piezas} if lectura.formato in {"master_kg", "master_kims", "master_ag"} else
                          {producto for p in piezas for producto in p.get("lineas", [])})
             for producto in sorted(productos):
-                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato in {"master_kg", "master_kims"}
+                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato in {"master_kg", "master_kims", "master_ag"}
                                             else producto in p.get("lineas", []))]
                 cand = [f for f in candidatos if f.linea == producto]
                 pend = [f for f in filas if f.linea == producto]
                 por_producto.append({"linea": producto, "producto": producto, "piezas": len(pp),
                     "compatibilidades": (sum(len(p["compatibilidades"]) for p in pp)
-                        if lectura.formato in {"master_kg", "master_kims"} else
+                        if lectura.formato in {"master_kg", "master_kims", "master_ag"} else
                         sum(1 for p in pp for c in p["compatibilidades"]
                             if c.get("producto" if lectura.formato == "master_cauplas" else "linea") == producto)),
                     "publicaciones": len(cand), "publicaciones_faltantes": len(pend)})
@@ -209,7 +226,7 @@ async def analizar(
                 "errores_total": len(errores), "errores": errores[:200], "por_linea": por_producto,
                 "por_sistema": por_sistema,
                 **getattr(lectura, "metricas_kims", {}),
-                **({"fotos": resumen_fotos} if fotos_cauplas is not None else {})}
+                **({"fotos": resumen_fotos} if (fotos_cauplas is not None or fotos_ag is not None) else {})}
 
         resultado = cruzar(piezas, publicados)
         por_linea = Counter(p["linea"] or "(sin línea)" for p in resultado["piezas_faltantes"])
@@ -246,6 +263,7 @@ async def generar(
     catalogo: UploadFile = File(...),
     publicaciones_ml: UploadFile = File(None),
     imagenes_cauplas: UploadFile = File(None),
+    imagenes_ag: UploadFile = File(None),
     descripcion_base: str = Form(""),
     marca: str = Form(""),
     categoria_ml: str = Form(""),
@@ -265,6 +283,10 @@ async def generar(
         raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
     if perfil.codigo_bodega != "CAUPLAS" and imagenes_cauplas:
         raise HTTPException(status_code=400, detail="El archivo de imágenes sólo aplica para CAUPLAS.")
+    if perfil.codigo_bodega == "AG" and not imagenes_ag:
+        raise HTTPException(status_code=400, detail="ARGENPARTS requiere el Archivo de fotos AG (.xlsx).")
+    if perfil.codigo_bodega != "AG" and imagenes_ag:
+        raise HTTPException(status_code=400, detail="El archivo de fotos AG sólo aplica para ARGENPARTS.")
     ruta_cat = _guardar_tmp(catalogo)
     ruta_pub = _guardar_tmp(publicaciones_ml) if publicaciones_ml else None
 
@@ -281,6 +303,15 @@ async def generar(
                     await imagenes_cauplas.read(), (p["clave"] for p in piezas))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+        galerias_ag = None
+        if perfil.codigo_bodega == "AG":
+            ruta_fotos_ag = _guardar_tmp(imagenes_ag)
+            try:
+                galerias_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            finally:
+                ruta_fotos_ag.unlink(missing_ok=True)
 
         if ruta_pub and solo_faltantes and lectura.formato == "legado":
             publicados = leer_skus_publicados(ruta_pub)
@@ -342,7 +373,9 @@ async def generar(
         filas = generar_filas(piezas, config)
         if galerias_cauplas is not None:
             asignar_imagenes_cauplas(filas, galerias_cauplas)
-        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher"}:
+        if galerias_ag is not None:
+            asignar_imagenes_ag(filas, galerias_ag)
+        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas:
             raise HTTPException(
@@ -381,6 +414,8 @@ async def generar(
                 "X-Imagenes-Formato-No-Verificable": str(imagenes["formato_no_verificable"]),
                 "X-Fotos-CAUPLAS-Detectadas": str((resumen_fotos or {}).get("urls_detectadas", 0)),
                 "X-Fotos-CAUPLAS-Sin-Match": str((resumen_fotos or {}).get("urls_sin_match", 0)),
+                "X-Fotos-AG-Detectadas": str((resumen_fotos or {}).get("urls_detectadas", 0)),
+                "X-Fotos-AG-Sin-Match": str((resumen_fotos or {}).get("urls_sin_match", 0)),
             },
         )
     finally:

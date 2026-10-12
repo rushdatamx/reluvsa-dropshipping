@@ -50,6 +50,10 @@ GONHER_HEADERS = (
 )
 GONHER_ANCLAS = ("Producto", "Línea", "Código Actual", "Filtro", "Marca", "Modelo", "Año", "Precio")
 GONHER_PLACEHOLDERS = {"", "^^", "- na -", "n/a", "na", "nd", "-"}
+AG_HEADERS = ("Producto", "Código", "SYD", "GROB", "KYB", "BOGE", "VAZLO", "Marca",
+              "Aplicación", "Desde", "Hasta", "Posición", "Distribuidor", "stock")
+AG_ANCLAS = ("Producto", "Código", "Aplicación", "Desde", "Hasta", "Distribuidor", "stock")
+AG_EQUIVALENCIAS = ("SYD", "GROB", "KYB", "BOGE", "VAZLO")
 
 
 def _texto(val) -> str:
@@ -327,6 +331,91 @@ def _numero_positivo(valor):
     except (TypeError, ValueError):
         return None
     return numero if numero > 0 else None
+
+
+def _headers_ag(ws):
+    valores = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    mapa = {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
+    return all(_normalizar(h) in mapa for h in AG_HEADERS), mapa
+
+
+def _parece_ag(ws):
+    _, columnas = _headers_ag(ws)
+    return sum(_normalizar(h) in columnas for h in AG_ANCLAS) >= 5
+
+
+def _hoja_ag(wb):
+    completas = [ws for ws in wb.worksheets if _headers_ag(ws)[0]]
+    return completas[0] if completas else next((ws for ws in wb.worksheets if _parece_ag(ws)), None)
+
+
+def _leer_master_ag(ws) -> ResultadoCatalogo:
+    valido, columnas = _headers_ag(ws)
+    if not valido:
+        faltan = [h for h in AG_HEADERS if _normalizar(h) not in columnas]
+        raise ValueError("El master AG requiere los encabezados: " + ", ".join(faltan))
+
+    def val(fila, nombre):
+        i = columnas[_normalizar(nombre)]
+        return fila[i] if i < len(fila) else None
+
+    grupos, filas_master, observados = {}, 0, set()
+    for numero, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not any(_texto(x) for x in fila):
+            continue
+        filas_master += 1
+        sku = _texto(val(fila, "Código"))
+        if sku: observados.add(sku.upper())
+        grupos.setdefault(sku.upper(), []).append({
+            "fila": numero, "clave": sku, "producto": _texto(val(fila, "Producto")),
+            "marca": _texto(val(fila, "Marca")), "aplicacion": _texto(val(fila, "Aplicación")),
+            "posicion": _texto(val(fila, "Posición")), "inicio_raw": val(fila, "Desde"),
+            "fin_raw": val(fila, "Hasta"), "stock_raw": val(fila, "stock"),
+            "costo_raw": val(fila, "Distribuidor"),
+            "equivalencias": {marca: _texto(val(fila, marca)) for marca in AG_EQUIVALENCIAS},
+        })
+
+    piezas, errores, validas, invalidas, duplicados = [], [], 0, 0, 0
+    sin_precio = inconsistentes = 0
+    for sku, filas in grupos.items():
+        primera = filas[0]
+        def err(motivo, registro=primera):
+            errores.append(_error(registro["fila"], {"clave": registro["clave"],
+                "armadora": registro["marca"], "modelo": registro["aplicacion"],
+                "inicio": registro["inicio_raw"], "fin": registro["fin_raw"]}, motivo))
+        if not sku or not primera["producto"]:
+            err("Falta Código o Producto"); continue
+        stocks = [_stock_entero(f["stock_raw"])[0] for f in filas]
+        if any(s is None for s in stocks):
+            err("Stock vacío o inválido dentro del SKU", next(f for f, s in zip(filas, stocks) if s is None)); continue
+        if len(set(stocks)) != 1:
+            err("Stock diferente dentro del SKU"); continue
+        costos = [_numero_positivo(f["costo_raw"]) for f in filas]
+        if any(c is None for c in costos) or len(set(costos)) != 1:
+            if any(c is None for c in costos): sin_precio += 1; err("Costo Distribuidor inválido o vacío")
+            else: inconsistentes += 1; err("Costo Distribuidor diferente dentro del SKU")
+            continue
+        pieza = {"clave": primera["clave"], "linea": primera["producto"], "producto": primera["producto"],
+            "formato": "master_ag", "stock": stocks[0], "costo": costos[0],
+            "compatibilidades": [], "equivalencias": {m: [] for m in AG_EQUIVALENCIAS},
+            "filas_origen": [f["fila"] for f in filas]}
+        vistos = set()
+        for f in filas:
+            inicio, fin = _anio_entero(f["inicio_raw"]), _anio_entero(f["fin_raw"])
+            if inicio is None or fin is None or not (1900 <= inicio <= 2100 and 1900 <= fin <= 2100) or inicio > fin:
+                invalidas += 1; err("Años inválidos, faltantes o invertidos", f); continue
+            firma = (_normalizar(f["aplicacion"]), _normalizar(f["marca"]), _normalizar(f["posicion"]), inicio, fin)
+            if firma in vistos:
+                duplicados += 1; continue
+            vistos.add(firma); validas += 1
+            pieza["compatibilidades"].append({"aplicacion": f["aplicacion"], "marca": f["marca"],
+                "posicion": f["posicion"], "inicio": inicio, "fin": fin, "fila": f["fila"]})
+            for marca, codigo in f["equivalencias"].items():
+                if codigo and _normalizar(codigo) not in {_normalizar(x) for x in pieza["equivalencias"][marca]}:
+                    pieza["equivalencias"][marca].append(codigo)
+        if pieza["compatibilidades"]: piezas.append(pieza)
+    return ResultadoCatalogo(piezas, "master_ag", filas_master, validas, invalidas, duplicados,
+        True, sin_precio, inconsistentes, errores, len(observados))
 
 
 def _leer_master_kims(ws) -> ResultadoCatalogo:
@@ -859,6 +948,11 @@ def _leer_legado(wb, perfil):
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     try:
+        hoja_ag = _hoja_ag(wb)
+        if hoja_ag is not None:
+            return _leer_master_ag(hoja_ag)
+        if perfil.codigo_bodega == "AG":
+            raise ValueError("El archivo no tiene la estructura esperada del master AG")
         hoja_gonher = _hoja_gonher(wb)
         if hoja_gonher is not None:
             return _leer_master_gonher(hoja_gonher)

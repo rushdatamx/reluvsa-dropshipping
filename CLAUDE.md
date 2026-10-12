@@ -699,6 +699,11 @@ Gonher (o su huella renombrada), agrupa por Filtro y deja stock e imágenes para
 manual. `Cantidad` y GONHER quedan vacías; la plantilla suma GONHER al final sin mover
 las 36 columnas anteriores. Contrato en `docs/master-gonher-publicaciones-masivas.md`.
 
+**ARGENPARTS:** formato `master_ag`, código `AG`, mostrado como ARGENPARTS. Exige Master AG
+y FOTOS AG.xlsx; consolida equivalencias, usa costo y stock únicos por SKU y llena Imagen1–10
+sólo desde `apimagenes.s3.amazonaws.com` tras la validación común. Contrato en
+`docs/master-ag-publicaciones-masivas.md`.
+
 ### Regla operativa nueva — GONHER
 
 El master GONHER es un flujo aislado de lectura local: no se debe conectar con la API de
@@ -753,7 +758,7 @@ es la **LÍNEA de producto**, no el precio ni el peso: el catálogo **no trae pe
 dimensiones**, tiene que darlo Gaby (~30 valores). ❌ **Se descartó estimarlo** con la columna
 AA del reporte de ML: esos datos son de llantas y sensores, no de KG.
 
-⬜ **Otros pendientes:** ya hay perfiles de **KG, CAUPLAS y KIM** (AG y VAZLO dan 400 con
+⬜ **Otros pendientes:** ya hay perfiles de **KG, CAUPLAS, KIM y AG** (VAZLO da 400 con
 mensaje claro); KG copia Imagen 1–5, KIMS conserva FOTO 1–4 y CAUPLAS cruza su CSV obligatorio
 de ImageKit hasta Imagen 1–10; el legado las deja vacías; la **categoría de ML** se teclea y
 aplica a todo el archivo.
