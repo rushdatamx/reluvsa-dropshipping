@@ -42,6 +42,21 @@ ff = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); ff.close(); foto
 galeria, resumen = leer_imagenes_ag(ff.name, ["1234"]); os.unlink(ff.name)
 check("fotos: principal, guion bajo y guion respetan orden", galeria["1234"][:3] == ["https://apimagenes.s3.amazonaws.com/AG/1234.jpg", "https://apimagenes.s3.amazonaws.com/AG/1234_2.jpg", "https://apimagenes.s3.amazonaws.com/AG/1234-3.jpg"])
 check("fotos omite kit, fuera de límite y SKU inexistente", resumen["urls_omitidas"] == 3)
+
+# Encabezados reales de FOTOS AG.xlsx. La primera hoja trae ``2`` en vez de
+# ``URL servidor``: URL FINAL debe funcionar aunque ese campo no sea usable.
+fotos_reales = openpyxl.Workbook(); hoja = fotos_reales.active
+hoja.append([2, "Nombre de la carpeta", "Nombre de la foto", "Formato de la foto", "URL FINAL"])
+hoja.append(["https://servidor-antiguo.example", "confort2024", "1234", ".png",
+             "https://apimagenes.s3.amazonaws.com/confort2024/1234.jpg"])
+hoja.append(["https://servidor-antiguo.example", "confort2024", "1234_2", ".png",
+             "https://apimagenes.s3.amazonaws.com/confort2024/1234_2.jpg"])
+ff = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); ff.close(); fotos_reales.save(ff.name)
+galeria_real, resumen_real = leer_imagenes_ag(ff.name, ["1234"]); os.unlink(ff.name)
+check("fotos reconoce encabezados reales de AG y URL FINAL", galeria_real["1234"][:2] == [
+    "https://apimagenes.s3.amazonaws.com/confort2024/1234.jpg",
+    "https://apimagenes.s3.amazonaws.com/confort2024/1234_2.jpg",
+] and resumen_real["urls_cruzadas"] == 2)
 check("fotos AG sólo permiten el host HTTPS exacto", _es_url_permitida(
     "https://apimagenes.s3.amazonaws.com/AG/1234.jpg", ("apimagenes.s3.amazonaws.com",)) and not _es_url_permitida(
     "https://cdn.apimagenes.s3.amazonaws.com/AG/1234.jpg", ("apimagenes.s3.amazonaws.com",)))

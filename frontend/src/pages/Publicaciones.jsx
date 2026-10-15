@@ -328,7 +328,7 @@ export default function Publicaciones() {
               {' '}{analisis.fotos.urls_omitidas.toLocaleString('es-MX')} omitidas
               {' '}({analisis.fotos.urls_sin_match.toLocaleString('es-MX')} sin match) y
               {' '}{analisis.fotos.sku_master_sin_foto.toLocaleString('es-MX')} SKU del master sin foto.
-              <span className="block mt-1">Las URLs se validarán al descargar: HTTPS, ImageKit, archivo de imagen y mínimo 1200×1200.</span>
+              <span className="block mt-1">Las URLs se validarán al descargar: HTTPS, {analisis.formato === 'master_ag' ? 'bucket autorizado' : 'ImageKit'}, archivo de imagen y mínimo 1200×1200.</span>
             </div>
           )}
 

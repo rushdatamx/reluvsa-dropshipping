@@ -18,8 +18,9 @@ def _nombre(valor):
 def leer_imagenes_ag(ruta, skus_master: Iterable[str]) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
     """Lee las diez hojas del libro y cruza Nombre / SKU_2 / SKU-2.
 
-    El libro de AG contiene servidor, carpeta, nombre y extensión por fila. Se
-    toleran mayúsculas y acentos en encabezados, pero no URLs externas.
+    El libro vigente de AG aporta ``URL FINAL``; los campos de servidor,
+    carpeta, nombre y extensión se conservan como respaldo para libros
+    anteriores. Se toleran mayúsculas y acentos en los encabezados.
     """
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     skus = {_texto(s).upper() for s in skus_master if _texto(s)}
@@ -35,21 +36,28 @@ def leer_imagenes_ag(ruta, skus_master: Iterable[str]) -> Tuple[Dict[str, List[s
             cols = {_normalizar(x): i for i, x in enumerate(header) if _texto(x)}
             def col(*nombres):
                 return next((cols[_normalizar(n)] for n in nombres if _normalizar(n) in cols), None)
-            servidor, carpeta = col("servidor", "server"), col("carpeta", "folder")
-            archivo, extension = col("nombre", "archivo", "name"), col("extension", "extensión", "ext")
+            servidor = col("servidor", "url servidor", "server")
+            carpeta = col("carpeta", "nombre de la carpeta", "folder")
+            archivo = col("nombre", "nombre de la foto", "archivo", "name")
+            extension = col("extension", "extensión", "formato de la foto", "ext")
+            url_final = col("url final")
             if archivo is None: continue
             for fila in rows:
                 def valor(i): return fila[i] if i is not None and i < len(fila) else ""
                 nombre = _nombre(valor(archivo))
                 if not nombre: continue
                 resumen["urls_detectadas"] += 1
-                ext = _texto(valor(extension)).lstrip(".") or "jpg"
-                # El libro define las cuatro partes de la ruta. La validación de
-                # descarga aplica después el host exacto; por tanto un servidor
-                # extraño nunca se abre desde este Excel.
-                base = _texto(valor(servidor)).rstrip("/") or HOST
-                partes = [str(valor(carpeta) or "").strip("/"), nombre + "." + ext]
-                url = base + "/" + "/".join(p for p in partes if p)
+                # ``URL FINAL`` es la fuente de verdad del libro actual. Si no
+                # viene en una fila, se mantiene la construcción histórica para
+                # que los archivos anteriores sigan siendo compatibles. Ambas
+                # rutas pasan después por el candado de host, HTTPS, sin
+                # redirecciones y resolución mínima antes de salir en el XLSX.
+                url = _texto(valor(url_final)).strip()
+                if not url:
+                    ext = _texto(valor(extension)).lstrip(".") or "jpg"
+                    base = _texto(valor(servidor)).rstrip("/") or HOST
+                    partes = [str(valor(carpeta) or "").strip("/"), nombre + "." + ext]
+                    url = base + "/" + "/".join(p for p in partes if p)
                 if re.search(r"\b(?:combo|kit)\b", nombre, re.IGNORECASE):
                     resumen["urls_omitidas"] += 1; continue
                 sku, posicion = (nombre.upper(), 1) if nombre.upper() in skus else (None, None)
