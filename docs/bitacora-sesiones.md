@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-10-15](#2026-10-15--argenparts-desglose-anual-de-publicaciones) | ARGENPARTS: desglose anual de publicaciones | ✅ Implementado y verificado localmente |
 | [2026-09-23](#2026-09-23--kims-en-publicaciones-masivas) | Módulo 2: master KIMS | ✅ Implementado y verificado |
 | [2026-09-05](#2026-09-05--stock-por-sku-desde-el-master) | Módulo 2: stock por SKU desde el master | ✅ Implementado y documentado |
 | [2026-09-09](#2026-09-09--compatibilidades-autozur) | Compatibilidades Autozur | ✅ Commiteado en `main` (`14a5ad1`); Railway SUCCESS |
@@ -43,6 +44,27 @@
 | [2026-06-02/03](#p1-cerrado-paso-d-confirmado-end-to-end-en-producción-2026-06-03) | Deploy Railway + parsers reales | ✅ Cerrado |
 | [2026-06-01](#8bis-estado-anterior-histórico-2026-06-01-superado-por-la-sección-8) | Snapshot pre-deploy | ✅ Superado |
 | [Pasos P1–P4](#9-siguientes-pasos-orden-recomendado) | Los 4 pendientes originales | ✅ Todos cerrados |
+
+---
+
+## 2026-10-15 — ARGENPARTS: desglose anual de publicaciones
+
+Los rangos `Desde–Hasta` del master AG ahora se expanden en una publicación por
+año, igual que GONHER. El título contiene un único año y la descripción continúa
+consolidando la compatibilidad original completa. La identidad de una variante
+es SKU + producto + posición + marca + aplicación + año, evitando duplicados de
+filas equivalentes del master.
+
+El cruce contra Publicaciones ML conserva cobertura de títulos históricos con
+rango, pero es conservador: además del SKU exige producto, posición, marca,
+aplicación y año. Sólo tolera las abreviaturas que el propio generador AG usa y
+la omisión conocida de una nota entre paréntesis en Aplicación. Si falta algún
+campo o no se puede identificar con seguridad, la variante se conserva
+pendiente. No se modificaron publicaciones existentes, datos ni llamadas a ML.
+
+La regresión AG terminó en **19/19**; también pasaron GONHER **24/24**, KIMS
+**19/19**, CAUPLAS **38/38** y Publicaciones masivas **86/86**. El contrato
+vigente está actualizado en `docs/master-ag-publicaciones-masivas.md`.
 
 ---
 

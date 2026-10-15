@@ -141,6 +141,63 @@ def _titulo_cubre_gonher(titulo, compat) -> bool:
     return True
 
 
+# AG sólo usa estas abreviaturas controladas al construir títulos. Expandirlas
+# antes del cruce permite reconocer un histórico generado por el portal sin
+# relajar los campos que identifican la compatibilidad.
+_ABREVIATURAS_AG = {
+    "amort": "amortiguador", "del": "delantero", "tras": "trasero",
+    "izq": "izquierdo", "der": "derecho",
+}
+
+
+def _normalizar_titulo_ag(valor) -> str:
+    texto = _normalizar(valor)
+    for corto, completo in _ABREVIATURAS_AG.items():
+        texto = re.sub(rf"\b{corto}\b", completo, texto)
+    return texto
+
+
+def _aplicacion_ag_en_titulo(titulo, aplicacion) -> bool:
+    """Acepta sólo la omisión conocida de notas parentéticas del título AG."""
+    esperado = _normalizar(aplicacion)
+    if _contiene_frase(titulo, esperado):
+        return True
+    sin_parentesis = re.sub(r"\s*\([^)]*\)", "", str(aplicacion or "")).strip()
+    return bool(sin_parentesis and sin_parentesis != str(aplicacion or "").strip()
+                and _contiene_frase(titulo, _normalizar(sin_parentesis)))
+
+
+def _titulo_cubre_ag(titulo, compat) -> bool:
+    """Cruce semántico estricto para una compatibilidad anual de ARGENPARTS.
+
+    Un rango histórico cubre sus años únicamente si SKU (filtrado por el
+    llamador), producto, posición, marca, aplicación y año siguen siendo
+    identificables. Un campo vacío o ambiguo deja la variante pendiente.
+    """
+    anio = compat.get("inicio")
+    if not isinstance(anio, int) or anio not in _anios_en_titulo(titulo):
+        return False
+    titulo_normalizado = _normalizar_titulo_ag(titulo)
+    producto = compat.get("producto", "")
+    posicion = compat.get("posicion", "")
+    marca = compat.get("marca", "")
+    aplicacion = compat.get("aplicacion", "")
+    if not all((producto, posicion, marca, aplicacion)):
+        return False
+    if not _contiene_frase(titulo_normalizado, _normalizar_titulo_ag(producto)):
+        return False
+    if not _contiene_frase(titulo_normalizado, _normalizar_titulo_ag(posicion)):
+        return False
+    if not _contiene_frase(titulo_normalizado, marca):
+        return False
+    return _aplicacion_ag_en_titulo(titulo_normalizado, aplicacion)
+
+
+def _firma_compatibilidad_ag(compat):
+    return tuple(_normalizar_titulo_ag(compat.get(campo, ""))
+                 for campo in ("producto", "posicion", "marca", "aplicacion"))
+
+
 @dataclass
 class ResultadoCatalogo:
     piezas: List[Dict]
@@ -994,18 +1051,38 @@ def leer_skus_publicados(ruta): return {sku for sku, _ in leer_publicaciones(rut
 
 def cruzar_variantes(filas, publicados):
     pendientes, existentes, vistos, deduplicadas = [], [], set(), 0
+    # Un título AG que identifica dos compatibilidades distintas (por ejemplo,
+    # dos posiciones) no cubre ninguna: la coincidencia no es verificable. Los
+    # años de una misma compatibilidad conservan la misma firma y sí pueden
+    # quedar cubiertos por un rango histórico.
+    ag_por_sku = {}
+    for fila in filas:
+        if fila.compatibilidad.get("formato") == "master_ag":
+            ag_por_sku.setdefault(fila.sku.upper(), []).append(fila)
+    ag_firmas_por_publicacion = {}
+    for sku, titulo in publicados:
+        candidatas = ag_por_sku.get(sku, [])
+        if candidatas:
+            ag_firmas_por_publicacion[(sku, titulo)] = {
+                _firma_compatibilidad_ag(fila.compatibilidad) for fila in candidatas
+                if _titulo_cubre_ag(titulo, fila.compatibilidad)
+            }
     for fila in filas:
         if fila.compatibilidad:
-            # GONHER no depende de que el título nuevo sea idéntico al histórico:
-            # una publicación con 2018-2020 cubre cada año del rango, pero sólo
-            # si conserva la compatibilidad completa de ese SKU.
+            # GONHER y AG no dependen de que el título nuevo sea idéntico al
+            # histórico: un rango cubre sus años, pero sólo si conserva todos
+            # los campos que identifican esa compatibilidad.
             par = (fila.sku.upper(), normalizar_titulo(fila.titulo))
             if par in vistos:
                 deduplicadas += 1
                 continue
             vistos.add(par)
+            cubre = (_titulo_cubre_ag if fila.compatibilidad.get("formato") == "master_ag"
+                     else _titulo_cubre_gonher)
             publicada = any(
-                sku == fila.sku.upper() and _titulo_cubre_gonher(titulo, fila.compatibilidad)
+                sku == fila.sku.upper() and cubre(titulo, fila.compatibilidad) and
+                (fila.compatibilidad.get("formato") != "master_ag" or
+                 len(ag_firmas_por_publicacion.get((sku, titulo), set())) == 1)
                 for sku, titulo in publicados
             )
             (existentes if publicada else pendientes).append(fila)

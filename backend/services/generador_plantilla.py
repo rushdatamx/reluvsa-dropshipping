@@ -518,13 +518,12 @@ def _describir_gonher(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
-def _titulo_ag(producto, compat):
+def _titulo_ag(producto, compat, anio):
     producto = " ".join(str(producto or "").split())
     posicion = " ".join(str(compat.get("posicion") or "").split())
     marca = " ".join(str(compat.get("marca") or "").split())
     aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
-    anios = str(compat["inicio"]) if compat["inicio"] == compat["fin"] else f"{compat['inicio']}-{compat['fin']}"
-    def armar(prod, pos, app): return " ".join(x for x in (prod, pos, "P/", marca, app, anios) if x)
+    def armar(prod, pos, app): return " ".join(x for x in (prod, pos, "P/", marca, app, str(anio)) if x)
     intentos = [(producto, posicion, aplicacion),
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto), posicion, aplicacion),
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto),
@@ -561,17 +560,33 @@ def generar_filas_con_reporte(piezas, config):
             descripcion = _describir_ag(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
             for compat in pieza.get("compatibilidades", []):
-                titulo = _titulo_ag(pieza.get("producto"), compat)
-                if not titulo:
-                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
-                        "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
-                        "anio": f"{compat.get('inicio')}-{compat.get('fin')}", "motivo": "Título excede 60 caracteres"})
-                    continue
-                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
-                if par in vistos: deduplicadas += 1; continue
-                vistos.add(par)
-                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(), pieza.get("producto", ""),
-                    precio, descripcion, f"{compat['inicio']}-{compat['fin']}", False, [], compat.get("fila"), stock=pieza["stock"]))
+                for anio in range(compat["inicio"], compat["fin"] + 1):
+                    compat_anual = dict(compat, producto=pieza.get("producto", ""), inicio=anio,
+                                         fin=anio, formato="master_ag")
+                    titulo = _titulo_ag(pieza.get("producto"), compat, anio)
+                    if not titulo:
+                        exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                            "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
+                            "anio": str(anio), "inicio": anio, "fin": anio,
+                            "motivo": "Título excede 60 caracteres"})
+                        continue
+                    # La equivalencia de una variante AG es SKU + compatibilidad + año,
+                    # no el texto del título: así una fila repetida no genera dos veces
+                    # la misma publicación anual.
+                    par = (str(pieza.get("clave")).upper(),
+                           _sin_acentos(compat_anual["producto"]).strip(),
+                           _sin_acentos(compat_anual.get("posicion") or "").strip(),
+                           _sin_acentos(compat_anual.get("marca") or "").strip(),
+                           _sin_acentos(compat_anual.get("aplicacion") or "").strip(), anio)
+                    if par in vistos:
+                        deduplicadas += 1
+                        continue
+                    vistos.add(par)
+                    filas.append(FilaPublicacion(
+                        titulo, str(pieza.get("clave") or "").strip(), pieza.get("producto", ""),
+                        precio, descripcion, str(anio), False, [], compat.get("fila"),
+                        stock=pieza["stock"], compatibilidad=compat_anual,
+                    ))
             continue
         if pieza.get("formato") == "master_gonher":
             descripcion = _describir_gonher(pieza, config)
