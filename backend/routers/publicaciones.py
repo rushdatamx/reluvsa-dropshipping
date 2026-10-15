@@ -370,14 +370,20 @@ async def generar(
             ),
         )
 
-        filas = generar_filas(piezas, config)
+        titulos_por_corregir = []
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
+            filas, reporte_titulos = generar_filas_con_reporte(piezas, config)
+            titulos_por_corregir = [e for e in reporte_titulos["exclusiones"]
+                                     if e.get("motivo") == "Título excede 60 caracteres"]
+        else:
+            filas = generar_filas(piezas, config)
         if galerias_cauplas is not None:
             asignar_imagenes_cauplas(filas, galerias_cauplas)
         if galerias_ag is not None:
             asignar_imagenes_ag(filas, galerias_ag)
         if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
-        if not filas:
+        if not filas and not titulos_por_corregir:
             raise HTTPException(
                 status_code=400,
                 detail=("Ninguna pieza tiene aplicaciones utilizables: todas vienen "
@@ -398,7 +404,7 @@ async def generar(
 
         fd, destino = tempfile.mkstemp(suffix=".xlsx", dir=TMP_DIR)
         Path(destino).unlink(missing_ok=True)
-        escribir_xlsx(filas, config, destino)
+        escribir_xlsx(filas, config, destino, titulos_por_corregir=titulos_por_corregir)
 
         return FileResponse(
             destino,

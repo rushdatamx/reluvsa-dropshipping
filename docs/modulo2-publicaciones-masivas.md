@@ -1,5 +1,16 @@
 # Módulo 2 — Publicaciones masivas
 
+## Actualización 2026-10-15 — títulos pendientes
+
+Los perfiles activos AG, CAUPLAS, GONHER, KG y KIM conservan las variantes cuyo
+título final cabe en 60 caracteres en `Publicaciones` y agregan siempre la hoja
+`Títulos por corregir`. La hoja lista título candidato después de la cascada de
+abreviaciones vigente, longitud, límite, SKU, proveedor, fila de origen,
+compatibilidad/año y motivo. Sólo incluye variantes excluidas por exceder el
+límite; otras exclusiones del análisis no se reclasifican. Puede quedar vacía
+(sólo encabezados), y se genera también cuando todos los candidatos exceden el
+límite. VAZLO sigue sin ser un perfil de Publicaciones Masivas.
+
 > Leer antes de tocar `services/aplicaciones_kg.py`, `generador_plantilla.py`,
 > `precio_publicacion.py`, `parser_catalogo.py`, `perfiles_catalogo.py` o
 > `routers/publicaciones.py`.

@@ -704,6 +704,12 @@ y FOTOS AG.xlsx; consolida equivalencias, usa costo y stock únicos por SKU y ll
 sólo desde `apimagenes.s3.amazonaws.com` tras la validación común. Contrato en
 `docs/master-ag-publicaciones-masivas.md`.
 
+**Títulos excedidos:** los libros de AG, CAUPLAS, GONHER, KG y KIM llevan siempre la hoja
+`Títulos por corregir`. Incluye sólo títulos que siguen sobre 60 caracteres después de la
+cascada actual, con candidato completo, longitud, SKU, proveedor, fila, compatibilidad/año y
+motivo. La hoja puede estar vacía; la plantilla `Publicaciones` sólo admite títulos de hasta
+60. Las otras exclusiones conservan su motivo original. VAZLO no es perfil activo.
+
 ### Regla operativa nueva — GONHER
 
 El master GONHER es un flujo aislado de lectura local: no se debe conectar con la API de

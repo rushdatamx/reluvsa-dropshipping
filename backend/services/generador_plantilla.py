@@ -206,7 +206,7 @@ def _cilindrada(motor):
     return m.group(1).replace(",", ".") if m else ""
 
 
-def _titulo_master(producto, compat, anios) -> Optional[str]:
+def _titulo_master(producto, compat, anios, permitir_exceso=False) -> Optional[str]:
     producto = " ".join(str(producto or "").split())
     armadora = " ".join(str(compat.get("armadora") or "").split())
     modelo = " ".join(str(compat.get("modelo") or "").split())
@@ -215,10 +215,12 @@ def _titulo_master(producto, compat, anios) -> Optional[str]:
     alias = ALIAS_PRODUCTO.get(_sin_acentos(producto), producto)
     intentos = [f"{producto} P/ {armadora} {sufijo}", f"{producto} P/ {sufijo}",
                 f"{alias} P/ {sufijo}"]
+    ultimo = ""
     for titulo in intentos:
         titulo = re.sub(r"\s+", " ", titulo).strip()
+        ultimo = titulo
         if len(titulo) <= MAX_TITULO: return titulo
-    return None
+    return ultimo if permitir_exceso else None
 
 
 def _variantes_master(producto, compat):
@@ -243,7 +245,7 @@ def _variantes_master(producto, compat):
     return variantes, excluidas
 
 
-def _titulo_cauplas(producto, compat, anios) -> Optional[str]:
+def _titulo_cauplas(producto, compat, anios, permitir_exceso=False) -> Optional[str]:
     producto = " ".join(str(producto or "").split())
     armadora = " ".join(str(compat.get("armadora") or "").split())
     modelo = " ".join(str(compat.get("modelo") or "").split())
@@ -257,11 +259,13 @@ def _titulo_cauplas(producto, compat, anios) -> Optional[str]:
     alias = ALIAS_PRODUCTO_CAUPLAS.get(_sin_acentos(producto))
     if alias:
         intentos.append(f"{alias} P/ {sufijo}")
+    ultimo = ""
     for titulo in intentos:
         titulo = re.sub(r"\s+", " ", titulo).strip()
+        ultimo = titulo
         if len(titulo) <= MAX_TITULO:
             return titulo
-    return None
+    return ultimo if permitir_exceso else None
 
 
 def _variantes_cauplas(producto, compat):
@@ -296,7 +300,7 @@ def _variantes_cauplas(producto, compat):
     return variantes, excluidas
 
 
-def _titulo_kims(producto, compat) -> Optional[str]:
+def _titulo_kims(producto, compat, permitir_exceso=False) -> Optional[str]:
     producto = " ".join(str(producto or "").split())
     armadora = " ".join(str(compat.get("armadora") or "").split())
     modelo = " ".join(str(compat.get("modelo") or "").split())
@@ -309,13 +313,15 @@ def _titulo_kims(producto, compat) -> Optional[str]:
         (producto, "P/", modelo, version, motor, anios),
         (producto, "P/", modelo, motor, anios),
     ]
+    ultimo = ""
     for partes in intentos:
         titulo = " ".join(x for x in partes if x)
         titulo = re.sub(r"\s+", " ", titulo).strip()
+        ultimo = titulo
         # Producto, modelo y años son estructurales; motor se conserva cuando existe.
         if titulo and len(titulo) <= MAX_TITULO:
             return titulo
-    return None
+    return ultimo if permitir_exceso else None
 
 
 def _motor_gonher_reducido(motor):
@@ -331,7 +337,7 @@ def _motor_gonher_reducido(motor):
     return " ".join(partes)
 
 
-def _titulo_gonher(producto, compat) -> Optional[str]:
+def _titulo_gonher(producto, compat, permitir_exceso=False) -> Optional[str]:
     producto = " ".join(str(producto or "").split())
     marca = " ".join(str(compat.get("armadora") or "").split())
     modelo = " ".join(str(compat.get("modelo") or "").split())
@@ -342,11 +348,13 @@ def _titulo_gonher(producto, compat) -> Optional[str]:
         (producto, "P/", marca, modelo, _motor_gonher_reducido(motor), anios),
         (producto, "P/", modelo, _motor_gonher_reducido(motor), anios),
     ]
+    ultimo = ""
     for partes in intentos:
         titulo = re.sub(r"\s+", " ", " ".join(x for x in partes if x)).strip()
+        ultimo = titulo
         if titulo and len(titulo) <= MAX_TITULO:
             return titulo
-    return None
+    return ultimo if permitir_exceso else None
 
 
 def _anios_gonher(compat):
@@ -518,7 +526,7 @@ def _describir_gonher(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
-def _titulo_ag(producto, compat, anio):
+def _titulo_ag(producto, compat, anio, permitir_exceso=False):
     producto = " ".join(str(producto or "").split())
     posicion = " ".join(str(compat.get("posicion") or "").split())
     marca = " ".join(str(compat.get("marca") or "").split())
@@ -528,14 +536,17 @@ def _titulo_ag(producto, compat, anio):
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto), posicion, aplicacion),
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto),
          " ".join(ALIAS_POSICION_AG.get(_sin_acentos(x), x) for x in posicion.split()), aplicacion)]
+    ultimo = ""
     for prod, pos, app in intentos:
         titulo = armar(prod, pos, app)
+        ultimo = titulo
         if len(titulo) <= MAX_TITULO: return titulo
         # Las notas explicativas sólo se retiran para el título.
         sin_parentesis = re.sub(r"\s*\([^)]*\)", "", app).strip()
         titulo = armar(prod, pos, sin_parentesis)
+        ultimo = titulo
         if len(titulo) <= MAX_TITULO: return titulo
-    return None
+    return ultimo if permitir_exceso else None
 
 
 def _describir_ag(pieza, config):
@@ -553,6 +564,23 @@ def _describir_ag(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _exclusion_titulo(codigo, clave, fila, titulo, compat, anio, producto=""):
+    """Contrato común de pendientes cuyo único motivo es exceder el título."""
+    proveedor = {"AG": "ARGENPARTS", "KIM": "KIMS"}.get(codigo, codigo)
+    return {
+        "titulo_candidato": titulo,
+        "caracteres": len(titulo),
+        "limite": MAX_TITULO,
+        "sku": str(clave or "").strip(),
+        "proveedor": proveedor,
+        "fila_origen": fila,
+        "compatibilidad": " ".join(str(compat.get(k) or "").strip()
+                                     for k in ("armadora", "marca", "modelo", "aplicacion", "motor") if compat.get(k)),
+        "anio": str(anio),
+        "motivo": "Título excede 60 caracteres",
+    }
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
@@ -565,10 +593,11 @@ def generar_filas_con_reporte(piezas, config):
                                          fin=anio, formato="master_ag")
                     titulo = _titulo_ag(pieza.get("producto"), compat, anio)
                     if not titulo:
-                        exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        candidato = _titulo_ag(pieza.get("producto"), compat, anio, permitir_exceso=True)
+                        exclusiones.append({**_exclusion_titulo("AG", pieza.get("clave"), compat.get("fila"),
+                            candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                             "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
-                            "anio": str(anio), "inicio": anio, "fin": anio,
-                            "motivo": "Título excede 60 caracteres"})
+                            "inicio": anio, "fin": anio})
                         continue
                     # La equivalencia de una variante AG es SKU + compatibilidad + año,
                     # no el texto del título: así una fila repetida no genera dos veces
@@ -596,10 +625,11 @@ def generar_filas_con_reporte(piezas, config):
                     compat_anual = dict(compat, anios=str(anio), inicio=anio, fin=anio)
                     titulo = _titulo_gonher(compat.get("producto"), compat_anual)
                     if not titulo:
-                        exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                        candidato = _titulo_gonher(compat.get("producto"), compat_anual, permitir_exceso=True)
+                        exclusiones.append({**_exclusion_titulo("GONHER", pieza.get("clave"), compat.get("fila"),
+                            candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                             "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                            "anio": str(anio), "inicio": anio, "fin": anio,
-                            "motivo": "Título excede 60 caracteres"})
+                            "inicio": anio, "fin": anio})
                         continue
                     # La identidad de una variante no depende de cómo se
                     # escriba el título: vehículo + motor + año son obligatorios.
@@ -623,11 +653,12 @@ def generar_filas_con_reporte(piezas, config):
             for compat in pieza.get("compatibilidades", []):
                 titulo = _titulo_kims(pieza.get("producto"), compat)
                 if not titulo:
-                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                    candidato = _titulo_kims(pieza.get("producto"), compat, permitir_exceso=True)
+                    anio = f"{compat.get('inicio')}/{compat.get('fin')}"
+                    exclusiones.append({**_exclusion_titulo("KIM", pieza.get("clave"), compat.get("fila"),
+                        candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                         "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "anio": f"{compat.get('inicio')}/{compat.get('fin')}",
-                        "inicio": compat.get("inicio"), "fin": compat.get("fin"),
-                        "motivo": "Título excede 60 caracteres"})
+                        "inicio": compat.get("inicio"), "fin": compat.get("fin")})
                     continue
                 par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                 if par in vistos:
@@ -646,10 +677,12 @@ def generar_filas_con_reporte(piezas, config):
                 precio = calcular_precio(pieza.get("costo"), producto, config.params_precio)
                 titulos, fuera = _variantes_cauplas(producto, compat)
                 for anios, motivo in fuera:
-                    exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                    candidato = _titulo_cauplas(producto, compat, "" if compat.get("universal") else anios,
+                                                permitir_exceso=True)
+                    exclusiones.append({**_exclusion_titulo("CAUPLAS", pieza.get("clave"), compat.get("fila"),
+                        candidato, compat, anios), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                         "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "anio": anios, "inicio": compat.get("inicio"), "fin": compat.get("fin"),
-                        "motivo": motivo})
+                        "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
                 for titulo in titulos:
                     par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                     if par in vistos:
@@ -674,9 +707,11 @@ def generar_filas_con_reporte(piezas, config):
         for compat in pieza.get("compatibilidades", []):
             titulos, fuera = _variantes_master(pieza.get("producto"), compat)
             for anios, motivo in fuera:
-                exclusiones.append({"fila": compat.get("fila"), "clave": pieza.get("clave"),
+                candidato = _titulo_master(pieza.get("producto"), compat, anios, permitir_exceso=True)
+                exclusiones.append({**_exclusion_titulo("KG", pieza.get("clave"), compat.get("fila"),
+                    candidato, compat, anios), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                     "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                    "anio": anios, "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
+                    "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
             for titulo in titulos:
                 par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                 if par in vistos: deduplicadas += 1; continue
@@ -721,7 +756,7 @@ def generar_filas(piezas, config: ConfiguracionProveedor,
 
 
 def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
-                  destino) -> int:
+                  destino, titulos_por_corregir=None) -> int:
     """Escribe el .xlsx con las 37 columnas listo para subir a ML."""
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -769,6 +804,26 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
     ws.freeze_panes = "A2"
     for col, ancho in (("A", 58), ("M", 60), ("L", 18)):
         ws.column_dimensions[col].width = ancho
+
+    if config.codigo_bodega.strip().upper() in {"AG", "CAUPLAS", "GONHER", "KG", "KIM"}:
+        pendientes = wb.create_sheet("Títulos por corregir")
+        columnas_pendientes = ["Título candidato", "Caracteres", "Límite", "SKU", "Proveedor",
+                               "Fila de origen", "Compatibilidad / año", "Motivo"]
+        for col, nombre in enumerate(columnas_pendientes, 1):
+            celda = pendientes.cell(1, col, nombre)
+            celda.font = encabezado
+        for numero_fila, caso in enumerate(titulos_por_corregir or [], 2):
+            valores = [caso.get("titulo_candidato", ""), caso.get("caracteres", ""),
+                       caso.get("limite", MAX_TITULO), caso.get("sku", caso.get("clave", "")),
+                       caso.get("proveedor", config.codigo_bodega),
+                       caso.get("fila_origen", caso.get("fila", "")),
+                       " ".join(x for x in (caso.get("compatibilidad", ""), str(caso.get("anio", ""))) if x),
+                       caso.get("motivo", "")]
+            for col, valor in enumerate(valores, 1):
+                pendientes.cell(numero_fila, col, valor)
+        pendientes.freeze_panes = "A2"
+        for col, ancho in (("A", 70), ("D", 22), ("G", 48), ("H", 32)):
+            pendientes.column_dimensions[col].width = ancho
 
     wb.save(destino)
     return len(filas)

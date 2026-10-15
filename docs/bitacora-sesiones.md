@@ -2859,3 +2859,11 @@ pueden cumplir 60 caracteres sin cortar palabras. FOTOS AG asigna principal y su
 `_2`/`-2` hasta Imagen10; las URLs pasan el mismo candado HTTPS, host exacto, sin
 redirecciones y resolución mínima de 1200 px. La regresión nueva cubre lectura,
 títulos, fotos, host y XLSX; también pasaron KG, CAUPLAS, KIMS, GONHER y validación de imágenes.
+
+## 2026-10-15 — Hoja de títulos por corregir
+
+Los libros de AG, CAUPLAS, GONHER, KG y KIM agregan `Títulos por corregir` con los
+candidatos completos que siguen excediendo 60 caracteres tras aplicar las alternativas
+vigentes. Se conservan SKU, proveedor, fila, compatibilidad/año, longitud, límite y motivo;
+la hoja se incluye vacía cuando no hay casos. La generación también entrega el libro cuando
+todos los candidatos quedaron excluidos por longitud. VAZLO no se habilitó.
