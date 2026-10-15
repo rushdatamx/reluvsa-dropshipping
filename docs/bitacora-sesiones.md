@@ -2867,3 +2867,13 @@ candidatos completos que siguen excediendo 60 caracteres tras aplicar las altern
 vigentes. Se conservan SKU, proveedor, fila, compatibilidad/año, longitud, límite y motivo;
 la hoja se incluye vacía cuando no hay casos. La generación también entrega el libro cuando
 todos los candidatos quedaron excluidos por longitud. VAZLO no se habilitó.
+
+La implementación quedó en `generador_plantilla.py` y `routers/publicaciones.py`; el contrato
+técnico está en `docs/modulo2-publicaciones-masivas.md`. Verificación: KG 86/86, CAUPLAS
+38/38, GONHER 24/24, KIMS 19/19 y AG 19/19; se comprobó además que los cinco códigos de
+proveedor escriben ambas pestañas, tanto con pendientes como con la pestaña de pendientes
+vacía. Pasaron `py_compile` y `git diff --check`. Commit `d4deacd` se subió a `main`.
+El CLI de Vercel y Railway rechazó sus tokens locales expirados, por lo que no se confirmó
+el despliegue del commit. La raíz pública de Vercel respondió HTTP 200; Railway respondió
+HTTP 405 a HEAD en la raíz, señal de que el servicio contestó pero no una comprobación de
+salud ni del commit desplegado.

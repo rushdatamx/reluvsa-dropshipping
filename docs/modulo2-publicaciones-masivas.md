@@ -4,12 +4,21 @@
 
 Los perfiles activos AG, CAUPLAS, GONHER, KG y KIM conservan las variantes cuyo
 título final cabe en 60 caracteres en `Publicaciones` y agregan siempre la hoja
-`Títulos por corregir`. La hoja lista título candidato después de la cascada de
-abreviaciones vigente, longitud, límite, SKU, proveedor, fila de origen,
-compatibilidad/año y motivo. Sólo incluye variantes excluidas por exceder el
-límite; otras exclusiones del análisis no se reclasifican. Puede quedar vacía
-(sólo encabezados), y se genera también cuando todos los candidatos exceden el
-límite. VAZLO sigue sin ser un perfil de Publicaciones Masivas.
+`Títulos por corregir`. Sus encabezados son `Título candidato`, `Caracteres`,
+`Límite`, `SKU`, `Proveedor`, `Fila de origen`, `Compatibilidad / año` y
+`Motivo`. El candidato es la última alternativa producida por las reglas de ese
+perfil, aunque siga excediendo el límite. Sólo se incluyen exclusiones cuyo motivo
+sea `Título excede 60 caracteres`; otros errores del catálogo conservan su motivo
+y no se muestran como exceso de título. La hoja puede quedar vacía (sólo
+encabezados), y el libro se genera incluso si todos los candidatos exceden el
+límite. La pestaña principal contiene únicamente títulos de hasta 60 caracteres.
+VAZLO sigue sin ser un perfil de Publicaciones Masivas.
+
+Implementación: `generar_filas_con_reporte` conserva candidato y metadatos en
+`backend/services/generador_plantilla.py`; `escribir_xlsx` escribe la pestaña, y
+`POST /api/publicaciones/generar` entrega sólo las exclusiones por longitud al
+escritor después de aplicar filtros de producto/sistema. El reporte se limita al
+catálogo y filtros solicitados en esa generación.
 
 > Leer antes de tocar `services/aplicaciones_kg.py`, `generador_plantilla.py`,
 > `precio_publicacion.py`, `parser_catalogo.py`, `perfiles_catalogo.py` o
