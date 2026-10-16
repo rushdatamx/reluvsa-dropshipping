@@ -43,6 +43,18 @@ def _accion_vendedor(claim, detail):
     return None, None
 
 
+def _hay_mediacion(claim):
+    """La mediación la determina ML: stage primero, acción disponible como fallback."""
+    stage = claim.get("stage")
+    if stage:
+        return stage.lower() == "dispute"
+    for player in claim.get("players") or []:
+        for action in player.get("available_actions") or []:
+            if (action.get("action") or "").lower() == "send_message_to_mediator":
+                return True
+    return False
+
+
 def procesar_reclamo(cuenta, claim_id):
     path = f"/post-purchase/v1/claims/{claim_id}"
     claim = ml_client.get(path, cuenta_ml=cuenta)
@@ -71,7 +83,8 @@ def procesar_reclamo(cuenta, claim_id):
     pack_id = claim.get("pack_id")
     order = ml_client.get_opcional(f"/orders/{order_id}", cuenta_ml=cuenta) if order_id else None
     productos = [{"sku": (i.get("item") or {}).get("seller_sku") or (i.get("item") or {}).get("seller_custom_field"),
-                  "titulo": (i.get("item") or {}).get("title"), "unidades_vendidas": i.get("quantity")}
+                  "titulo": (i.get("item") or {}).get("title"), "unidades_vendidas": i.get("quantity"),
+                  "store_id": str((i.get("stock") or {}).get("store_id")) if (i.get("stock") or {}).get("store_id") is not None else None}
                  for i in (order or {}).get("order_items") or []]
     reason_text = reason.get("detail") or reason.get("name") or detail.get("problem") or reason_id
     if isinstance(reason_text, dict):
@@ -82,8 +95,8 @@ def procesar_reclamo(cuenta, claim_id):
         conn.execute("""INSERT INTO ml_devoluciones
             (cuenta_ml, claim_id, order_id, pack_id, return_id, estado_ml, estado_devolucion,
              accion_pendiente, fecha_limite, unidades_reclamadas, motivo, reason_id, detalle,
-             creado_ml, actualizado_ml, raw_claim, raw_return, productos_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             creado_ml, actualizado_ml, raw_claim, raw_return, productos_json, mediacion)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(cuenta_ml,claim_id) DO UPDATE SET
              order_id=excluded.order_id, pack_id=excluded.pack_id, return_id=excluded.return_id,
              estado_ml=excluded.estado_ml, estado_devolucion=excluded.estado_devolucion,
@@ -91,7 +104,8 @@ def procesar_reclamo(cuenta, claim_id):
              unidades_reclamadas=excluded.unidades_reclamadas, motivo=excluded.motivo,
              reason_id=excluded.reason_id, detalle=excluded.detalle,
              actualizado_ml=excluded.actualizado_ml, raw_claim=excluded.raw_claim,
-             raw_return=excluded.raw_return, productos_json=excluded.productos_json""",
+             raw_return=excluded.raw_return, productos_json=excluded.productos_json,
+             mediacion=excluded.mediacion""",
             (cuenta, str(claim_id), str(order_id) if order_id else None,
              str(pack_id) if pack_id else None, str(returned.get("id")) if returned and returned.get("id") else None,
              claim.get("status"), returned.get("status") if returned else None,
@@ -99,8 +113,27 @@ def procesar_reclamo(cuenta, claim_id):
              reason_id, detail.get("description"), claim.get("date_created"),
              claim.get("last_updated") or now, json.dumps(claim, ensure_ascii=False),
              json.dumps(returned, ensure_ascii=False) if returned else None,
-             json.dumps(productos, ensure_ascii=False)))
+             json.dumps(productos, ensure_ascii=False), int(_hay_mediacion(claim))))
     return True
+
+
+def reprocesar_existentes(cuenta=None):
+    """Refresca claims ya guardados y vuelve a traer sus órdenes (sólo GET)."""
+    with get_db() as conn:
+        sql = "SELECT cuenta_ml, claim_id FROM ml_devoluciones"
+        params = ()
+        if cuenta:
+            sql += " WHERE cuenta_ml=?"
+            params = (cuenta,)
+        casos = conn.execute(sql + " ORDER BY cuenta_ml, claim_id", params).fetchall()
+    resultado = {"procesados": 0, "errores": 0}
+    for row in casos:
+        try:
+            procesar_reclamo(row["cuenta_ml"], row["claim_id"])
+            resultado["procesados"] += 1
+        except ml_client.MLError:
+            resultado["errores"] += 1
+    return resultado
 
 
 def procesar_pendientes(limit=30):

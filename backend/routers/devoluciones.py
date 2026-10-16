@@ -21,8 +21,10 @@ TIPOS = {b"\xff\xd8\xff": ("image/jpeg", ".jpg"), b"\x89PNG\r\n\x1a\n": ("image/
 
 
 class Seguimiento(BaseModel):
-    mediacion: Optional[bool] = None
     revisado: Optional[bool] = None
+
+    class Config:
+        extra = "forbid"
 
 
 def _caso(conn, cuenta, claim_id):
@@ -34,20 +36,33 @@ def _caso(conn, cuenta, claim_id):
         ventas = conn.execute("""SELECT num_venta, num_venta_origen, pack_id, sku, titulo, deposito,
             albaran, fecha_albaran FROM ventas_ml WHERE cuenta_ml=? AND num_venta_origen=?""",
             (cuenta, item["order_id"])).fetchall()
-    elif item["pack_id"]:
-        ventas = conn.execute("""SELECT num_venta, num_venta_origen, pack_id, sku, titulo, deposito,
-            albaran, fecha_albaran FROM ventas_ml WHERE cuenta_ml=? AND pack_id=?""",
-            (cuenta, item["pack_id"])).fetchall()
     else:
         ventas = []
     item["ventas"] = [dict(v) for v in ventas]
     item["sin_cruce"] = not bool(ventas)
-    item["numero_venta"] = (item["ventas"][0].get("pack_id") or item["ventas"][0]["num_venta_origen"]) if ventas else None
-    item["sku"] = ", ".join(dict.fromkeys(v["sku"] for v in ventas if v["sku"])) or None
-    item["almacen"] = ", ".join(dict.fromkeys(v["deposito"] for v in ventas if v["deposito"])) or None
+    item["numero_venta"] = (item["ventas"][0].get("pack_id") or item["ventas"][0]["num_venta_origen"]) if ventas else (item["order_id"] or item["pack_id"])
+    item["productos"] = json.loads(item.pop("productos_json") or "[]")
+    item["almacen"] = None
+    if ventas:
+        item["sku"] = ", ".join(dict.fromkeys(v["sku"] for v in ventas if v["sku"])) or None
+        item["almacen"] = ", ".join(dict.fromkeys(v["deposito"] for v in ventas if v["deposito"])) or None
+    else:
+        item["sku"] = ", ".join(dict.fromkeys(p["sku"] for p in item["productos"] if p.get("sku"))) or None
+    if not item["almacen"]:
+        store_ids = list(dict.fromkeys(p["store_id"] for p in item["productos"] if p.get("store_id")))
+        if cuenta == "principal":
+            stores = conn.execute("SELECT store_id, description FROM ml_stores WHERE store_id IN (%s)" % ",".join("?" for _ in store_ids), store_ids).fetchall() if store_ids else []
+        else:
+            stores = conn.execute("SELECT store_id, description FROM ml_deposito_proveedor WHERE cuenta_ml=? AND store_id IN (%s)" % ",".join("?" for _ in store_ids), [cuenta, *store_ids]).fetchall() if store_ids else []
+        by_id = {r["store_id"]: r["description"] for r in stores if r["description"]}
+        item["almacen"] = ", ".join(dict.fromkeys(by_id[s] for s in store_ids if s in by_id)) or "No informado por ML"
     item["albaran"] = ", ".join(dict.fromkeys(v["albaran"] for v in ventas if v["albaran"])) or None
     item["fecha_albaran"] = next((v["fecha_albaran"] for v in ventas if v["fecha_albaran"]), None)
-    item["productos"] = json.loads(item.pop("productos_json") or "[]")
+    claim = json.loads(item.get("raw_claim") or "{}")
+    stage = claim.get("stage")
+    item["mediacion"] = ((stage.lower() == "dispute") if stage else any(
+        (a.get("action") or "").lower() == "send_message_to_mediator"
+        for p in claim.get("players") or [] for a in p.get("available_actions") or []))
     item.pop("raw_claim", None)
     item.pop("raw_return", None)
     return item
@@ -82,15 +97,13 @@ def detalle(cuenta: str, claim_id: str):
 
 @router.patch("/{cuenta}/{claim_id}")
 def seguimiento(cuenta: str, claim_id: str, payload: Seguimiento, user: UserInfo = Depends(require_admin)):
-    if payload.mediacion is None and payload.revisado is None:
+    if payload.revisado is None:
         raise HTTPException(400, "Indica una marca para actualizar")
     with get_db() as conn:
         _caso(conn, cuenta, claim_id)
-        conn.execute("""UPDATE ml_devoluciones SET mediacion=COALESCE(?, mediacion),
-            revisado=COALESCE(?, revisado), seguimiento_usuario=?, seguimiento_fecha=?
+        conn.execute("""UPDATE ml_devoluciones SET revisado=?, seguimiento_usuario=?, seguimiento_fecha=?
             WHERE cuenta_ml=? AND claim_id=?""",
-            (int(payload.mediacion) if payload.mediacion is not None else None,
-             int(payload.revisado) if payload.revisado is not None else None,
+            (int(payload.revisado),
              user.email, datetime.now(timezone.utc).isoformat(), cuenta, claim_id))
         return _caso(conn, cuenta, claim_id)
 

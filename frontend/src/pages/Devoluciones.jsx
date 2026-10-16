@@ -70,9 +70,10 @@ export default function Devoluciones() {
     <div className="flex gap-4 text-sm mb-4"><strong>{data.total} casos</strong><span>{data.sin_revisar} sin revisar</span><span>{data.sin_mediacion} sin mediación</span></div>
     <div className="overflow-x-auto bg-white rounded-lg border">
       <table className="min-w-full text-sm"><thead className="bg-gray-50 text-left"><tr>
-        {['Venta', 'SKU', 'Almacén', 'Unidades reclamadas', 'Motivo', 'Fecha límite', 'Albarán', 'Fecha albarán', 'Estado ML', 'Mediación', 'Revisión'].map((h) => <th key={h} className="p-3 whitespace-nowrap">{h}</th>)}
+        {['Cuenta', 'Venta', 'SKU', 'Almacén', 'Unidades reclamadas', 'Motivo', 'Fecha límite', 'Albarán', 'Fecha albarán', 'Estado ML', 'Mediación', 'Revisión'].map((h) => <th key={h} className="p-3 whitespace-nowrap">{h}</th>)}
       </tr></thead><tbody>{data.items.map((item) => <tr key={`${item.cuenta_ml}-${item.claim_id}`} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => abrir(item)}>
-        <td className="p-3 font-medium">{item.numero_venta || 'Pendiente de identificar'}</td>
+        <td className="p-3">{item.cuenta_ml === 'principal' ? 'Principal' : 'Secundaria'}</td>
+        <td className="p-3 font-medium">{item.numero_venta || 'Pendiente de identificar'}{item.sin_cruce && item.numero_venta ? <span className="block text-xs text-amber-700">Sin cruce local</span> : null}</td>
         <td className="p-3">{mostrar(item.sku)}</td><td className="p-3">{mostrar(item.almacen)}</td>
         <td className="p-3">{mostrar(item.unidades_reclamadas)}</td><td className="p-3 max-w-xs truncate" title={item.motivo || ''}>{mostrar(item.motivo)}</td>
         <td className="p-3 whitespace-nowrap">{fecha(item.fecha_limite)}</td><td className="p-3">{mostrar(item.albaran)}</td>
@@ -101,10 +102,9 @@ export default function Devoluciones() {
         <ul className="mb-6 text-sm space-y-1">{(detalle.productos.length ? detalle.productos : detalle.ventas).map((p, idx) =>
           <li key={idx} className="border rounded p-2">{mostrar(p.sku)} · {mostrar(p.titulo)}{p.unidades_vendidas ? ` · ${p.unidades_vendidas} vendidas` : ''}</li>)}</ul>
         <div className="flex gap-3 mb-2">
-          <button disabled={saving} onClick={() => marcar('mediacion', !detalle.mediacion)} className="border rounded px-3 py-2 text-sm">{detalle.mediacion ? 'Con mediación ✓' : 'Sin mediación'}</button>
           <button disabled={saving} onClick={() => marcar('revisado', !detalle.revisado)} className="border rounded px-3 py-2 text-sm">{detalle.revisado ? 'Revisado ✓' : 'Sin revisar'}</button>
         </div>
-        <p className="text-xs text-gray-500 mb-6">Último cambio: {detalle.seguimiento_usuario || 'Sin cambios'} · {fecha(detalle.seguimiento_fecha)}. “Con mediación” indica que el equipo ya la abrió en Mercado Libre.</p>
+        <p className="text-xs text-gray-500 mb-6">Mediación: {detalle.mediacion ? 'Con mediación (estado derivado de Mercado Libre)' : 'Sin mediación (estado derivado de Mercado Libre)'}. Último cambio interno: {detalle.seguimiento_usuario || 'Sin cambios'} · {fecha(detalle.seguimiento_fecha)}.</p>
         <h3 className="font-semibold mb-2">Evidencia</h3>
         <p className="text-xs text-gray-500 mb-2">JPG, PNG o PDF · máximo 10 MB cada uno · 10 archivos por caso</p>
         <input type="file" accept="image/jpeg,image/png,application/pdf" multiple disabled={saving} onChange={(e) => { subir([...e.target.files]); e.target.value = ''; }} />

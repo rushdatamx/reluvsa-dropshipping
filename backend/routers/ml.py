@@ -3,8 +3,8 @@ Integración con Mercado Libre: OAuth (conectar la cuenta), estado y sync.
 
 Seguridad (docs/configuracion-app-ml.md §6 + skill api-seguridad):
 - Todo el tráfico a ML sale por services.ml_client (SOLO GET + POST /oauth/token).
-- /oauth/callback es el ÚNICO endpoint sin JWT (lo abre el navegador del titular
-  vía redirect de ML); se protege con el state anti-CSRF de un solo uso.
+- Los callbacks OAuth (principal y por cuenta) son las únicas rutas sin JWT: ML
+  los abre por redirect y ambos se protegen con state anti-CSRF de un solo uso.
 - /estado NUNCA devuelve tokens — solo metadatos.
 - La autorización debe hacerla el TITULAR de la cuenta ML (un operador da
   invalid_operator_user_id).

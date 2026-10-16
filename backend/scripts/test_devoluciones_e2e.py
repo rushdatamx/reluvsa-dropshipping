@@ -32,7 +32,7 @@ with get_db() as conn:
             (topic, resource, recibido_en, cuenta_ml) VALUES ('post_purchase', ?, '2026-10-16', 'principal')""", (resource,))
 
 claims = {
-    "101": {"id": 101, "resource": "order", "resource_id": "order-1", "status": "opened",
+    "101": {"id": 101, "resource": "order", "resource_id": "order-1", "status": "opened", "stage": "dispute",
             "type": "return", "reason_id": "PDD1", "claimed_quantity": 2,
             "last_updated": "2026-10-16T12:00:00+00:00",
             "players": [{"role": "respondent", "type": "seller", "available_actions": [
@@ -93,11 +93,14 @@ try:
     assert [i["claim_id"] for i in listing["items"]] == ["101", "103"]
     first = listing["items"][0]
     assert first["sku"] == "SKU-1" and first["unidades_reclamadas"] == 2
+    assert first["mediacion"] is True and first["cuenta_ml"] == "principal"
     assert len(first["productos"]) == 2 and first["fecha_limite"]
-    assert listing["items"][1]["sku"] is None and listing["items"][1]["fecha_limite"] is None
+    assert listing["items"][1]["sku"] == "SKU-1, SKU-2" and listing["items"][1]["almacen"] == "No informado por ML"
+    assert client.get("/api/devoluciones", params={"mediacion": "true"}).json()["total"] == 1
     assert client.get("/api/devoluciones", params={"almacen": "KIM"}).json()["total"] == 1
-    changed = client.patch("/api/devoluciones/principal/101", json={"mediacion": True, "revisado": True}).json()
+    changed = client.patch("/api/devoluciones/principal/101", json={"revisado": True}).json()
     assert changed["mediacion"] and changed["revisado"] and changed["seguimiento_usuario"] == "admin@test.mx"
+    assert client.patch("/api/devoluciones/principal/101", json={"mediacion": False}).status_code == 422
     sync_devoluciones.procesar_reclamo("principal", "101")
     assert client.get("/api/devoluciones/principal/101").json()["revisado"] == 1
     assert sync_devoluciones.procesar_reclamo("principal", "104") is True
