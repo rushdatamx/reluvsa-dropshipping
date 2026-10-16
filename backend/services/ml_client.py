@@ -293,7 +293,12 @@ def _post_oauth_token(form: dict) -> dict:
         # Nunca incluir el body completo (defensa): solo el código de error de ML.
         codigo = None
         try:
-            codigo = resp.json().get("error")
+            recibido = resp.json().get("error")
+            # El servidor remoto es entrada no confiable: jamás interpolar texto
+            # arbitrario en auditoría o excepciones (podría reflejar credenciales).
+            if recibido in {"invalid_grant", "invalid_client", "invalid_request",
+                            "unauthorized_client", "unsupported_grant_type", "invalid_scope"}:
+                codigo = recibido
         except Exception:
             pass
         # El código de error de ML es el discriminador del diagnóstico
@@ -306,7 +311,7 @@ def _post_oauth_token(form: dict) -> dict:
             raise MLTokenInvalido(
                 "ML rechazó el token (invalid_grant): hay que re-autorizar con el titular de la cuenta"
             )
-        raise MLError(f"/oauth/token respondió {resp.status_code} (error={codigo})")
+        raise MLError(f"/oauth/token respondió {resp.status_code} (error={codigo or 'desconocido'})")
     return resp.json()
 
 

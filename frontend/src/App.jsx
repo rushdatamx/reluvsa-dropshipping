@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Ventas from './pages/Ventas';
 import Facturas from './pages/Facturas';
 import Incidencias from './pages/Incidencias';
+import Devoluciones from './pages/Devoluciones';
 import Metricas from './pages/Metricas';
 import Uploads from './pages/Uploads';
 import Publicaciones from './pages/Publicaciones';
@@ -39,6 +40,7 @@ function Shell() {
             <Route path="/ventas" element={<Ventas />} />
             <Route path="/facturas" element={<Facturas />} />
             <Route path="/incidencias" element={<Incidencias />} />
+            <Route path="/devoluciones" element={<AdminOnly><Devoluciones /></AdminOnly>} />
             <Route path="/metricas" element={<Metricas />} />
             <Route path="/publicaciones" element={<AdminOnly><Publicaciones /></AdminOnly>} />
             <Route path="/publicaciones-autozur" element={<AdminOnly><PublicacionesAutozur /></AdminOnly>} />

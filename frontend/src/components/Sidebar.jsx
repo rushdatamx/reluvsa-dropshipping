@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, FileText, AlertCircle, BarChart3, Upload, Users, LogOut, Store, PackagePlus, CarFront, ClipboardCheck } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, FileText, AlertCircle, BarChart3, Upload, Users, LogOut, Store, PackagePlus, CarFront, ClipboardCheck, RotateCcw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 
@@ -9,6 +9,7 @@ const NAV_ADMIN = [
   { to: '/ventas', label: 'Ventas y cruces', icon: ShoppingCart },
   { to: '/facturas', label: 'Facturas', icon: FileText },
   { to: '/incidencias', label: 'Incidencias', icon: AlertCircle },
+  { to: '/devoluciones', label: 'Devoluciones', icon: RotateCcw },
   { to: '/metricas', label: 'Métricas proveedores', icon: BarChart3 },
   { to: '/uploads', label: 'Cargar reportes', icon: Upload },
   { to: '/conciliacion-erp', label: 'Conciliación ERP', icon: ClipboardCheck },

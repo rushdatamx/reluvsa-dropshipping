@@ -131,6 +131,22 @@ def main():
                               data={"grant_type": "refresh_token"})
     ok(resp.status_code == 200, "POST /oauth/token permitido (única excepción de la allowlist)")
 
+    # Una respuesta remota no confiable no puede reflejar secretos en logs/errores.
+    request_original = ml_client._request
+    ml_client._request = lambda *args, **kwargs: httpx.Response(500, json={"error": "SECRETO_REFLEJADO"})
+    try:
+        try:
+            ml_client._post_oauth_token({})
+            filtrado = False
+        except ml_client.MLError as exc:
+            filtrado = "SECRETO_REFLEJADO" not in str(exc)
+    finally:
+        ml_client._request = request_original
+    with database.get_db() as conn:
+        ultima_error = conn.execute("SELECT error FROM ml_api_log ORDER BY id DESC LIMIT 1").fetchone()["error"]
+    ok(filtrado and "SECRETO_REFLEJADO" not in str(ultima_error),
+       "una respuesta OAuth remota no puede reflejar secretos en logs o excepciones")
+
     # --- 5) 401 → refresh + retry, tokens nuevos persistidos JUNTOS ---
     _sembrar_token(access="ACCESS_VIEJO_401", refresh="REFRESH_VIEJO")
     refresh_antes = REFRESH_COUNT[0]

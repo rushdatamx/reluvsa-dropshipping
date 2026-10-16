@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS ventas_ml (
     -- albaran: # de albarán que aporta Gaby en un Excel aparte (uploader propio),
     -- cruzado por num_venta. NO viene en el reporte de Ventas ML ni de colecta.
     albaran TEXT,
+    fecha_albaran TEXT,
     -- pack_id: el número que Mercado Libre le muestra a Gaby EN SU PROPIO PORTAL
     -- (el "# de venta" que ella ve y con el que trabaja a diario). NO es el mismo
     -- que num_venta (= order.id, nuestra llave primaria y la de la API).
@@ -422,6 +423,58 @@ CREATE TABLE IF NOT EXISTS ml_deposito_proveedor (
     PRIMARY KEY (cuenta_ml, store_id)
 );
 
+CREATE TABLE IF NOT EXISTS ml_devoluciones (
+    cuenta_ml TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    order_id TEXT,
+    pack_id TEXT,
+    return_id TEXT,
+    estado_ml TEXT,
+    estado_devolucion TEXT,
+    accion_pendiente TEXT,
+    fecha_limite TEXT,
+    unidades_reclamadas INTEGER,
+    motivo TEXT,
+    reason_id TEXT,
+    detalle TEXT,
+    creado_ml TEXT,
+    actualizado_ml TEXT,
+    raw_claim TEXT,
+    raw_return TEXT,
+    productos_json TEXT,
+    mediacion INTEGER NOT NULL DEFAULT 0,
+    revisado INTEGER NOT NULL DEFAULT 0,
+    seguimiento_usuario TEXT,
+    seguimiento_fecha TEXT,
+    PRIMARY KEY (cuenta_ml, claim_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ml_devoluciones_plazo ON ml_devoluciones(fecha_limite);
+CREATE TABLE IF NOT EXISTS ml_postventa_sin_devolucion (
+    cuenta_ml TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    estado_ml TEXT,
+    actualizado_ml TEXT,
+    comprobado_en TEXT NOT NULL,
+    PRIMARY KEY (cuenta_ml, claim_id)
+);
+CREATE TABLE IF NOT EXISTS ml_devolucion_archivos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cuenta_ml TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    nombre_original TEXT NOT NULL,
+    nombre_servidor TEXT NOT NULL UNIQUE,
+    tipo TEXT NOT NULL,
+    tamano INTEGER NOT NULL,
+    usuario TEXT NOT NULL,
+    creado_en TEXT NOT NULL,
+    FOREIGN KEY (cuenta_ml, claim_id) REFERENCES ml_devoluciones(cuenta_ml, claim_id)
+);
+CREATE TRIGGER IF NOT EXISTS trg_ml_devolucion_max_archivos
+BEFORE INSERT ON ml_devolucion_archivos
+WHEN (SELECT COUNT(*) FROM ml_devolucion_archivos
+      WHERE cuenta_ml=NEW.cuenta_ml AND claim_id=NEW.claim_id) >= 10
+BEGIN SELECT RAISE(ABORT, 'maximo 10 archivos'); END;
+
 CREATE INDEX IF NOT EXISTS idx_ml_deposito_proveedor_node
     ON ml_deposito_proveedor(cuenta_ml, network_node_id);
 
@@ -483,6 +536,8 @@ def init_database():
         _migrar_envio_pack_id(cursor)
         _migrar_cargas_erp(cursor)
         _migrar_multi_cuenta(cursor)
+        if "fecha_albaran" not in {r[1] for r in cursor.execute("PRAGMA table_info(ventas_ml)")}:
+            cursor.execute("ALTER TABLE ventas_ml ADD COLUMN fecha_albaran TEXT")
 
         cursor.execute("SELECT COUNT(*) as c FROM proveedores")
         if cursor.fetchone()["c"] == 0:

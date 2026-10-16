@@ -73,6 +73,15 @@ export const subirFacturasMultiple = (xmlFiles, pdfFiles) => {
 
 // Incidencias
 export const listarIncidencias = (params = {}) => api.get('/incidencias', { params });
+export const listarDevoluciones = (params = {}) => api.get('/devoluciones', { params });
+export const detalleDevolucion = (cuenta, id) => api.get(`/devoluciones/${cuenta}/${id}`);
+export const actualizarDevolucion = (cuenta, id, data) => api.patch(`/devoluciones/${cuenta}/${id}`, data);
+export const subirEvidenciaDevolucion = (cuenta, id, file) => {
+  const fd = new FormData(); fd.append('file', file);
+  return api.post(`/devoluciones/${cuenta}/${id}/evidencias`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
+export const descargarEvidenciaDevolucion = (cuenta, id, archivoId) =>
+  api.get(`/devoluciones/${cuenta}/${id}/evidencias/${archivoId}`, { responseType: 'blob' });
 export const crearIncidencia = (payload) => api.post('/incidencias', payload);
 export const resolverIncidencia = (id) => api.patch(`/incidencias/${id}/resolver`);
 

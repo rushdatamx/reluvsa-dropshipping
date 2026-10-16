@@ -2877,3 +2877,30 @@ El CLI de Vercel y Railway rechazó sus tokens locales expirados, por lo que no 
 el despliegue del commit. La raíz pública de Vercel respondió HTTP 200; Railway respondió
 HTTP 405 a HEAD en la raíz, señal de que el servicio contestó pero no una comprobación de
 salud ni del commit desplegado.
+## 2026-10-16 — Devoluciones de Mercado Libre (implementación local)
+
+Se agregó la sección administrativa Devoluciones, separada de Incidencias. El webhook
+acepta `post_purchase`; un worker propio consume los avisos por cuenta y reclamo,
+consulta por GET el claim, detalle, motivo, devolución y orden, y confirma el aviso
+sólo después de persistir el resultado. Los reclamos sin devolución quedan registrados
+en una tabla de resultados negativos para no perder la transición posterior. El sync
+de ventas ya no consume avisos de postventa. La reconciliación busca reclamos abiertos
+y actualizaciones desde el lanzamiento. Los errores se reintentan con espera creciente.
+
+El listado cruza la orden exacta dentro de su cuenta, conserva todos los productos
+que ML informa y deja visible un caso sin venta cruzada. Ordena por vencimiento de
+acción del vendedor, con los casos sin fecha al final. Las marcas de mediación y
+revisión son internas y sobreviven a una resincronización. La evidencia vive junto
+a la base en el volumen persistente, con acceso admin, límite de 10 archivos de
+10 MB y nombres de servidor aleatorios. El Excel de albarán acepta la columna
+opcional `Fecha de albarán`, preserva la fecha previa si la celda viene vacía y
+mantiene la prioridad `num_venta` → `pack_id`.
+
+Verificación local: `test_devoluciones_e2e.py`, `test_ml_client_solo_lectura.py`,
+`test_sync_ml_e2e.py`, `test_albaran_pack_id.py`, test del callback, build del frontend
+y `git diff --check` pasan. `api-guardian` aprobó el cambio tras delimitar que los hits
+en `test_sync_automatica.py` (MockTransport) y `requirements.txt` son preexistentes;
+no hay nueva salida productiva fuera de `ml_client`. Antes de la migración se creó y
+verificó con `PRAGMA integrity_check` el backup `/data/dropshipping.db.bak-20261016_170244`
+(173,568,000 bytes). Sigue el commit/push y la comprobación del despliegue, del worker
+y de los casos reales de postventa.

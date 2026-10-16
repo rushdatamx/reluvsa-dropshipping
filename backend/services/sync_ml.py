@@ -663,7 +663,7 @@ def _finalizar(run_id: int, inicio: datetime, stats: dict, cuenta_ml: str = "pri
         # corrida (date_last_updated con solape); las que lleguen DURANTE la corrida
         # refieren updates posteriores a `inicio`, que el próximo incremental
         # (ultima_sync - 5 min) vuelve a cubrir. Por eso es seguro marcarlas todas.
-        conn.execute("UPDATE ml_notificaciones SET procesada=1 WHERE cuenta_ml=? AND procesada=0", (cuenta_ml,))
+        conn.execute("UPDATE ml_notificaciones SET procesada=1 WHERE cuenta_ml=? AND procesada=0 AND topic != 'post_purchase'", (cuenta_ml,))
 
         # Poda de auditoría.
         corte = (datetime.utcnow() - timedelta(days=API_LOG_RETENCION_DIAS)).isoformat(timespec="seconds")

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 # Tópicos suscritos en el DevCenter (docs/configuracion-app-ml.md §4). Cualquier
 # otro se guarda pero se marca procesada=1 (descartado) para que el sync no lo lea.
-TOPICS_SUSCRITOS = {"orders_v2", "payments", "invoices", "shipments"}
+TOPICS_SUSCRITOS = {"orders_v2", "payments", "invoices", "shipments", "post_purchase"}
 
 
 @router.api_route(

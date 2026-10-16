@@ -511,6 +511,10 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: en qué está el proyecto
 
+- **Devoluciones:** implementación local de postventa, Excel y seguimiento lista para revisión.
+  Auditoría `api-guardian` aprobada; el hit literal de `httpx` quedó documentado como
+  dependencia/test MockTransport preexistentes. Respaldo pre-migración creado en
+  `/data/dropshipping.db.bak-20261016_170244`. Ver `docs/bitacora-sesiones.md` (2026-10-16).
 - **Módulo 1 (conciliación venta↔envío↔factura): estable y en producción.** No quedan tareas
   grandes abiertas. La API de ML está viva, la sync automática corre sola cada 30 min, y la BD
   de prod ronda ~58,700 ventas / ~55,900 envíos.

@@ -110,6 +110,9 @@ def parse_albaran(path: Path) -> dict:
             "Verifica que el Excel tenga esos dos encabezados."
         )
 
+    idx_fecha = next((i for i, cell in enumerate(rows[header_idx])
+                      if _norm(cell) in ("fecha de albarán", "fecha de albaran")), None)
+
     por_num_venta = 0        # filas que cruzaron por order.id (paso 1)
     por_pack_id = 0          # filas que cruzaron por pack_id  (paso 2)
     ventas_actualizadas = 0  # filas de ventas_ml escritas (un pack puede ser >1)
@@ -126,14 +129,23 @@ def parse_albaran(path: Path) -> dict:
                 continue
 
             albaran = _celda_a_texto(row[idx_albaran]) if idx_albaran < len(row) else ""
-            if not albaran:
+            fecha = None
+            if idx_fecha is not None and idx_fecha < len(row) and row[idx_fecha] is not None:
+                valor = row[idx_fecha]
+                if hasattr(valor, "date"):
+                    fecha = valor.date().isoformat()
+                elif hasattr(valor, "isoformat"):
+                    fecha = valor.isoformat()
+                else:
+                    fecha = str(valor).strip() or None
+            if not albaran and not fecha:
                 sin_albaran += 1
                 continue  # no tocar: evita borrar un albarán existente al re-subir parcial
 
             # ── Paso 1: por num_venta (order.id). Si cruza, gana y no se sigue. ──
             cur = conn.execute(
-                "UPDATE ventas_ml SET albaran = ? WHERE num_venta = ?",
-                (albaran, num_venta),
+                "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE num_venta = ?",
+                (albaran, fecha, num_venta),
             )
             if cur.rowcount:
                 por_num_venta += 1
@@ -144,8 +156,8 @@ def parse_albaran(path: Path) -> dict:
             # Consulta SEPARADA a propósito: combinarla con el paso 1 cruzaría números
             # que son order.id de una venta y pack_id de otra distinta.
             cur = conn.execute(
-                "UPDATE ventas_ml SET albaran = ? WHERE pack_id = ?",
-                (albaran, num_venta),
+                "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE pack_id = ? AND cuenta_ml = 'principal'",
+                (albaran, fecha, num_venta),
             )
             if cur.rowcount:
                 # El carrito viaja junto: el albarán ampara todas sus ventas.
