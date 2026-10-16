@@ -146,7 +146,7 @@ def reconciliar(cuenta):
     # en range; el rango acotado recupera cierres recientes y eventos perdidos.
     hasta = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
     searches = [{"status": "opened"},
-                {"range": f"last_updated:after:{since},before:{hasta}"}]
+                {"type": "return", "range": f"last_updated:after:{since},before:{hasta}"}]
     if not closed_scanned:
         searches.append({"status": "closed", "sort": "date_created:asc"})
     for extra in searches:

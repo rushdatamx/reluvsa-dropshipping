@@ -157,6 +157,8 @@ try:
     assert sync_devoluciones.reconciliar("principal") == 0
     rango = next(p["range"] for p in search_params if "range" in p)
     assert ",before:" in rango and ".000+00:00" in rango
+    rango_params = next(p for p in search_params if "range" in p)
+    assert rango_params["type"] == "return"
     print("✅ postventa: duplicados, reintento 403/429, reclamo sin devolución, cruce exacto, SKU múltiples, plazo, filtros, marcas, evidencia y permisos")
 finally:
     ml_client.get, ml_client.get_opcional = old_get, old_optional

@@ -2877,7 +2877,7 @@ El CLI de Vercel y Railway rechazó sus tokens locales expirados, por lo que no 
 el despliegue del commit. La raíz pública de Vercel respondió HTTP 200; Railway respondió
 HTTP 405 a HEAD en la raíz, señal de que el servicio contestó pero no una comprobación de
 salud ni del commit desplegado.
-## 2026-10-16 — Devoluciones de Mercado Libre (implementación local)
+## 2026-10-16 — Devoluciones de Mercado Libre
 
 Se agregó la sección administrativa Devoluciones, separada de Incidencias. El webhook
 acepta `post_purchase`; un worker propio consume los avisos por cuenta y reclamo,
@@ -2902,5 +2902,13 @@ y `git diff --check` pasan. `api-guardian` aprobó el cambio tras delimitar que 
 en `test_sync_automatica.py` (MockTransport) y `requirements.txt` son preexistentes;
 no hay nueva salida productiva fuera de `ml_client`. Antes de la migración se creó y
 verificó con `PRAGMA integrity_check` el backup `/data/dropshipping.db.bak-20261016_170244`
-(173,568,000 bytes). Sigue el commit/push y la comprobación del despliegue, del worker
-y de los casos reales de postventa.
+(173,568,000 bytes). Los commits `6f6f978` y `638f136` están en `main`; Railway desplegó
+la versión `97d24652-940f-4054-80d6-e3590645f369` y Vercel sirve el bundle con la sección.
+La base productiva pasó `integrity_check`, tiene 60 devoluciones, 3,231 avisos
+`post_purchase` y ninguno pendiente. El registro confirma GET de reclamos, motivos,
+detalle, devoluciones y órdenes; la búsqueda de reclamos abiertos devuelve 200. La
+reconciliación acotada por `last_updated` inicialmente respondía 400 porque ML exige
+al menos un filtro explícito además de `players.user_id` y `range`. Se añadió `type=return`
+y la prueba E2E lo verifica. El GET de diagnóstico, pasando por `ml_client`, devolvió 200
+para ambas cuentas. Este ajuste está listo para commit y despliegue; después se comprobará
+que el worker registra una reconciliación exitosa con la nueva versión.
