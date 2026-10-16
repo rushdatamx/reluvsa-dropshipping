@@ -2915,5 +2915,9 @@ la prueba de producción confirmó que `type=returns` (plural) trae casos en amb
 mientras el singular devuelve cero. Se corrigió el filtro. Las respuestas históricas de
 tipo `returns` pertenecen a Claims 1.0, cuyo `/detail` responde 401 “functionality is not
 available”; ahora se omite ese recurso y se guardan los reclamos que no son devoluciones
-antes de solicitar motivo/detalle. Las pruebas obligatorias y `api-guardian` aprobaron;
-queda desplegar este último ajuste y comprobar que el worker consume el backlog.
+antes de solicitar motivo/detalle. Las pruebas obligatorias y `api-guardian` aprobaron.
+El commit `834fdec` se desplegó en Railway (`26397013-e7c6-45dd-8f87-38ff7451c932`);
+la reconciliación devolvió 200 en ambas cuentas, el worker consumió la cola y la
+verificación final encontró 192 devoluciones, 0 avisos pendientes e
+`integrity_check=ok`. El registro tiene cuatro GET de reconciliación acotada, todos 200.
+Backup previo a migración: `/data/dropshipping.db.bak-20261016_170244`.
