@@ -142,9 +142,11 @@ def reconciliar(cuenta):
             since = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
             set_config(conn, "devoluciones_inicio", since, cuenta)
     total = 0
-    # El filtro abierto recupera casos antiguos activos. El rango recupera
-    # cierres recientes y eventos perdidos desde el lanzamiento.
-    searches = [{"status": "opened"}, {"range": f"last_updated:after:{since}"}]
+    # El filtro abierto recupera casos antiguos activos. ML exige ambos límites
+    # en range; el rango acotado recupera cierres recientes y eventos perdidos.
+    hasta = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
+    searches = [{"status": "opened"},
+                {"range": f"last_updated:after:{since},before:{hasta}"}]
     if not closed_scanned:
         searches.append({"status": "closed", "sort": "date_created:asc"})
     for extra in searches:

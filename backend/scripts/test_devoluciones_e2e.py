@@ -40,11 +40,15 @@ claims = {
     "102": {"id": 102, "resource": "order", "resource_id": "order-1", "status": "opened", "type": "mediations"},
     "103": {"id": 103, "resource": "order", "resource_id": "missing", "status": "opened", "type": "return"},
 }
+search_params = []
 fail = {"status": "403"}
 old_get, old_optional = ml_client.get, ml_client.get_opcional
 
 
 def fake_get(path, **kwargs):
+    if path == "/post-purchase/v1/claims/search":
+        search_params.append(kwargs.get("params") or {})
+        return {"data": [], "paging": {"total": 0}}
     if path.endswith("/103") and fail["status"]:
         raise ml_client.MLError("GET falló " + fail["status"])
     if path.startswith("/orders/"):
@@ -150,6 +154,9 @@ try:
         other = conn.execute("SELECT albaran, fecha_albaran FROM ventas_ml WHERE cuenta_ml='secundaria'").fetchone()
         assert own["albaran"] == "ALB-3" and own["fecha_albaran"] == "2026-10-16"
         assert other["albaran"] is None and other["fecha_albaran"] is None
+    assert sync_devoluciones.reconciliar("principal") == 0
+    rango = next(p["range"] for p in search_params if "range" in p)
+    assert ",before:" in rango and ".000+00:00" in rango
     print("✅ postventa: duplicados, reintento 403/429, reclamo sin devolución, cruce exacto, SKU múltiples, plazo, filtros, marcas, evidencia y permisos")
 finally:
     ml_client.get, ml_client.get_opcional = old_get, old_optional
