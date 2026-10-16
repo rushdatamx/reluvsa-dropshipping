@@ -46,15 +46,11 @@ def _accion_vendedor(claim, detail):
 def procesar_reclamo(cuenta, claim_id):
     path = f"/post-purchase/v1/claims/{claim_id}"
     claim = ml_client.get(path, cuenta_ml=cuenta)
-    detail = ml_client.get_opcional(path + "/detail", cuenta_ml=cuenta) or {}
-    reason_id = claim.get("reason_id")
-    reason = (ml_client.get_opcional(f"/post-purchase/v1/claims/reasons/{reason_id}", cuenta_ml=cuenta)
-              if reason_id else None) or {}
     returned = ml_client.get_opcional(f"/post-purchase/v2/claims/{claim_id}/returns", cuenta_ml=cuenta)
-    action, deadline = _accion_vendedor(claim, detail)
+    tipo = claim.get("type")
     # Registrar el resultado negativo antes de confirmar el aviso. Una futura
     # notificación del mismo claim puede convertirlo en devolución.
-    if not returned and claim.get("type") != "return":
+    if not returned and tipo not in ("return", "returns"):
         with get_db() as conn:
             conn.execute("""INSERT INTO ml_postventa_sin_devolucion
                 (cuenta_ml, claim_id, estado_ml, actualizado_ml, comprobado_en) VALUES (?,?,?,?,?)
@@ -63,6 +59,14 @@ def procesar_reclamo(cuenta, claim_id):
                 (cuenta, str(claim_id), claim.get("status"), claim.get("last_updated"),
                  datetime.now(timezone.utc).isoformat()))
         return False
+    # Claims 1.0 usa el tipo "returns" y no ofrece el endpoint /detail; sus
+    # acciones/vencimientos, cuando existen, ya vienen en el claim.
+    detail = (ml_client.get_opcional(path + "/detail", cuenta_ml=cuenta) or {}
+              if tipo != "returns" else {})
+    reason_id = claim.get("reason_id")
+    reason = (ml_client.get_opcional(f"/post-purchase/v1/claims/reasons/{reason_id}", cuenta_ml=cuenta)
+              if reason_id else None) or {}
+    action, deadline = _accion_vendedor(claim, detail)
     order_id = claim.get("order_id") or (claim.get("resource_id") if claim.get("resource") == "order" else None)
     pack_id = claim.get("pack_id")
     order = ml_client.get_opcional(f"/orders/{order_id}", cuenta_ml=cuenta) if order_id else None
@@ -146,9 +150,9 @@ def reconciliar(cuenta):
     # en range; el rango acotado recupera cierres recientes y eventos perdidos.
     hasta = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
     searches = [{"status": "opened"},
-                {"type": "return", "range": f"last_updated:after:{since},before:{hasta}"}]
+                {"type": "returns", "range": f"last_updated:after:{since},before:{hasta}"}]
     if not closed_scanned:
-        searches.append({"status": "closed", "sort": "date_created:asc"})
+        searches.append({"status": "closed", "type": "returns", "sort": "date_created:asc"})
     for extra in searches:
         for offset in range(0, 9950, 50):
             data = ml_client.get("/post-purchase/v1/claims/search", params={

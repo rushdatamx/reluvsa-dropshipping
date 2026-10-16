@@ -39,8 +39,10 @@ claims = {
                 {"action": "review", "mandatory": True, "due_date": "2026-10-17T12:00:00+00:00"}]}]},
     "102": {"id": 102, "resource": "order", "resource_id": "order-1", "status": "opened", "type": "mediations"},
     "103": {"id": 103, "resource": "order", "resource_id": "missing", "status": "opened", "type": "return"},
+    "104": {"id": 104, "resource": "order", "resource_id": "order-1", "status": "closed", "type": "returns"},
 }
 search_params = []
+optional_paths = []
 fail = {"status": "403"}
 old_get, old_optional = ml_client.get, ml_client.get_opcional
 
@@ -58,6 +60,7 @@ def fake_get(path, **kwargs):
 
 
 def fake_optional(path, **kwargs):
+    optional_paths.append(path)
     if path.endswith("/detail"):
         return {"due_date": "2026-10-17T12:00:00+00:00", "action_responsible": "seller" if "/101/" in path else "mediator"}
     if "/reasons/" in path:
@@ -73,6 +76,7 @@ ml_client.get, ml_client.get_opcional = fake_get, fake_optional
 try:
     result = sync_devoluciones.procesar_pendientes()
     assert result == {"procesados": 2, "errores": 1}, result
+    assert not any(path.endswith("/102/detail") for path in optional_paths)
     with get_db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM ml_devoluciones").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM ml_postventa_sin_devolucion").fetchone()[0] == 1
@@ -96,6 +100,8 @@ try:
     assert changed["mediacion"] and changed["revisado"] and changed["seguimiento_usuario"] == "admin@test.mx"
     sync_devoluciones.procesar_reclamo("principal", "101")
     assert client.get("/api/devoluciones/principal/101").json()["revisado"] == 1
+    assert sync_devoluciones.procesar_reclamo("principal", "104") is True
+    assert not any(path.endswith("/104/detail") for path in optional_paths)
     bad = client.post("/api/devoluciones/principal/101/evidencias", files={"file": ("bad.jpg", b"bad", "image/jpeg")})
     assert bad.status_code == 400
     good = client.post("/api/devoluciones/principal/101/evidencias", files={"file": ("photo.jpg", b"\xff\xd8\xffabc\xff\xd9", "image/jpeg")})
@@ -158,7 +164,7 @@ try:
     rango = next(p["range"] for p in search_params if "range" in p)
     assert ",before:" in rango and ".000+00:00" in rango
     rango_params = next(p for p in search_params if "range" in p)
-    assert rango_params["type"] == "return"
+    assert rango_params["type"] == "returns"
     print("✅ postventa: duplicados, reintento 403/429, reclamo sin devolución, cruce exacto, SKU múltiples, plazo, filtros, marcas, evidencia y permisos")
 finally:
     ml_client.get, ml_client.get_opcional = old_get, old_optional

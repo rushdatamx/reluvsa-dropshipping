@@ -511,7 +511,7 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: en qué está el proyecto
 
-- **Devoluciones:** desplegada en producción; webhook, casos y evidencias operativos. El filtro de reconciliación ahora añade `type=return`; GET de diagnóstico dio 200 en ambas cuentas. Falta validar el worker tras el siguiente despliegue (bitácora 2026-10-16).
+- **Devoluciones:** desplegada en producción; webhook, casos y evidencias operativos. Pendiente desplegar el ajuste a `type=returns` y evitar `/detail` para Claims 1.0; pruebas y `api-guardian` ya pasaron (bitácora 2026-10-16).
   Auditoría `api-guardian` aprobada; el hit literal de `httpx` quedó documentado como
   dependencia/test MockTransport preexistentes. Respaldo pre-migración creado en
   `/data/dropshipping.db.bak-20261016_170244`. Ver `docs/bitacora-sesiones.md` (2026-10-16).

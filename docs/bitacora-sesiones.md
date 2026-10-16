@@ -2910,5 +2910,10 @@ detalle, devoluciones y órdenes; la búsqueda de reclamos abiertos devuelve 200
 reconciliación acotada por `last_updated` inicialmente respondía 400 porque ML exige
 al menos un filtro explícito además de `players.user_id` y `range`. Se añadió `type=return`
 y la prueba E2E lo verifica. El GET de diagnóstico, pasando por `ml_client`, devolvió 200
-para ambas cuentas. Este ajuste está listo para commit y despliegue; después se comprobará
-que el worker registra una reconciliación exitosa con la nueva versión.
+para ambas cuentas. Sin embargo, `type=return` no coincidía con el valor real del API:
+la prueba de producción confirmó que `type=returns` (plural) trae casos en ambas cuentas,
+mientras el singular devuelve cero. Se corrigió el filtro. Las respuestas históricas de
+tipo `returns` pertenecen a Claims 1.0, cuyo `/detail` responde 401 “functionality is not
+available”; ahora se omite ese recurso y se guardan los reclamos que no son devoluciones
+antes de solicitar motivo/detalle. Las pruebas obligatorias y `api-guardian` aprobaron;
+queda desplegar este último ajuste y comprobar que el worker consume el backlog.
