@@ -1,21 +1,21 @@
 # Módulo 2 — Publicaciones masivas
 
-## Actualización 2026-10-15 — títulos pendientes
+## Actualización 2026-10-19 — títulos pendientes como filas completas
 
 Los perfiles activos AG, CAUPLAS, GONHER, KG y KIM conservan las variantes cuyo
 título final cabe en 60 caracteres en `Publicaciones` y agregan siempre la hoja
-`Títulos por corregir`. Sus encabezados son `Título candidato`, `Caracteres`,
-`Límite`, `SKU`, `Proveedor`, `Fila de origen`, `Compatibilidad / año` y
-`Motivo`. El candidato es la última alternativa producida por las reglas de ese
-perfil, aunque siga excediendo el límite. Sólo se incluyen exclusiones cuyo motivo
-sea `Título excede 60 caracteres`; otros errores del catálogo conservan su motivo
-y no se muestran como exceso de título. La hoja puede quedar vacía (sólo
-encabezados), y el libro se genera incluso si todos los candidatos exceden el
-límite. La pestaña principal contiene únicamente títulos de hasta 60 caracteres.
+`Títulos por corregir`. Tiene exactamente los mismos 37 encabezados, orden y campos
+calculados que `Publicaciones`; la columna `Titulo` conserva el candidato largo para
+que Gaby pueda editarlo. Se incluyen sólo exclusiones cuyo motivo sea
+`Título excede 60 caracteres`; otras exclusiones conservan su reporte habitual. La
+hoja puede quedar vacía (sólo encabezados), y el libro se genera incluso si todos los
+candidatos exceden el límite. La pestaña principal contiene únicamente títulos de
+hasta 60 caracteres. Configuración, fotos y validación de URLs se aplican también a
+las filas pendientes.
 VAZLO sigue sin ser un perfil de Publicaciones Masivas.
 
-Implementación: `generar_filas_con_reporte` conserva candidato y metadatos en
-`backend/services/generador_plantilla.py`; `escribir_xlsx` escribe la pestaña, y
+Implementación: `generar_filas_con_reporte` conserva cada variante como fila calculada
+en `backend/services/generador_plantilla.py`; `escribir_xlsx` escribe la pestaña, y
 `POST /api/publicaciones/generar` entrega sólo las exclusiones por longitud al
 escritor después de aplicar filtros de producto/sistema. El reporte se limita al
 catálogo y filtros solicitados en esa generación.

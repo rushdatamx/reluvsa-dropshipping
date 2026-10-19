@@ -581,6 +581,16 @@ def _exclusion_titulo(codigo, clave, fila, titulo, compat, anio, producto=""):
     }
 
 
+def _fila_pendiente(exclusion, pieza, titulo, precio, descripcion, aplicacion,
+                    imagenes=None, stock=0, marca="", linea=None, compatibilidad=None):
+    exclusion["fila_publicacion"] = FilaPublicacion(
+        titulo, str(pieza.get("clave") or "").strip(), linea or pieza.get("producto", ""),
+        precio, descripcion, str(aplicacion or ""), False, imagenes or [],
+        exclusion.get("fila"), stock, marca, compatibilidad or {},
+    )
+    return exclusion
+
+
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
@@ -594,10 +604,12 @@ def generar_filas_con_reporte(piezas, config):
                     titulo = _titulo_ag(pieza.get("producto"), compat, anio)
                     if not titulo:
                         candidato = _titulo_ag(pieza.get("producto"), compat, anio, permitir_exceso=True)
-                        exclusiones.append({**_exclusion_titulo("AG", pieza.get("clave"), compat.get("fila"),
+                        exclusion = {**_exclusion_titulo("AG", pieza.get("clave"), compat.get("fila"),
                             candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                             "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
-                            "inicio": anio, "fin": anio})
+                            "inicio": anio, "fin": anio}
+                        exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                            anio, stock=pieza["stock"], compatibilidad=compat_anual))
                         continue
                     # La equivalencia de una variante AG es SKU + compatibilidad + año,
                     # no el texto del título: así una fila repetida no genera dos veces
@@ -626,10 +638,12 @@ def generar_filas_con_reporte(piezas, config):
                     titulo = _titulo_gonher(compat.get("producto"), compat_anual)
                     if not titulo:
                         candidato = _titulo_gonher(compat.get("producto"), compat_anual, permitir_exceso=True)
-                        exclusiones.append({**_exclusion_titulo("GONHER", pieza.get("clave"), compat.get("fila"),
+                        exclusion = {**_exclusion_titulo("GONHER", pieza.get("clave"), compat.get("fila"),
                             candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                             "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                            "inicio": anio, "fin": anio})
+                            "inicio": anio, "fin": anio}
+                        exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                            anio, stock=None, linea=compat.get("linea", ""), compatibilidad=compat_anual))
                         continue
                     # La identidad de una variante no depende de cómo se
                     # escriba el título: vehículo + motor + año son obligatorios.
@@ -655,10 +669,12 @@ def generar_filas_con_reporte(piezas, config):
                 if not titulo:
                     candidato = _titulo_kims(pieza.get("producto"), compat, permitir_exceso=True)
                     anio = f"{compat.get('inicio')}/{compat.get('fin')}"
-                    exclusiones.append({**_exclusion_titulo("KIM", pieza.get("clave"), compat.get("fila"),
+                    exclusion = {**_exclusion_titulo("KIM", pieza.get("clave"), compat.get("fila"),
                         candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                         "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "inicio": compat.get("inicio"), "fin": compat.get("fin")})
+                        "inicio": compat.get("inicio"), "fin": compat.get("fin")}
+                    exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                        anio, imagenes=pieza.get("imagenes", []), stock=pieza["stock"], marca=pieza.get("marca", "")))
                     continue
                 par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                 if par in vistos:
@@ -679,10 +695,15 @@ def generar_filas_con_reporte(piezas, config):
                 for anios, motivo in fuera:
                     candidato = _titulo_cauplas(producto, compat, "" if compat.get("universal") else anios,
                                                 permitir_exceso=True)
-                    exclusiones.append({**_exclusion_titulo("CAUPLAS", pieza.get("clave"), compat.get("fila"),
+                    exclusion = {**_exclusion_titulo("CAUPLAS", pieza.get("clave"), compat.get("fila"),
                         candidato, compat, anios), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                         "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
+                        "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo}
+                    if motivo == "Título excede 60 caracteres":
+                        exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                            "Universal" if compat.get("universal") else anios, stock=pieza["stock"], linea=producto))
+                    else:
+                        exclusiones.append(exclusion)
                 for titulo in titulos:
                     par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                     if par in vistos:
@@ -708,10 +729,15 @@ def generar_filas_con_reporte(piezas, config):
             titulos, fuera = _variantes_master(pieza.get("producto"), compat)
             for anios, motivo in fuera:
                 candidato = _titulo_master(pieza.get("producto"), compat, anios, permitir_exceso=True)
-                exclusiones.append({**_exclusion_titulo("KG", pieza.get("clave"), compat.get("fila"),
+                exclusion = {**_exclusion_titulo("KG", pieza.get("clave"), compat.get("fila"),
                     candidato, compat, anios), "fila": compat.get("fila"), "clave": pieza.get("clave"),
                     "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                    "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo})
+                    "inicio": compat.get("inicio"), "fin": compat.get("fin"), "motivo": motivo}
+                if motivo == "Título excede 60 caracteres":
+                    exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                        compat.get("guia", ""), imagenes=pieza.get("imagenes", []), stock=pieza["stock"]))
+                else:
+                    exclusiones.append(exclusion)
             for titulo in titulos:
                 par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
                 if par in vistos: deduplicadas += 1; continue
@@ -807,23 +833,41 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
 
     if config.codigo_bodega.strip().upper() in {"AG", "CAUPLAS", "GONHER", "KG", "KIM"}:
         pendientes = wb.create_sheet("Títulos por corregir")
-        columnas_pendientes = ["Título candidato", "Caracteres", "Límite", "SKU", "Proveedor",
-                               "Fila de origen", "Compatibilidad / año", "Motivo"]
-        for col, nombre in enumerate(columnas_pendientes, 1):
+        for col, nombre in enumerate(COLUMNAS, 1):
             celda = pendientes.cell(1, col, nombre)
             celda.font = encabezado
         for numero_fila, caso in enumerate(titulos_por_corregir or [], 2):
-            valores = [caso.get("titulo_candidato", ""), caso.get("caracteres", ""),
-                       caso.get("limite", MAX_TITULO), caso.get("sku", caso.get("clave", "")),
-                       caso.get("proveedor", config.codigo_bodega),
-                       caso.get("fila_origen", caso.get("fila", "")),
-                       " ".join(x for x in (caso.get("compatibilidad", ""), str(caso.get("anio", ""))) if x),
-                       caso.get("motivo", "")]
-            for col, valor in enumerate(valores, 1):
-                pendientes.cell(numero_fila, col, valor)
+            fila = caso.get("fila_publicacion")
+            if fila is None:
+                continue
+            _escribir_fila_publicacion(pendientes, numero_fila, fila, config, idx, bodega)
         pendientes.freeze_panes = "A2"
-        for col, ancho in (("A", 70), ("D", 22), ("G", 48), ("H", 32)):
+        for col, ancho in (("A", 58), ("M", 60), ("L", 18)):
             pendientes.column_dimensions[col].width = ancho
 
     wb.save(destino)
     return len(filas)
+
+
+def _escribir_fila_publicacion(ws, numero_fila, fila, config, idx, bodega):
+    ws.cell(numero_fila, idx["Titulo"], fila.titulo)
+    ws.cell(numero_fila, idx["Categoria"], config.categoria_ml)
+    if fila.precio is not None:
+        ws.cell(numero_fila, idx["Precio"], fila.precio)
+        ws.cell(numero_fila, idx["Envio Gratis(si,no)"], "Si" if fila.precio >= 299.00 else "No")
+    ws.cell(numero_fila, idx["SKU"], fila.sku)
+    ws.cell(numero_fila, idx["Descripcion"], fila.descripcion).alignment = Alignment(wrap_text=True)
+    ws.cell(numero_fila, idx["Marca"], fila.marca or config.marca)
+    ws.cell(numero_fila, idx["Modelo"], fila.sku)
+    limite_imagenes = 10 if bodega in {"CAUPLAS", "AG"} else 5
+    for numero, imagen in enumerate(fila.imagenes[:limite_imagenes], 1):
+        if imagen:
+            ws.cell(numero_fila, idx[f"Imagen{numero}"], imagen)
+    for nombre, valor in CONSTANTES.items():
+        ws.cell(numero_fila, idx[nombre], valor)
+    if fila.stock is not None:
+        ws.cell(numero_fila, idx["Cantidad"], fila.stock)
+    for b in BODEGAS:
+        if fila.stock is None and b == bodega:
+            continue
+        ws.cell(numero_fila, idx[b], fila.stock if b == bodega else 0)

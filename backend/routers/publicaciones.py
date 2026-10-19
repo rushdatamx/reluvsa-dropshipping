@@ -378,9 +378,9 @@ async def generar(
         else:
             filas = generar_filas(piezas, config)
         if galerias_cauplas is not None:
-            asignar_imagenes_cauplas(filas, galerias_cauplas)
+            asignar_imagenes_cauplas(filas + [e["fila_publicacion"] for e in titulos_por_corregir], galerias_cauplas)
         if galerias_ag is not None:
-            asignar_imagenes_ag(filas, galerias_ag)
+            asignar_imagenes_ag(filas + [e["fila_publicacion"] for e in titulos_por_corregir], galerias_ag)
         if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas and not titulos_por_corregir:
@@ -394,11 +394,12 @@ async def generar(
         imagenes = {"revisadas": 0, "validas": 0, "eliminadas": 0,
                     "no_disponibles": 0, "resolucion_insuficiente": 0,
                     "dominio_no_autorizado": 0, "formato_no_verificable": 0}
-        if any(any(isinstance(url, str) and url.strip() for url in fila.imagenes) for fila in filas):
+        filas_con_imagenes = filas + [e["fila_publicacion"] for e in titulos_por_corregir]
+        if any(any(isinstance(url, str) and url.strip() for url in fila.imagenes) for fila in filas_con_imagenes):
             try:
                 # La validación hace red y puede tardar; no bloquea el event
                 # loop que atiende a los demás usuarios del portal.
-                imagenes = await asyncio.to_thread(filtrar_imagenes, filas, perfil.dominios_imagenes)
+                imagenes = await asyncio.to_thread(filtrar_imagenes, filas_con_imagenes, perfil.dominios_imagenes)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
 

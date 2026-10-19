@@ -709,10 +709,11 @@ sólo desde `apimagenes.s3.amazonaws.com` tras la validación común. Contrato e
 `docs/master-ag-publicaciones-masivas.md`.
 
 **Títulos excedidos:** los libros de AG, CAUPLAS, GONHER, KG y KIM llevan siempre la hoja
-`Títulos por corregir`. Incluye sólo títulos que siguen sobre 60 caracteres después de la
-cascada actual, con candidato completo, longitud, SKU, proveedor, fila, compatibilidad/año y
-motivo. La hoja puede estar vacía; la plantilla `Publicaciones` sólo admite títulos de hasta
-60. Las otras exclusiones conservan su motivo original. VAZLO no es perfil activo.
+`Títulos por corregir`. Tiene las mismas 37 columnas que `Publicaciones` y guarda la fila
+calculada completa, incluido el candidato largo editable en `Titulo`, fotos y stock. Incluye
+sólo títulos que siguen sobre 60 caracteres después de la cascada actual. La hoja puede estar
+vacía; `Publicaciones` sólo admite títulos de hasta 60. Las otras exclusiones conservan su
+motivo original. VAZLO no es perfil activo. Contrato en `docs/modulo2-publicaciones-masivas.md`.
 
 ### Regla operativa nueva — GONHER
 

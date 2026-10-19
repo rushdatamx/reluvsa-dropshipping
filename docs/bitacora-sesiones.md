@@ -2921,3 +2921,17 @@ la reconciliación devolvió 200 en ambas cuentas, el worker consumió la cola y
 verificación final encontró 192 devoluciones, 0 avisos pendientes e
 `integrity_check=ok`. El registro tiene cuatro GET de reconciliación acotada, todos 200.
 Backup previo a migración: `/data/dropshipping.db.bak-20261016_170244`.
+
+## 2026-10-19 — Títulos pendientes como publicaciones completas
+
+Se cambió `Títulos por corregir` para que conserve una fila completa con las 37 columnas
+idénticas a `Publicaciones`. Cada exclusión por longitud conserva la fila calculada de su
+perfil: candidato largo editable, categoría, precio y envío derivado, SKU, descripción,
+marca/modelo, constantes, fotos, stock y bodega. Se dejó fuera cualquier otra causa de
+exclusión. La asignación de galerías CAUPLAS y AG y la validación común de URLs incluyen
+ahora las filas pendientes. Ambos encabezados mantienen la hoja aun sin casos, y un libro
+sigue siendo posible cuando todos los candidatos exceden el límite.
+
+Se actualizaron `docs/modulo2-publicaciones-masivas.md` y la regla breve de Módulo 2 en
+`CLAUDE.md`. Verificación: regresiones AG 19/19, CAUPLAS 38/38, GONHER 24/24, KIMS 19/19
+y KG 86/86; compilación Python correcta. La prueba directa del XLSX confirmó ambos encabezados de 37 columnas y los valores de título, precio, envío, SKU, descripción, imagen, cantidad y bodega. `git diff --check` pasó.
