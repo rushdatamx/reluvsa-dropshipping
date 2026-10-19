@@ -28,7 +28,7 @@
 
 ## 1. Contexto del negocio
 
-**Cliente**: RELUVSA — refaccionaria que vende en Mercado Libre operando con 5 proveedores en modelo **dropshipping** (el proveedor manda directo al comprador final).
+**Cliente**: RELUVSA — refaccionaria que vende en Mercado Libre operando con 6 proveedores en modelo **dropshipping** (el proveedor manda directo al comprador final).
 
 **Contacto operativo**: Gaby (RELUVSA) — Mario (mario@rushdata.com.mx) actúa como Project Manager intermediario.
 
@@ -44,7 +44,7 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 
 ---
 
-## 2. Los 5 proveedores
+## 2. Los 6 proveedores
 
 | RFC | Razón social | Código bodega | Esquema SKU típico |
 |---|---|---|---|
@@ -53,12 +53,15 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 | `ARG041025AU2` | ARGENPARTS | `AG` | `P2172292` (factura) → `AG P2172292-2` (ML) |
 | `VIM990605M8A` | VAZLO COMERCIAL | `VAZLO` | `30-578` (factura) → `VAZLO-30-578&30-578` (ML) |
 | `STR910211DT2` | KEEPONGREEN (factura como SUMINISTRO TRANSAMERICANO DE REFACCIONES) | `KG` | `KR-1095WP` |
+| `MEMC860920K4A` | CRESCENCIO MENDOZA MENDOZA (marca comercial DIFIRSA) | `DIFIRSA` | CFDI `NoIdentificacion`; concilia por referencias de venta impresas en PDF + SKU de venta secundaria, con confirmación manual |
 
 ⚠️ `MATRIZ` aparece en stock pero es bodega propia de RELUVSA, **NO** es proveedor dropshipping.
 
-⚠️ Cada proveedor usa su propio esquema de códigos. **No hay código universal cruzable con MercadoLibre**. El match con MercadoLibre requiere:
+⚠️ Cada proveedor usa su propio esquema de códigos. **No hay código universal cruzable con MercadoLibre**. El flujo legacy de los otros proveedores requiere:
 1. Tabla puente `(rfc_emisor, codigo_proveedor) → sku_ml` por proveedor (lo construye el matcher conforme va aprendiendo).
 2. Fallback fuzzy por descripción del concepto contra título de la venta.
+
+**Excepción DIFIRSA (2026-10):** la factura omite el prefijo `20000` de las referencias de venta que imprime. El uploader conserva XML y PDF, propone referencias vía OCR local y cruces sólo contra ventas de la cuenta secundaria cuyo depósito sea `Difirsa` o tengan un envío asignado a DIFIRSA. En Mercado Libre → cuenta secundaria, el admin asigna el depósito a DIFIRSA y sincroniza la cuenta. Gaby/admin revisa las referencias y asigna las unidades completas de cada concepto antes de confirmar. Equivalencias de SKU sólo se guardan al confirmar explícitamente; una misma venta no puede quedar confirmada en dos facturas. Ver `routers/facturas.py` y `services/ocr_difrisa.py`.
 
 ---
 
@@ -307,7 +310,7 @@ cruza a la más reciente sin facturar (la guarda 4 aplica sólo con SKU-kit dist
 - Auth JWT con `python-jose` + contraseñas con `bcrypt`.
 - Parsers: `openpyxl` (Excels), `lxml` (CFDI XML).
 - Matching: `rapidfuzz` (token_set_ratio).
-- Sin migrations: `database.py::init_database()` crea schema idempotente al arrancar y siembra los 5 proveedores.
+- Sin migrations: `database.py::init_database()` crea schema idempotente al arrancar y siembra los 6 proveedores (incluye alta idempotente de DIFIRSA en bases existentes).
 
 ### Deploy
 - Backend: Railway (Procfile + railway.json listos).

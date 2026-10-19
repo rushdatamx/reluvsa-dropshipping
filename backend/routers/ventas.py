@@ -217,7 +217,7 @@ def _construir_filtros(
         existe_factura_q = """
             EXISTS (
                 SELECT 1
-                FROM factura_conceptos fcq
+                FROM factura_concepto_ventas fcq
                 JOIN facturas fq ON fq.id = fcq.factura_id
                 JOIN proveedores pq ON pq.id = fq.proveedor_id
                 WHERE fcq.num_venta_match = v.num_venta
@@ -243,7 +243,7 @@ def _construir_filtros(
 
     # Facturada / sin factura. Se evalúa con un subquery EXISTS para no duplicar
     # filas cuando una venta tiene varios conceptos facturados.
-    existe_factura = "EXISTS (SELECT 1 FROM factura_conceptos fc WHERE fc.num_venta_match = v.num_venta)"
+    existe_factura = "EXISTS (SELECT 1 FROM factura_concepto_ventas fc WHERE fc.num_venta_match = v.num_venta)"
     if facturada == "true":
         where.append(existe_factura)
     elif facturada == "false":
@@ -315,7 +315,7 @@ _SELECT_VENTAS = """
            -- de abajo): el que trae proveedor. No se devuelve a la UI, sólo dirige la
            -- elección de SQLite.
            MAX(CASE WHEN e.proveedor_id IS NOT NULL THEN 1 ELSE 0 END) as _envio_rank,
-           (SELECT COUNT(*) FROM factura_conceptos fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
+           (SELECT COUNT(DISTINCT fc2.factura_id) FROM factura_concepto_ventas fc2 WHERE fc2.num_venta_match = v.num_venta) as facturas_count,
            -- Cuántas ventas comparten el paquete (carrito). Es 1 en una venta normal.
            -- Sirve para que la UI marque "Carrito 2 de 2": las N ventas de un pack muestran
            -- el MISMO número (el pack_id, que es el que ML enseña) y ahora también el mismo
@@ -344,7 +344,7 @@ _SELECT_VENTAS = """
            -- proveedor en Python (formatear_folio). serie/folio no contienen comas (CFDI).
            (SELECT group_concat(DISTINCT
                        IFNULL(f3.serie,'') || '|' || IFNULL(f3.folio,'') || '|' || IFNULL(p3.codigo_bodega,''))
-            FROM factura_conceptos fc3
+            FROM factura_concepto_ventas fc3
             JOIN facturas f3 ON f3.id = fc3.factura_id
             JOIN proveedores p3 ON p3.id = f3.proveedor_id
             WHERE fc3.num_venta_match = v.num_venta) as facturas_raw,
@@ -554,7 +554,7 @@ def detalle(num_venta: str, user: UserInfo = Depends(get_current_user)):
         ).fetchone()
         conceptos = conn.execute(
             """SELECT fc.*, f.uuid_cfdi, f.folio, f.fecha_factura
-               FROM factura_conceptos fc
+               FROM factura_concepto_ventas fc
                JOIN facturas f ON f.id = fc.factura_id
                WHERE fc.num_venta_match = ?""",
             (num_venta,),

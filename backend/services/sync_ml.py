@@ -144,7 +144,7 @@ def _bootstrap_post_conexion(cuenta_ml: str = "principal") -> dict:
 
 def _sincronizar_stores(seller_id: str, cuenta_ml: str = "principal") -> int:
     """Catálogo de depósitos → ml_stores. description = lo que el Excel mostraba
-    en 'Depósito' (MATRIZ/KIM/CAUPLAS/...); codigo_bodega vía LUGAR_A_BODEGA."""
+    en 'Depósito' (MATRIZ/KIM/CAUPLAS/VAZLO/AG/KG/DIFIRSA)."""
     try:
         data = ml_client.get(f"/users/{seller_id}/stores/search", params={"tags": "stock_location"}, cuenta_ml=cuenta_ml)
     except ml_client.MLError:

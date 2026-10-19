@@ -15,6 +15,7 @@
 
 | Sesión | Tema | Estado hoy |
 |---|---|---|
+| [2026-10-19](#2026-10-19--difirsa-facturas-conciliación-por-referencia-y-reparto) | DIFIRSA: facturas y reparto de cantidades | ✅ Implementado; requiere despliegue |
 | [2026-10-15](#2026-10-15--argenparts-desglose-anual-de-publicaciones) | ARGENPARTS: desglose anual de publicaciones | ✅ Implementado y verificado localmente |
 | [2026-09-23](#2026-09-23--kims-en-publicaciones-masivas) | Módulo 2: master KIMS | ✅ Implementado y verificado |
 | [2026-09-05](#2026-09-05--stock-por-sku-desde-el-master) | Módulo 2: stock por SKU desde el master | ✅ Implementado y documentado |
@@ -2921,6 +2922,26 @@ la reconciliación devolvió 200 en ambas cuentas, el worker consumió la cola y
 verificación final encontró 192 devoluciones, 0 avisos pendientes e
 `integrity_check=ok`. El registro tiene cuatro GET de reconciliación acotada, todos 200.
 Backup previo a migración: `/data/dropshipping.db.bak-20261016_170244`.
+
+## 2026-10-19 — DIFIRSA: facturas, conciliación por referencia y reparto
+
+Se incorporó DIFIRSA al catálogo de proveedores (RFC `MEMC860920K4A`, bodega `DIFIRSA`).
+El CFDI conserva los códigos de `NoIdentificacion`; el PDF se procesa localmente con
+Tesseract para recuperar las referencias que omiten el prefijo `20000`. En la interfaz
+administrativa se pueden corregir esas referencias, revisar ventas candidatas de la cuenta
+secundaria, repartir cantidades de un concepto entre ventas y confirmar la asignación.
+Las equivalencias SKU se persisten sólo al confirmarlas y una venta no puede asignarse a
+facturas distintas. La pantalla Mercado Libre permite asignar el depósito de la cuenta
+secundaria a DIFIRSA; ventas cuyo depósito sea `Difirsa` también se identifican directamente.
+Ventas, buscador y métricas leen el vínculo efectivo común a relaciones legacy y asignaciones
+nuevas. La colecta reconoce `DIFIRSA` como bodega.
+
+La factura de muestra no coincidió con ventas disponibles en la base local, así que el
+esquema de SKU deberá validarse contra ventas secundarias sincronizadas; la pantalla impide
+auto-confirmar cuando no hay una equivalencia o candidato compatible. Se añadió `backend/nixpacks.toml`
+para instalar Tesseract y español en el build Nixpacks de Railway. Verificación local:
+prueba de split y cuenta secundaria, suites de solo lectura ML/sync, regresiones de filtros,
+conciliación, ocupación, carrito y métricas; build de frontend correcto. No se hizo deploy.
 
 ## 2026-10-19 — Títulos pendientes como publicaciones completas
 

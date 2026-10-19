@@ -10,7 +10,7 @@ export default function Proveedores() {
     <div>
       <PageHeader
         title="Proveedores"
-        subtitle="Los 5 proveedores dropshipping identificados"
+        subtitle={`${rows.length} proveedores dropshipping identificados`}
       />
       <div className="bg-white rounded-xl border border-notion-border overflow-hidden">
         <table className="w-full text-sm">

@@ -48,6 +48,12 @@ export const reasignarEnvio = (numEnvio, payload) =>
 // Facturas
 export const listarFacturas = (params = {}) => api.get('/facturas', { params });
 export const getFactura = (id) => api.get(`/facturas/${id}`);
+export const getConciliacionDifirsa = (id) => api.get(`/facturas/${id}/difirsa`);
+export const guardarReferenciasDifirsa = (id, referencias) =>
+  api.put(`/facturas/${id}/difirsa/referencias`, { referencias });
+export const proponerCrucesDifirsa = (id) => api.post(`/facturas/${id}/difirsa/proponer`);
+export const confirmarCrucesDifirsa = (id, payload) =>
+  api.post(`/facturas/${id}/difirsa/confirmar`, payload);
 export const exportarFacturasCsv = (params = {}) =>
   api.get('/facturas/export.csv', { params, responseType: 'blob' });
 // Los archivos van protegidos por JWT (header Authorization), así que se bajan como
@@ -138,6 +144,8 @@ export const mlSyncAuto = (payload) => api.post('/ml/sync-auto', payload);
 export const mlNotificaciones = (limit = 20) =>
   api.get('/webhooks/mercadolibre/recientes', { params: { limit } });
 export const mlCuentas = () => api.get('/ml/cuentas');
+export const mlAsignarProveedorDeposito = (cuenta, storeId, proveedor_id) =>
+  api.patch(`/ml/cuentas/${encodeURIComponent(cuenta)}/depositos/${encodeURIComponent(storeId)}`, { proveedor_id });
 export const mlIniciarOauthCuenta = (cuenta) => api.post(`/ml/cuentas/${encodeURIComponent(cuenta)}/oauth/iniciar`);
 export const mlSyncCuenta = (cuenta, tipo = 'incremental') =>
   api.post(`/ml/cuentas/${encodeURIComponent(cuenta)}/sync`, { tipo });

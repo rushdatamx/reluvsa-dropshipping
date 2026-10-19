@@ -74,13 +74,16 @@ def metricas_proveedores(
             # una métrica que Gaby ya lee. Si algún día ese conteo deja de ser 0, la decisión
             # de cambiar el promedio es de negocio y hay que tomarla con ella.
             tiempo_fact = conn.execute(
-                f"""SELECT AVG(JULIANDAY(f.fecha_factura) - JULIANDAY(v.fecha_venta)) as avg_dias
-                   FROM facturas f
-                   JOIN factura_conceptos fc ON fc.factura_id = f.id
-                   JOIN ventas_ml v ON v.num_venta = fc.num_venta_match
-                   LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
-                   WHERE f.proveedor_id = ? AND v.fecha_venta IS NOT NULL AND f.fecha_factura IS NOT NULL
-                     AND {NO_ES_FULL}""",
+                f"""SELECT AVG(dias) AS avg_dias FROM (
+                     SELECT DISTINCT f.id AS factura_id, fc.concepto_id, e.num_envio,
+                            JULIANDAY(f.fecha_factura) - JULIANDAY(v.fecha_venta) AS dias
+                       FROM facturas f
+                       JOIN factura_concepto_ventas fc ON fc.factura_id = f.id
+                       JOIN ventas_ml v ON v.num_venta = fc.num_venta_match
+                       LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
+                      WHERE f.proveedor_id = ? AND v.fecha_venta IS NOT NULL
+                        AND f.fecha_factura IS NOT NULL AND {NO_ES_FULL}
+                   )""",
                 (pid,),
             ).fetchone()
 
@@ -96,10 +99,11 @@ def metricas_proveedores(
             errores = conn.execute(
                 f"""SELECT COUNT(DISTINCT fc.id) c FROM factura_conceptos fc
                    JOIN facturas f ON f.id = fc.factura_id
-                   LEFT JOIN ventas_ml v ON v.num_venta = fc.num_venta_match
+                   LEFT JOIN factura_concepto_ventas fv ON fv.concepto_id=fc.id
+                   LEFT JOIN ventas_ml v ON v.num_venta = fv.num_venta_match
                    LEFT JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
                    WHERE f.proveedor_id = ?
-                     AND (fc.num_venta_match IS NULL
+                     AND (fv.concepto_id IS NULL
                           OR (fc.match_confidence < 0.5 AND {NO_ES_FULL}))""",
                 (pid,),
             ).fetchone()["c"]

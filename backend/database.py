@@ -179,6 +179,61 @@ CREATE TABLE IF NOT EXISTS factura_conceptos (
     match_confidence REAL
 );
 
+CREATE TABLE IF NOT EXISTS factura_referencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    factura_id INTEGER NOT NULL REFERENCES facturas(id) ON DELETE CASCADE,
+    orden INTEGER NOT NULL,
+    valor_original TEXT NOT NULL,
+    num_venta_origen TEXT,
+    fuente TEXT NOT NULL DEFAULT 'ocr',
+    confianza REAL,
+    UNIQUE(factura_id, orden)
+);
+
+CREATE TABLE IF NOT EXISTS factura_ocr (
+    factura_id INTEGER PRIMARY KEY REFERENCES facturas(id) ON DELETE CASCADE,
+    texto TEXT,
+    estado TEXT NOT NULL,
+    uuid_detectado TEXT,
+    pdf_sha256 TEXT,
+    motor TEXT NOT NULL DEFAULT 'tesseract',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS factura_asignaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    factura_id INTEGER NOT NULL REFERENCES facturas(id) ON DELETE CASCADE,
+    concepto_id INTEGER NOT NULL REFERENCES factura_conceptos(id) ON DELETE CASCADE,
+    num_venta_match TEXT NOT NULL REFERENCES ventas_ml(num_venta) ON DELETE CASCADE,
+    cantidad REAL NOT NULL CHECK(cantidad > 0),
+    estado TEXT NOT NULL DEFAULT 'propuesta' CHECK(estado IN ('propuesta','confirmada')),
+    confirmado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    confirmado_en TIMESTAMP,
+    UNIQUE(concepto_id, num_venta_match)
+);
+
+CREATE TABLE IF NOT EXISTS proveedor_sku_equivalencias (
+    proveedor_id INTEGER NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
+    codigo_prov TEXT NOT NULL,
+    sku_ml TEXT NOT NULL,
+    creado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(proveedor_id, codigo_prov, sku_ml)
+);
+
+CREATE VIEW IF NOT EXISTS factura_concepto_ventas AS
+    SELECT fc.factura_id, fc.id AS concepto_id, fc.num_venta_match,
+           fc.cantidad AS cantidad_asignada, 'legacy' AS origen
+      FROM factura_conceptos fc
+     WHERE fc.num_venta_match IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM factura_asignaciones fa
+                        WHERE fa.concepto_id=fc.id AND fa.estado='confirmada')
+    UNION ALL
+    SELECT fa.factura_id, fa.concepto_id, fa.num_venta_match,
+           fa.cantidad AS cantidad_asignada, 'difirsa' AS origen
+      FROM factura_asignaciones fa
+     WHERE fa.estado='confirmada';
+
 CREATE TABLE IF NOT EXISTS incidencias (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     num_venta TEXT REFERENCES ventas_ml(num_venta) ON DELETE CASCADE,
@@ -495,6 +550,9 @@ CREATE INDEX IF NOT EXISTS idx_envios_proveedor ON envios_colecta(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_facturas_proveedor ON facturas(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_conceptos_factura ON factura_conceptos(factura_id);
 CREATE INDEX IF NOT EXISTS idx_conceptos_venta ON factura_conceptos(num_venta_match);
+CREATE INDEX IF NOT EXISTS idx_factura_refs_factura ON factura_referencias(factura_id, orden);
+CREATE INDEX IF NOT EXISTS idx_factura_asig_venta ON factura_asignaciones(num_venta_match, estado);
+CREATE INDEX IF NOT EXISTS idx_factura_asig_factura ON factura_asignaciones(factura_id, estado);
 CREATE INDEX IF NOT EXISTS idx_incidencias_proveedor ON incidencias(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_publicaciones_sku ON publicaciones_ml(att_seller_sku);
 CREATE INDEX IF NOT EXISTS idx_entradas_erp_carga ON entradas_erp(carga_id);
@@ -511,14 +569,17 @@ SEED_PROVEEDORES = [
     # KeepOnGreen factura a través de SUMINISTRO TRANSAMERICANO DE REFACCIONES
     # (RFC confirmado con su CFDI real el 2026-06-09; antes estaba "PENDIENTE").
     ("KEEPONGREEN", "STR910211DT2", "KG", None, None),
+    ("DIFIRSA", "MEMC860920K4A", "DIFIRSA", None, None),
 ]
 
 
 def init_database():
-    """Crea tablas y siembra los 5 proveedores conocidos."""
+    """Crea tablas y siembra los 6 proveedores conocidos."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.executescript(SCHEMA)
+
+        _migrar_asignaciones_factura(cursor)
 
         _migrar_envios_sin_fk(cursor)
         _migrar_columnas_cruce(cursor)
@@ -545,9 +606,51 @@ def init_database():
                 "INSERT INTO proveedores (nombre, rfc, codigo_bodega, contacto_email, contacto_nombre) VALUES (?, ?, ?, ?, ?)",
                 SEED_PROVEEDORES,
             )
+        else:
+            # El seed completo sólo aplica a bases vacías; esta alta idempotente
+            # incorpora DIFIRSA también en volúmenes ya existentes.
+            existente = cursor.execute(
+                "SELECT id FROM proveedores WHERE rfc=? OR codigo_bodega=?",
+                ("MEMC860920K4A", "DIFIRSA"),
+            ).fetchone()
+            if not existente:
+                cursor.execute(
+                    "INSERT INTO proveedores (nombre, rfc, codigo_bodega) VALUES (?, ?, ?)",
+                    ("DIFIRSA", "MEMC860920K4A", "DIFIRSA"),
+                )
 
         _bootstrap_admin(cursor)
         _bootstrap_proveedores(cursor)
+
+
+def _migrar_asignaciones_factura(cursor):
+    """Una venta puede ser cubierta por varios conceptos de una misma factura,
+    pero nunca por conceptos de facturas distintas. La guarda incluye cruces legacy.
+    """
+    cursor.executescript("""
+      CREATE TRIGGER IF NOT EXISTS trg_factura_asignacion_unica_insert
+      BEFORE INSERT ON factura_asignaciones
+      WHEN NEW.estado='confirmada' AND (
+        EXISTS (SELECT 1 FROM factura_asignaciones a
+                 WHERE a.num_venta_match=NEW.num_venta_match
+                   AND a.estado='confirmada' AND a.factura_id!=NEW.factura_id)
+        OR EXISTS (SELECT 1 FROM factura_conceptos fc
+                    WHERE fc.num_venta_match=NEW.num_venta_match
+                      AND fc.factura_id!=NEW.factura_id)
+      )
+      BEGIN SELECT RAISE(ABORT, 'venta ocupada por otra factura'); END;
+      CREATE TRIGGER IF NOT EXISTS trg_factura_asignacion_unica_update
+      BEFORE UPDATE OF estado, num_venta_match, factura_id ON factura_asignaciones
+      WHEN NEW.estado='confirmada' AND (
+        EXISTS (SELECT 1 FROM factura_asignaciones a
+                 WHERE a.num_venta_match=NEW.num_venta_match AND a.estado='confirmada'
+                   AND a.factura_id!=NEW.factura_id AND a.id!=NEW.id)
+        OR EXISTS (SELECT 1 FROM factura_conceptos fc
+                    WHERE fc.num_venta_match=NEW.num_venta_match
+                      AND fc.factura_id!=NEW.factura_id)
+      )
+      BEGIN SELECT RAISE(ABORT, 'venta ocupada por otra factura'); END;
+    """)
 
 
 def _migrar_multi_cuenta(cursor):

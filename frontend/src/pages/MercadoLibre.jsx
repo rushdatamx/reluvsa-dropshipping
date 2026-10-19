@@ -3,7 +3,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, Copy, Link2, RefreshCw, Store, XCircle, Zap,
 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto, mlCuentas, mlIniciarOauthCuenta, mlSyncCuenta } from '../services/api';
+import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto, mlCuentas, mlIniciarOauthCuenta, mlSyncCuenta, mlAsignarProveedorDeposito, listarProveedores } from '../services/api';
 
 const INTERVALOS = [15, 30, 60, 120, 240];
 
@@ -24,6 +24,7 @@ function Badge({ ok, children }) {
 export default function MercadoLibre() {
   const [estado, setEstado] = useState(null);
   const [cuentas, setCuentas] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
   const [notifs, setNotifs] = useState([]);
   const [authUrl, setAuthUrl] = useState(null);
   const [aviso, setAviso] = useState(null);
@@ -41,6 +42,10 @@ export default function MercadoLibre() {
     } catch {
       return null;
     }
+  }, []);
+
+  useEffect(() => {
+    listarProveedores().then(({ data }) => setProveedores(data || [])).catch(() => {});
   }, []);
 
   // Carga inicial + refresco periódico (muestra el avance de la sync en vivo).
@@ -76,6 +81,14 @@ export default function MercadoLibre() {
     setError(null);
     try { await mlSyncCuenta(cuenta, tipo); cargar(); }
     catch (err) { setError(err.response?.data?.detail || 'No se pudo iniciar la sincronización'); }
+  };
+
+  const asignarProveedorDeposito = async (cuenta, storeId, value) => {
+    setError(null);
+    try {
+      await mlAsignarProveedorDeposito(cuenta, storeId, value ? Number(value) : null);
+      await cargar();
+    } catch (err) { setError(err.response?.data?.detail || 'No se pudo guardar el proveedor del depósito'); }
   };
 
   const copiarUrl = async () => {
@@ -138,6 +151,26 @@ export default function MercadoLibre() {
             <div className="flex justify-between gap-3 items-center mb-2"><h3 className="font-semibold">Cuenta ML · {cuenta.etiqueta}</h3><Badge ok={cuenta.conectado}>{cuenta.conectado ? 'Conectada' : 'Pendiente'}</Badge></div>
             <p className="text-sm text-notion-text-secondary">{cuenta.nickname || 'Sin autorización'}{cuenta.seller_id ? ` · seller ${cuenta.seller_id}` : ''}</p>
             <p className="text-xs text-notion-text-secondary mt-2">{(cuenta.stores || []).map((s) => s.description).filter(Boolean).join(' · ') || 'Sin depósitos leídos'}</p>
+            {cuenta.clave === 'secundaria' && (cuenta.stores || []).length > 0 && (
+              <div className="mt-3 border-t border-notion-border pt-3 space-y-2">
+                <p className="text-xs font-semibold text-notion-text-secondary">Proveedor por depósito</p>
+                {cuenta.stores.map((store) => (
+                  <label key={store.store_id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-2 min-w-0"><Store size={14} className="shrink-0 text-notion-text-secondary" /><span className="truncate">{store.description || store.store_id}</span></span>
+                    <select
+                      value={store.proveedor_id || ''}
+                      onChange={(e) => asignarProveedorDeposito(cuenta.clave, store.store_id, e.target.value)}
+                      className="max-w-[190px] rounded-lg border border-notion-border bg-white px-2 py-1.5 text-xs"
+                      aria-label={`Proveedor para depósito ${store.description || store.store_id}`}
+                    >
+                      <option value="">Sin asignar</option>
+                      {proveedores.map((p) => <option key={p.id} value={p.id}>{p.codigo_bodega} — {p.nombre}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <p className="text-xs text-notion-text-secondary">Asigna “Difirsa” a DIFIRSA y sincroniza la cuenta para relacionar sus ventas.</p>
+              </div>
+            )}
             <div className="flex gap-2 mt-3">
               <button onClick={() => conectarCuenta(cuenta.clave)} className="px-3 py-1.5 border border-notion-border rounded-lg text-sm">{cuenta.conectado ? 'Reautorizar' : 'Conectar'}</button>
               <button disabled={!cuenta.conectado} onClick={() => sincronizarCuenta(cuenta.clave, 'incremental')} className="px-3 py-1.5 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm disabled:opacity-50">Sincronizar</button>

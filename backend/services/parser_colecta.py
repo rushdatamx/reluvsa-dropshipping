@@ -32,6 +32,7 @@ CRUCE_TITULO_MIN = 85             # umbral fuzzy token_set_ratio sobre el títul
 LUGAR_A_BODEGA = {
     "AG": "AG",
     "CAUPLAS": "CAUPLAS",
+    "DIFIRSA": "DIFIRSA",
     "KG": "KG",
     "KIM": "KIM",
     "VAZLO": "VAZLO",

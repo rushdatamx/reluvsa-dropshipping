@@ -6,7 +6,8 @@ import {
 import PageHeader from '../components/PageHeader';
 import {
   listarFacturas, subirFacturasMultiple, getFactura, exportarFacturasCsv,
-  descargarArchivoFactura, listarProveedores,
+  descargarArchivoFactura, listarProveedores, getConciliacionDifirsa,
+  guardarReferenciasDifirsa, proponerCrucesDifirsa, confirmarCrucesDifirsa,
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -50,6 +51,11 @@ export default function Facturas() {
   const [exportando, setExportando] = useState(false);
   const [expandida, setExpandida] = useState(null);   // factura_id expandida
   const [detalle, setDetalle] = useState({});          // { [id]: conceptos[] }
+  const [conciliaciones, setConciliaciones] = useState({});
+  const [referenciasTexto, setReferenciasTexto] = useState({});
+  const [asignacionesDraft, setAsignacionesDraft] = useState({});
+  const [guardandoCruce, setGuardandoCruce] = useState(null);
+  const [mensajeCruce, setMensajeCruce] = useState({});
 
   // Subida (rol proveedor) — múltiples XML + PDF
   const [xmlFiles, setXmlFiles] = useState([]);
@@ -89,8 +95,106 @@ export default function Facturas() {
     setExpandida(f.id);
     if (!detalle[f.id]) {
       const { data } = await getFactura(f.id);
-      setDetalle((d) => ({ ...d, [f.id]: data.conceptos }));
+      setDetalle((d) => ({ ...d, [f.id]: data }));
+      if (f.codigo_bodega === 'DIFIRSA') {
+        const { data: c } = await getConciliacionDifirsa(f.id);
+        setConciliaciones((prev) => ({ ...prev, [f.id]: c }));
+        setReferenciasTexto((prev) => ({
+          ...prev,
+          [f.id]: c.referencias.map((r) => r.valor_original).join('\n'),
+        }));
+      }
     }
+  };
+
+  const actualizarConciliacion = (id, data) => {
+    setConciliaciones((prev) => ({ ...prev, [id]: data }));
+    setAsignacionesDraft((prev) => ({
+      ...prev,
+      [id]: data.propuestas || data.asignaciones || [],
+    }));
+  };
+
+  const guardarReferencias = async (id) => {
+    setGuardandoCruce(id); setMensajeCruce((m) => ({ ...m, [id]: null }));
+    try {
+      const refs = (referenciasTexto[id] || '').split(/[\s,;/]+/).filter(Boolean);
+      const { data } = await guardarReferenciasDifirsa(id, refs);
+      setConciliaciones((prev) => ({ ...prev, [id]: data }));
+      setAsignacionesDraft((prev) => ({ ...prev, [id]: [] }));
+      setMensajeCruce((m) => ({ ...m, [id]: 'Referencias guardadas. Genera una propuesta o asigna las ventas.' }));
+    } catch (e) {
+      setMensajeCruce((m) => ({ ...m, [id]: e.response?.data?.detail || 'No se pudieron guardar las referencias.' }));
+    } finally { setGuardandoCruce(null); }
+  };
+
+  const generarPropuesta = async (id) => {
+    setGuardandoCruce(id); setMensajeCruce((m) => ({ ...m, [id]: null }));
+    try {
+      const { data } = await proponerCrucesDifirsa(id);
+      actualizarConciliacion(id, data);
+      setMensajeCruce((m) => ({ ...m, [id]: `${data.propuestas.length} asignaciones sugeridas. Revísalas antes de confirmar.` }));
+    } catch (e) {
+      setMensajeCruce((m) => ({ ...m, [id]: e.response?.data?.detail || 'No se pudo generar la propuesta.' }));
+    } finally { setGuardandoCruce(null); }
+  };
+
+  const confirmarPropuesta = async (id) => {
+    setGuardandoCruce(id); setMensajeCruce((m) => ({ ...m, [id]: null }));
+    try {
+      const conc = conciliaciones[id];
+      const conceptos = conc.conceptos || [];
+      const rows = asignacionesDraft[id] || [];
+      const payload = {
+        asignaciones: rows.map((a) => ({
+          concepto_id: a.concepto_id, num_venta: a.num_venta, cantidad: Number(a.cantidad),
+        })),
+        equivalencias: rows.flatMap((a) => {
+          const c = conceptos.find((x) => x.id === a.concepto_id);
+          const sale = c?.ventas_referenciadas.find((x) => x.num_venta === a.num_venta);
+          if (!c || !sale || (c.codigo_prov || '').trim().toUpperCase() === (sale.sku || '').trim().toUpperCase()) return [];
+          return [{ codigo_prov: c.codigo_prov, sku_ml: sale.sku }];
+        }),
+      };
+      const { data } = await confirmarCrucesDifirsa(id, payload);
+      setDetalle((prev) => ({ ...prev, [id]: data }));
+      const { data: updated } = await getConciliacionDifirsa(id);
+      setConciliaciones((prev) => ({ ...prev, [id]: updated }));
+      setAsignacionesDraft((prev) => ({ ...prev, [id]: [] }));
+      setMensajeCruce((m) => ({ ...m, [id]: 'Cruce confirmado y guardado.' }));
+      cargar();
+    } catch (e) {
+      setMensajeCruce((m) => ({ ...m, [id]: e.response?.data?.detail || 'No se pudo confirmar el cruce.' }));
+    } finally { setGuardandoCruce(null); }
+  };
+
+  const editarAsignacion = (id, conceptoId, index, campo, valor) => {
+    setAsignacionesDraft((prev) => {
+      const rows = [...(prev[id] || [])];
+      const delConcepto = rows.filter((r) => r.concepto_id === conceptoId);
+      const otro = rows.filter((r) => r.concepto_id !== conceptoId);
+      delConcepto[index] = { ...delConcepto[index], [campo]: campo === 'cantidad' ? Number(valor) : valor };
+      return { ...prev, [id]: [...otro, ...delConcepto] };
+    });
+  };
+
+  const agregarAsignacion = (id, conceptoId) => {
+    const conc = conciliaciones[id]?.conceptos.find((c) => c.id === conceptoId);
+    const selected = (asignacionesDraft[id] || []).filter((a) => a.concepto_id === conceptoId);
+    const available = conc?.ventas_referenciadas.find((v) => !selected.some((a) => a.num_venta === v.num_venta));
+    if (!available) return;
+    setAsignacionesDraft((prev) => ({
+      ...prev,
+      [id]: [...(prev[id] || []), { concepto_id: conceptoId, num_venta: available.num_venta, cantidad: 0 }],
+    }));
+  };
+
+  const quitarAsignacion = (id, conceptoId, index) => {
+    setAsignacionesDraft((prev) => {
+      const rows = (prev[id] || []).filter((a) => a.concepto_id !== conceptoId);
+      const selected = (prev[id] || []).filter((a) => a.concepto_id === conceptoId).filter((_, i) => i !== index);
+      return { ...prev, [id]: [...rows, ...selected] };
+    });
   };
 
   const onExportar = async () => {
@@ -141,8 +245,8 @@ export default function Facturas() {
     <div>
       <PageHeader
         title="Facturas"
-        subtitle={isProveedor()
-          ? 'Sube tus facturas (XML + PDF) — el sistema las cruzará automáticamente con los pedidos'
+      subtitle={isProveedor()
+          ? 'Sube tus facturas (XML + PDF) para conciliarlas con tus pedidos'
           : 'Facturas subidas por los proveedores, con su PDF/XML y las ventas a las que cruzan'}
       />
 
@@ -338,6 +442,88 @@ export default function Facturas() {
                     <tr className="bg-notion-bg-subtle">
                       <td></td>
                       <td colSpan="6" className="px-4 py-3">
+                        {f.codigo_bodega === 'DIFIRSA' && conciliaciones[f.id] && (
+                          <section className="mb-5 rounded-xl border border-amber-200 bg-white p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <h4 className="font-semibold">Revisión DIFIRSA</h4>
+                                <p className="mt-1 text-xs text-notion-text-secondary">
+                                  Revisa las referencias leídas del PDF y distribuye todas las unidades. Los cambios se aplican sólo al confirmar.
+                                </p>
+                              </div>
+                              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                                OCR: {conciliaciones[f.id].ocr?.estado || 'sin lectura'}
+                              </span>
+                            </div>
+                            {isAdmin() && (
+                              <>
+                                <label className="mt-4 block text-xs font-semibold text-notion-text-secondary">
+                                  Referencias de venta (una por línea; se acepta el sufijo o el número completo)
+                                </label>
+                                <textarea value={referenciasTexto[f.id] || ''}
+                                  onChange={(e) => setReferenciasTexto((prev) => ({ ...prev, [f.id]: e.target.value }))}
+                                  rows={3} className="mt-1 w-full rounded-lg border border-notion-border p-2 font-mono text-xs" />
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button onClick={() => guardarReferencias(f.id)} disabled={guardandoCruce === f.id}
+                                    className="rounded-lg border border-notion-border px-3 py-1.5 text-xs font-semibold hover:bg-notion-bg-subtle disabled:opacity-50">
+                                    Guardar referencias
+                                  </button>
+                                  <button onClick={() => generarPropuesta(f.id)} disabled={guardandoCruce === f.id}
+                                    className="rounded-lg bg-reluvsa-black px-3 py-1.5 text-xs font-semibold text-reluvsa-yellow disabled:opacity-50">
+                                    Generar sugerencia
+                                  </button>
+                                </div>
+                                <div className="mt-4 space-y-3">
+                                  {conciliaciones[f.id].conceptos.map((c) => {
+                                    const rows = (asignacionesDraft[f.id] || []).filter((a) => a.concepto_id === c.id);
+                                    const asignado = rows.reduce((s, a) => s + (Number(a.cantidad) || 0), 0);
+                                    const restante = Number(c.cantidad || 0) - asignado;
+                                    return (
+                                      <div key={c.id} className="rounded-lg border border-notion-border p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                          <div><span className="font-mono font-semibold">{c.codigo_prov}</span><span className="ml-2 text-notion-text-secondary">{c.descripcion}</span></div>
+                                          <span className={Math.abs(restante) < 0.000001 ? 'font-semibold text-success' : 'font-semibold text-warning'}>
+                                            {asignado} / {c.cantidad} unidades
+                                          </span>
+                                        </div>
+                                        {rows.map((a, index) => (
+                                          <div key={`${c.id}-${index}`} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_100px_auto]">
+                                            <select value={a.num_venta || ''} onChange={(e) => editarAsignacion(f.id, c.id, index, 'num_venta', e.target.value)}
+                                              className="min-w-0 rounded-lg border border-notion-border px-2 py-1.5 text-xs">
+                                              <option value="">Selecciona venta de las referencias</option>
+                                              {c.ventas_referenciadas.map((v) => (
+                                                <option key={v.num_venta} value={v.num_venta}>
+                                                  {(v.num_venta_origen || v.num_venta)} · {v.sku || 'sin SKU'} · {v.unidades ?? '?'} u. · {v.titulo || ''}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            <input type="number" min="0" step="1" value={a.cantidad ?? 0}
+                                              onChange={(e) => editarAsignacion(f.id, c.id, index, 'cantidad', e.target.value)}
+                                              className="rounded-lg border border-notion-border px-2 py-1.5 text-xs" aria-label="Unidades asignadas" />
+                                            <button onClick={() => quitarAsignacion(f.id, c.id, index)}
+                                              className="rounded-lg border border-notion-border px-2 py-1.5 text-xs hover:bg-red-50 hover:text-danger">Quitar</button>
+                                          </div>
+                                        ))}
+                                        <button onClick={() => agregarAsignacion(f.id, c.id)}
+                                          className="mt-2 text-xs font-semibold text-blue-700 hover:underline">+ Repartir en otra venta</button>
+                                        {c.candidatas.length === 0 && (
+                                          <p className="mt-2 text-xs text-warning">Sin SKU igual o equivalencia conocida. Si eliges una venta, se guardará la equivalencia para futuras facturas.</p>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {mensajeCruce[f.id] && <p className="mt-3 text-xs text-notion-text-secondary">{mensajeCruce[f.id]}</p>}
+                                <div className="mt-3 flex justify-end">
+                                  <button onClick={() => confirmarPropuesta(f.id)} disabled={guardandoCruce === f.id}
+                                    className="rounded-lg bg-reluvsa-black px-4 py-2 text-xs font-semibold text-reluvsa-yellow disabled:opacity-50">
+                                    {guardandoCruce === f.id ? 'Guardando…' : 'Confirmar cruces revisados'}
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </section>
+                        )}
                         <div className="text-xs font-semibold text-notion-text-secondary mb-2">
                           Conceptos de la factura y la venta a la que cruzan
                         </div>
@@ -354,7 +540,7 @@ export default function Facturas() {
                             </tr>
                           </thead>
                           <tbody>
-                            {(detalle[f.id] || []).map((c) => (
+                            {(detalle[f.id]?.conceptos || []).map((c) => (
                               <tr key={c.id} className="border-t border-notion-border">
                                 <td className="py-1.5 pr-3 font-mono">{c.codigo_prov || '—'}</td>
                                 <td className="py-1.5 pr-3 font-mono">
@@ -367,8 +553,16 @@ export default function Facturas() {
                                 </td>
                                 <td className="py-1.5 pr-3 max-w-[260px] truncate" title={c.descripcion}>{c.descripcion || '—'}</td>
                                 <td className="py-1.5 pr-3 text-right">{c.importe != null ? `$${Number(c.importe).toFixed(2)}` : ''}</td>
-                                <td className="py-1.5 pr-3 font-mono">{c.num_venta_match || <span className="text-danger">sin cruce</span>}</td>
-                                <td className="py-1.5 pr-3 max-w-[260px] truncate" title={c.venta_titulo}>{c.venta_titulo || '—'}</td>
+                                <td className="py-1.5 pr-3 font-mono">
+                                  {c.asignaciones?.length
+                                    ? c.asignaciones.map((a) => <div key={a.num_venta}>{a.num_venta_origen || a.num_venta} × {a.cantidad}</div>)
+                                    : c.num_venta_match || <span className="text-danger">sin cruce</span>}
+                                </td>
+                                <td className="py-1.5 pr-3 max-w-[260px] truncate" title={c.asignaciones?.map((a) => a.titulo).filter(Boolean).join(' · ') || c.venta_titulo}>
+                                  {c.asignaciones?.length
+                                    ? c.asignaciones.map((a) => <div key={a.num_venta}>{a.titulo || a.sku || '—'}</div>)
+                                    : c.venta_titulo || '—'}
+                                </td>
                                 <td className="py-1.5">
                                   {c.conflicto_factura ? (
                                     <div>
