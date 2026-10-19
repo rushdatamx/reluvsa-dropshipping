@@ -20,7 +20,7 @@ from services.generador_plantilla import (
     generar_filas_con_reporte, escribir_xlsx,
 )
 from services.parser_catalogo import (cruzar, cruzar_variantes, leer_catalogo_detallado,
-                                      leer_publicaciones)
+                                      leer_publicaciones, normalizar_titulo)
 from services.perfiles_catalogo import perfil_de
 import openpyxl
 from services.precio_publicacion import ParametrosPrecio, calcular_precio
@@ -41,7 +41,7 @@ def check(nombre, cond, extra=""):
 
 print("\n=== 1. HERENCIA de marca y modelo ===")
 # 🔴 'V8 6.0L 2007-2009' NO es un modelo llamado V8: es el mismo Avalanche con
-# otro motor. Sin herencia el título sale 'Bomba de agua P/ V8 6.0' — basura.
+# otro motor. Sin herencia el título sale 'Bomba de agua para V8 6.0' — basura.
 r = parse_aplicaciones("GM AVALANCHE V8 5.3L 2007-2010 | V8 6.0L 2007-2009 | SILVERADO 1500 V8 4.8L 2007-2010")
 check("un fragmento sin modelo hereda marca Y modelo",
       r.aplicaciones[1].vehiculo == "GM AVALANCHE", r.aplicaciones[1].vehiculo)
@@ -142,6 +142,9 @@ largo = [{"clave": "K", "linea": "KIT BANDA DISTRIBUCION C/BOMBA", "costo": 100.
           "aplicaciones": "VOLKSWAGEN CROSSFOX SPORTLINE L4 1.6L 2005-2018"}]
 f = generar_filas(largo, cfg)[0]
 check(f"título recortado a {MAX_TITULO}", len(f.titulo) <= MAX_TITULO, f"{len(f.titulo)}: {f.titulo}")
+check("título KG usa para", " para " in f.titulo, f.titulo)
+check("P/ histórico y para nuevo se normalizan igual",
+      normalizar_titulo("Filtro P/ Ford Focus") == normalizar_titulo("Filtro para Ford Focus"))
 check("no se corta a media palabra (suelta años del final)", not f.titulo.endswith(("-", " 2")), f.titulo)
 
 print("\n=== 7. DESCRIPCIÓN: cabeza variable + cuerpo fijo ===")

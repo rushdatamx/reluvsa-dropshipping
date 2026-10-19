@@ -166,7 +166,7 @@ check("costos contradictorios no se eligen arbitrariamente",
       rc.sku_precio_inconsistente == 1 and
       next(p for p in rc.piezas if p["clave"] == "INC")["costo"] is None)
 check("la descripción base queda al final", f500.descripcion.endswith("BASE RELUVSA"))
-check("All genera el título universal exacto", fterm.titulo == "Termostato P/ Universal", fterm.titulo)
+check("All genera el título universal exacto", fterm.titulo == "Termostato para Universal", fterm.titulo)
 
 print("\n=== 3. TÍTULOS, EXPANSIÓN Y DEDUPLICACIÓN ===")
 wa = openpyxl.Workbook(); sa = wa.active; sa.append(HEADERS)
@@ -176,10 +176,12 @@ sa.append(fila("DUP", fecha="2020", inicio=2020, fin=2020))
 sa.append(fila("DUP", fecha="2020", inicio=2020, fin=2020))
 ra = leer_catalogo_detallado(guardar(wa), perfil_de("CAUPLAS"))
 fa, repa = generar_filas_con_reporte(ra.piezas, cfg)
+check("títulos CAUPLAS usan para", all(" para " in f.titulo for f in fa), [f.titulo for f in fa])
 alias = [f.titulo for f in fa if f.sku == "ALIAS"]
 check("usa sólo alias controlado cuando el nombre completo no cabe",
-      any(t.startswith("Mang. Circulación Aire P/") for t in alias), alias)
-check("genera rango y bloques cronológicos", any("2010/2014" in t for t in alias) and len(alias) >= 3, alias)
+      any(t.startswith("Mang. Circulación Aire para") for t in alias), alias)
+check("si el rango excede 60, divide en años sin recortar",
+      len(alias) == 5 and {t.rsplit(" ", 1)[-1] for t in alias} == {"2010", "2011", "2012", "2013", "2014"}, alias)
 check("todos los títulos respetan estrictamente 60 caracteres", all(len(f.titulo) <= 60 for f in fa))
 check("deduplica por SKU + título normalizado", sum(f.sku == "DUP" for f in fa) == 1)
 

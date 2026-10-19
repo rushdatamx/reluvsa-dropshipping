@@ -68,7 +68,10 @@ def _normalizar(val) -> str:
 
 
 def normalizar_titulo(val) -> str:
-    return _normalizar(val)
+    # Los títulos históricos usan ``P/``; tratarlo igual que el conector nuevo
+    # ``para`` evita reproponer una publicación sólo por el cambio de formato.
+    texto = re.sub(r"\bp\s*/\s*", "para ", _texto(val), flags=re.IGNORECASE)
+    return _normalizar(texto)
 
 
 _PALABRAS_TITULO_IGNORABLES = {"de", "del", "la", "el", "para", "por", "p",

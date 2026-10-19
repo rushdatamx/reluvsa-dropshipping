@@ -20,7 +20,7 @@ Las reglas fijas son:
 2. Un archivo con huella fuerte pero incompleto falla con los encabezados faltantes.
 3. El parser KG conserva su ruta y comportamiento anteriores.
 4. `fecha` (K) valida `inicio`/`fin` (L–M); `compatibilidad` (AB) no da los años.
-5. `All` significa compatibilidad universal y genera `Producto P/ Universal`.
+5. `All` significa compatibilidad universal y genera `Producto para Universal`.
 6. Una fila con años inválidos o contradictorios se excluye y reporta; no se adivina.
 7. Un costo ausente, no cacheado o contradictorio queda en `None`, nunca en cero.
 8. La columna O se ignora porque sólo contiene nombres `.png`; las imágenes llegan
@@ -161,8 +161,8 @@ seleccionados; no debe generar categorías hermanas que el usuario no eligió.
 
 Una compatibilidad normal intenta esta cascada:
 
-1. `I P/ B C E años`.
-2. Si supera 60 caracteres, `I P/ C E años`.
+1. `I para B C E años`.
+2. Si supera 60 caracteres, `I para C E años`.
 3. Si todavía supera 60, abreviar únicamente I con un alias controlado.
 
 Aliases permitidos:
@@ -179,7 +179,7 @@ Aliases permitidos:
 Nunca se recortan modelo, cilindrada, años o palabras. Si ninguna alternativa cabe,
 la variante se excluye con `Título excede 60 caracteres`.
 
-Una fila universal genera un solo título `Producto P/ Universal`, usando el alias
+Una fila universal genera un solo título `Producto para Universal`, usando el alias
 únicamente si fuera indispensable para respetar el límite.
 
 ## 8. Expansión cronológica

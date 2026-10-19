@@ -110,7 +110,7 @@ su perfil independiente.
 - Una compatibilidad de un año genera una publicación. Con dos o más genera el
   rango `Inicio/Fin` y bloques cronológicos balanceados; los bloques se
   subdividen cuando haga falta para conservar el límite de 60 caracteres.
-- El título es `Producto P/ Armadora Modelo Cilindrada Años`. Nunca lleva OEM ni
+- El título es `Producto para Armadora Modelo Cilindrada Años`. Nunca lleva OEM ni
   Clave. Para caber, primero omite Armadora y después usa alias controlados del
   producto; nunca corta Modelo, motor, años o palabras.
 - La descripción reúne todos los OEM, guías de compradores, especificaciones y
@@ -152,9 +152,9 @@ Principales" es una publicación distinta, el SKU / precio / descripción /
 imágenes se repiten **idénticos** y **lo único que cambia es el TÍTULO**.
 
 ```
-39300-4A800-Z  ->  Sensor Map ... P/ Truck H200 2.5 2016 2017 2018
-               ->  Sensor Map ... P/ Truck H200 2.5 2019 2020
-               ->  Sensor Map ... P/ Solati H350 2020 2021 2022
+39300-4A800-Z  ->  Sensor Map ... para Truck H200 2.5 2016 2017 2018
+               ->  Sensor Map ... para Truck H200 2.5 2019 2020
+               ->  Sensor Map ... para Solati H350 2020 2021 2022
 ```
 
 Así la misma pieza compite por más búsquedas en ML.
@@ -175,7 +175,7 @@ GM AVALANCHE V8 5.3L 2007-2010 | V8 6.0L 2007-2009 | SILVERADO 1500 V8 4.8L ...
 ```
 
 `V8 6.0L 2007-2009` **no es un modelo llamado "V8"**: es el mismo Avalanche con
-otro motor. Sin la herencia el título sale `Bomba de agua P/ V8 6.0` — basura.
+otro motor. Sin la herencia el título sale `Bomba de agua para V8 6.0` — basura.
 
 ⚠️ **Pero si el fragmento trae su PROPIA marca, ésta REEMPLAZA a la heredada:**
 en `ST CORDOBA … | IBIZA … | VW CROSSFOX …` el Crossfox es un **VW, no un Seat**.

@@ -9,7 +9,7 @@ ARGENPARTS se identifica en el portal como `AG` y se muestra como **ARGENPARTS**
 
 `Código` es el SKU; `Distribuidor` es costo sin IVA y `stock` es un entero obligatorio mayor o igual a cero. Costo o stock distintos, vacíos o inválidos en filas del mismo SKU excluyen el SKU completo. Una fila válida es una compatibilidad; años ausentes, inválidos o invertidos se excluyen y se reportan.
 
-Las equivalencias SYD/GROB/KYB/BOGE/VAZLO y todas las compatibilidades del SKU se consolidan en la descripción. Cada rango válido `Desde–Hasta` se expande a una publicación por año: `2012–2015` genera 2012, 2013, 2014 y 2015. El título es `Producto Posición P/ Marca Aplicación Año`; siempre contiene un solo año, nunca el rango. Usa sólo abreviaturas controladas. Cuando es necesario se quita el paréntesis de Aplicación sólo del título. Si aún supera 60 caracteres se excluye: nunca se corta una palabra. La descripción conserva el texto completo.
+Las equivalencias SYD/GROB/KYB/BOGE/VAZLO y todas las compatibilidades del SKU se consolidan en la descripción. Cada rango válido `Desde–Hasta` se expande a una publicación por año: `2012–2015` genera 2012, 2013, 2014 y 2015. El título es `Producto Posición para Marca Aplicación Año`; siempre contiene un solo año, nunca el rango. Usa sólo abreviaturas controladas. Cuando es necesario se quita el paréntesis de Aplicación sólo del título. Si aún supera 60 caracteres se excluye: nunca se corta una palabra. La descripción conserva el texto completo.
 
 La deduplicación de AG es por SKU + producto + posición + marca + aplicación + año. Así dos filas equivalentes del master no producen dos publicaciones anuales.
 

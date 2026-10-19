@@ -213,8 +213,8 @@ def _titulo_master(producto, compat, anios, permitir_exceso=False) -> Optional[s
     motor = _cilindrada(compat.get("motor"))
     sufijo = " ".join(x for x in (modelo, motor, anios) if x)
     alias = ALIAS_PRODUCTO.get(_sin_acentos(producto), producto)
-    intentos = [f"{producto} P/ {armadora} {sufijo}", f"{producto} P/ {sufijo}",
-                f"{alias} P/ {sufijo}"]
+    intentos = [f"{producto} para {armadora} {sufijo}", f"{producto} para {sufijo}",
+                f"{alias} para {sufijo}"]
     ultimo = ""
     for titulo in intentos:
         titulo = re.sub(r"\s+", " ", titulo).strip()
@@ -252,13 +252,13 @@ def _titulo_cauplas(producto, compat, anios, permitir_exceso=False) -> Optional[
     cilindrada = " ".join(str(compat.get("motor") or "").split())
     if compat.get("universal"):
         sufijo = "Universal"
-        intentos = [f"{producto} P/ {sufijo}"]
+        intentos = [f"{producto} para {sufijo}"]
     else:
         sufijo = " ".join(x for x in (modelo, cilindrada, anios) if x)
-        intentos = [f"{producto} P/ {armadora} {sufijo}", f"{producto} P/ {sufijo}"]
+        intentos = [f"{producto} para {armadora} {sufijo}", f"{producto} para {sufijo}"]
     alias = ALIAS_PRODUCTO_CAUPLAS.get(_sin_acentos(producto))
     if alias:
-        intentos.append(f"{alias} P/ {sufijo}")
+        intentos.append(f"{alias} para {sufijo}")
     ultimo = ""
     for titulo in intentos:
         titulo = re.sub(r"\s+", " ", titulo).strip()
@@ -309,9 +309,9 @@ def _titulo_kims(producto, compat, permitir_exceso=False) -> Optional[str]:
     inicio, fin = compat["inicio"], compat["fin"]
     anios = str(inicio) if inicio == fin else f"{inicio}/{fin}"
     intentos = [
-        (producto, "P/", armadora, modelo, version, motor, anios),
-        (producto, "P/", modelo, version, motor, anios),
-        (producto, "P/", modelo, motor, anios),
+        (producto, "para", armadora, modelo, version, motor, anios),
+        (producto, "para", modelo, version, motor, anios),
+        (producto, "para", modelo, motor, anios),
     ]
     ultimo = ""
     for partes in intentos:
@@ -344,9 +344,9 @@ def _titulo_gonher(producto, compat, permitir_exceso=False) -> Optional[str]:
     motor = " ".join(str(compat.get("motor") or "").split())
     anios = " ".join(str(compat.get("anios") or "").split())
     intentos = [
-        (producto, "P/", marca, modelo, motor, anios),
-        (producto, "P/", marca, modelo, _motor_gonher_reducido(motor), anios),
-        (producto, "P/", modelo, _motor_gonher_reducido(motor), anios),
+        (producto, "para", marca, modelo, motor, anios),
+        (producto, "para", marca, modelo, _motor_gonher_reducido(motor), anios),
+        (producto, "para", modelo, _motor_gonher_reducido(motor), anios),
     ]
     ultimo = ""
     for partes in intentos:
@@ -366,10 +366,10 @@ def _anios_gonher(compat):
 
 
 def _titular(nombre_pieza: str, app: Aplicacion) -> str:
-    """Arma el título como lo escribe Gaby: 'Pieza P/ Coche Motor Años'.
+    """Arma el título: 'Pieza para Coche Motor Años'.
 
     Formato copiado de su plantilla real:
-        'Sensor Map De Aire Admision P/ Truck H200 2.5 2016 2017 2018'
+        'Sensor Map De Aire Admision para Truck H200 2.5 2016 2017 2018'
     Se recorta a 60 caracteres (tope de ML) quitando años del final, nunca a
     media palabra: un título cortado se ve como error en la publicación.
     """
@@ -383,7 +383,7 @@ def _titular(nombre_pieza: str, app: Aplicacion) -> str:
         if m:
             litros = m.group(1).replace(",", ".")
 
-    cabeza = f"{pieza} P/ {vehiculo}".strip()
+    cabeza = f"{pieza} para {vehiculo}".strip()
     if litros:
         cabeza = f"{cabeza} {litros}"
 
@@ -531,7 +531,7 @@ def _titulo_ag(producto, compat, anio, permitir_exceso=False):
     posicion = " ".join(str(compat.get("posicion") or "").split())
     marca = " ".join(str(compat.get("marca") or "").split())
     aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
-    def armar(prod, pos, app): return " ".join(x for x in (prod, pos, "P/", marca, app, str(anio)) if x)
+    def armar(prod, pos, app): return " ".join(x for x in (prod, pos, "para", marca, app, str(anio)) if x)
     intentos = [(producto, posicion, aplicacion),
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto), posicion, aplicacion),
         (ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto),

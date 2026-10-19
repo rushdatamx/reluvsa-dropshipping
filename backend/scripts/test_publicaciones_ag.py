@@ -38,7 +38,7 @@ check("rango AG genera exactamente una publicación por año", len(focus_izquier
 check("títulos AG llevan un solo año, nunca Desde-Hasta", all(
       x.titulo.rsplit(" ", 1)[-1] == x.aplicacion and "-" not in x.titulo.rsplit(" ", 1)[-1]
       for x in filas))
-check("títulos AG no exceden 60 y conservan P/", all(len(x.titulo) <= 60 and "P/" in x.titulo for x in filas))
+check("títulos AG no exceden 60 y conservan para", all(len(x.titulo) <= 60 and " para " in x.titulo for x in filas))
 check("descripción conserva notas parentéticas", "(Europa)" in filas[0].descripcion)
 
 # La identidad anual es SKU + producto + posición + marca + aplicación + año,

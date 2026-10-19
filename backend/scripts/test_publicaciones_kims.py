@@ -59,6 +59,7 @@ cfg = ConfiguracionProveedor("KIM", descripcion_base="BASE RELUVSA", tipo_cambio
 filas, reporte = generar_filas_con_reporte(lectura.piezas, cfg)
 check("genera una publicación por rango", len(filas) == 2, len(filas))
 check("títulos no exceden 60", all(len(f.titulo) <= 60 for f in filas))
+check("títulos KIM usan para", all(" para " in f.titulo for f in filas))
 check("título conserva producto modelo motor y años", "Bomba de Agua" in filas[0].titulo and "F-150" in filas[0].titulo and "V8 5.0L" in filas[0].titulo and "2018/2020" in filas[0].titulo, filas[0].titulo)
 check("descripción consolida datos y base", all(x in filas[0].descripcion for x in ("OEM-A", "Gasolina", "Incluye empaque", "Delantera", "BASE RELUVSA", "Nissan NP300 2021")))
 esperado = calcular_precio(10 * 18.5, "Bomba De Agua", cfg.params_precio)

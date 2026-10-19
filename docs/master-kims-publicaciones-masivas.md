@@ -27,7 +27,7 @@ Por SKU se consolidan OEM (`alterna_1`–`alterna_4`, columnas B:E; `original` e
 comentarios, posiciones, sistemas, fotos y todas las compatibilidades. Cilindros,
 tipo, múltiplo, dimensiones y UPC no se exportan en esta versión.
 
-Cada rango produce un título `Producto P/ Armadora Modelo Versión Motor Años`.
+Cada rango produce un título `Producto para Armadora Modelo Versión Motor Años`.
 Si no cabe en 60 caracteres se omite armadora; después, versión. Producto,
 modelo, motor presente y años nunca se eliminan ni se cortan. Si aun así no cabe,
 la variante se excluye y queda en el reporte de errores.
