@@ -144,6 +144,8 @@ export const mlSyncAuto = (payload) => api.post('/ml/sync-auto', payload);
 export const mlNotificaciones = (limit = 20) =>
   api.get('/webhooks/mercadolibre/recientes', { params: { limit } });
 export const mlCuentas = () => api.get('/ml/cuentas');
+export const mlSyncAutoCuenta = (cuenta, payload) =>
+  api.patch(`/ml/cuentas/${encodeURIComponent(cuenta)}/sync-auto`, payload);
 export const mlAsignarProveedorDeposito = (cuenta, storeId, proveedor_id) =>
   api.patch(`/ml/cuentas/${encodeURIComponent(cuenta)}/depositos/${encodeURIComponent(storeId)}`, { proveedor_id });
 export const mlIniciarOauthCuenta = (cuenta) => api.post(`/ml/cuentas/${encodeURIComponent(cuenta)}/oauth/iniciar`);

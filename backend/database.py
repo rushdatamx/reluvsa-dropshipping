@@ -442,7 +442,7 @@ CREATE TABLE IF NOT EXISTS ml_cuentas (
     nickname TEXT,
     seller_id TEXT,
     activo INTEGER NOT NULL DEFAULT 1,
-    sync_activo INTEGER NOT NULL DEFAULT 0,
+    sync_activo INTEGER NOT NULL DEFAULT 1,
     sync_intervalo_minutos INTEGER NOT NULL DEFAULT 30,
     creado_en TEXT NOT NULL,
     actualizado_en TEXT NOT NULL
@@ -667,6 +667,17 @@ def _migrar_multi_cuenta(cursor):
            VALUES (?, ?, ?, ?) ON CONFLICT(clave) DO NOTHING""",
         [("principal", "Principal", ahora, ahora), ("secundaria", "Secundaria", ahora, ahora)],
     )
+    # La cuenta secundaria ahora hereda el comportamiento automático de la
+    # principal. Se migra una sola vez para no reactivar la opción si un admin
+    # la pausa posteriormente desde el portal.
+    if not cursor.execute(
+        "SELECT 1 FROM ml_config WHERE clave='migracion_sync_auto_cuentas_v1'"
+    ).fetchone():
+        cursor.execute("UPDATE ml_cuentas SET sync_activo=1 WHERE activo=1")
+        cursor.execute(
+            "INSERT INTO ml_config (clave, valor, actualizado_en) VALUES (?, ?, ?)",
+            ("migracion_sync_auto_cuentas_v1", "1", ahora),
+        )
     for tabla, origen, indice in (
         ("ventas_ml", "num_venta_origen", "idx_ventas_cuenta_origen"),
         ("envios_colecta", "num_envio_origen", "idx_envios_cuenta_origen"),

@@ -3,7 +3,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, Copy, Link2, RefreshCw, Store, XCircle, Zap,
 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto, mlCuentas, mlIniciarOauthCuenta, mlSyncCuenta, mlAsignarProveedorDeposito, listarProveedores } from '../services/api';
+import { mlEstado, mlIniciarOauth, mlNotificaciones, mlSync, mlSyncAuto, mlCuentas, mlIniciarOauthCuenta, mlSyncCuenta, mlSyncAutoCuenta, mlAsignarProveedorDeposito, listarProveedores } from '../services/api';
 
 const INTERVALOS = [15, 30, 60, 120, 240];
 
@@ -83,6 +83,14 @@ export default function MercadoLibre() {
     catch (err) { setError(err.response?.data?.detail || 'No se pudo iniciar la sincronización'); }
   };
 
+  const configurarSyncAutoCuenta = async (cuenta, payload) => {
+    setError(null);
+    try {
+      await mlSyncAutoCuenta(cuenta, payload);
+      await cargar();
+    } catch (err) { setError(err.response?.data?.detail || 'No se pudo actualizar la sincronización automática'); }
+  };
+
   const asignarProveedorDeposito = async (cuenta, storeId, value) => {
     setError(null);
     try {
@@ -151,6 +159,33 @@ export default function MercadoLibre() {
             <div className="flex justify-between gap-3 items-center mb-2"><h3 className="font-semibold">Cuenta ML · {cuenta.etiqueta}</h3><Badge ok={cuenta.conectado}>{cuenta.conectado ? 'Conectada' : 'Pendiente'}</Badge></div>
             <p className="text-sm text-notion-text-secondary">{cuenta.nickname || 'Sin autorización'}{cuenta.seller_id ? ` · seller ${cuenta.seller_id}` : ''}</p>
             <p className="text-xs text-notion-text-secondary mt-2">{(cuenta.stores || []).map((s) => s.description).filter(Boolean).join(' · ') || 'Sin depósitos leídos'}</p>
+            {cuenta.clave !== 'principal' && <div className="mt-3 rounded-lg bg-gray-50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(cuenta.sync_activo)}
+                    disabled={!cuenta.conectado}
+                    onChange={(e) => configurarSyncAutoCuenta(cuenta.clave, { activo: e.target.checked })}
+                    className="h-4 w-4 accent-reluvsa-black"
+                  />
+                  <span>Sincronización automática</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-notion-text-secondary">
+                  Cada
+                  <select
+                    value={cuenta.sync_intervalo_minutos || 30}
+                    disabled={!cuenta.conectado || !cuenta.sync_activo}
+                    onChange={(e) => configurarSyncAutoCuenta(cuenta.clave, { intervalo_minutos: Number(e.target.value) })}
+                    className="rounded-md border border-notion-border bg-white px-2 py-1 text-sm text-notion-text"
+                    aria-label={`Intervalo automático para cuenta ${cuenta.etiqueta}`}
+                  >
+                    {INTERVALOS.map((minutos) => <option key={minutos} value={minutos}>{minutos < 60 ? `${minutos} min` : `${minutos / 60} h`}</option>)}
+                  </select>
+                </label>
+              </div>
+              <p className="mt-1 text-xs text-notion-text-secondary">La cuenta principal sincroniza cada 30 minutos. La automática inicia después de la primera sincronización manual.</p>
+            </div>}
             {cuenta.clave === 'secundaria' && (cuenta.stores || []).length > 0 && (
               <div className="mt-3 border-t border-notion-border pt-3 space-y-2">
                 <p className="text-xs font-semibold text-notion-text-secondary">Proveedor por depósito</p>
