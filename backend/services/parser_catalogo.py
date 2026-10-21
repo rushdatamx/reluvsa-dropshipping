@@ -177,8 +177,9 @@ def _titulo_cubre_ag(titulo, compat) -> bool:
     llamador), producto, posición, marca, aplicación y año siguen siendo
     identificables. Un campo vacío o ambiguo deja la variante pendiente.
     """
-    anio = compat.get("inicio")
-    if not isinstance(anio, int) or anio not in _anios_en_titulo(titulo):
+    anios = compat.get("anios_cubiertos") or [compat.get("inicio")]
+    anios_titulo = _anios_en_titulo(titulo)
+    if not anios or any(not isinstance(anio, int) for anio in anios) or not set(anios).issubset(anios_titulo):
         return False
     titulo_normalizado = _normalizar_titulo_ag(titulo)
     producto = compat.get("producto", "")
@@ -190,6 +191,13 @@ def _titulo_cubre_ag(titulo, compat) -> bool:
     if not _contiene_frase(titulo_normalizado, _normalizar_titulo_ag(producto)):
         return False
     if not _contiene_frase(titulo_normalizado, _normalizar_titulo_ag(posicion)):
+        return False
+    posicion_titulo = set(_tokens_semanticos(titulo_normalizado))
+    posicion_esperada = set(_tokens_semanticos(_normalizar_titulo_ag(posicion)))
+    if (("izquierdo" in posicion_titulo and "izquierdo" not in posicion_esperada) or
+        ("derecho" in posicion_titulo and "derecho" not in posicion_esperada) or
+        ("delantero" in posicion_titulo and "delantero" not in posicion_esperada) or
+        ("trasero" in posicion_titulo and "trasero" not in posicion_esperada)):
         return False
     if not _contiene_frase(titulo_normalizado, marca):
         return False
@@ -1075,7 +1083,9 @@ def cruzar_variantes(filas, publicados):
             # GONHER y AG no dependen de que el título nuevo sea idéntico al
             # histórico: un rango cubre sus años, pero sólo si conserva todos
             # los campos que identifican esa compatibilidad.
-            par = (fila.sku.upper(), normalizar_titulo(fila.titulo))
+            par = (fila.sku.upper(), normalizar_titulo(fila.titulo),
+                   tuple(fila.compatibilidad.get("anios_cubiertos", ()))
+                   if fila.compatibilidad.get("formato") == "master_ag" else None)
             if par in vistos:
                 deduplicadas += 1
                 continue

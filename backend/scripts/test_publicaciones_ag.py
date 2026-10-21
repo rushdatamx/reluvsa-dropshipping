@@ -31,13 +31,13 @@ check("Código numérico conserva SKU textual", r.piezas[0]["clave"] == "1234")
 check("consolida equivalencias y compatibilidades", len(r.piezas[0]["compatibilidades"]) == 2 and r.piezas[0]["equivalencias"]["SYD"] == ["S1", "S2"])
 check("años invertidos se excluyen y reportan", r.compatibilidades_invalidas == 1 and r.errores)
 filas, reporte = generar_filas_con_reporte(r.piezas, ConfiguracionProveedor(codigo_bodega="AG", marca="ARGENPARTS"))
-check("precio usa costo antes de IVA y genera variantes", len(filas) == 7 and filas[0].precio is not None)
+check("precio usa costo antes de IVA y genera variantes", len(filas) == 6 and filas[0].precio is not None)
 focus_izquierdo = [x for x in filas if x.sku == "1234" and x.compatibilidad["posicion"] == "Delantero izquierdo"]
-check("rango AG genera exactamente una publicación por año", len(focus_izquierdo) == 4 and
-      {x.aplicacion for x in focus_izquierdo} == {"2012", "2013", "2014", "2015"})
-check("títulos AG llevan un solo año, nunca Desde-Hasta", all(
-      x.titulo.rsplit(" ", 1)[-1] == x.aplicacion and "-" not in x.titulo.rsplit(" ", 1)[-1]
-      for x in filas))
+check("rango AG genera rango completo y dos bloques balanceados", len({x.titulo for x in focus_izquierdo}) == 3 and
+      any("2012-2015" in x.titulo for x in focus_izquierdo) and
+      any("2012 2013" in x.titulo for x in focus_izquierdo) and
+      any("2014 2015" in x.titulo for x in focus_izquierdo))
+check("cada título agrupado aparece una sola vez", len(focus_izquierdo) == len({x.titulo for x in focus_izquierdo}) == 3)
 check("títulos AG no exceden 60 y conservan para", all(len(x.titulo) <= 60 and " para " in x.titulo for x in filas))
 check("descripción conserva notas parentéticas", "(Europa)" in filas[0].descripcion)
 
@@ -52,7 +52,7 @@ pieza_duplicada = {
     ], "equivalencias": {},
 }
 filas_dup, reporte_dup = generar_filas_con_reporte([pieza_duplicada], ConfiguracionProveedor("AG", marca="ARGENPARTS"))
-check("deduplica por SKU + compatibilidad + año", len(filas_dup) == 2 and reporte_dup["deduplicadas"] == 2)
+check("deduplica por SKU + compatibilidad + título agrupado", len(filas_dup) == 3 and reporte_dup["deduplicadas"] == 3)
 
 # El reporte ML puede conservar títulos AG históricos con rango. Debe cubrir
 # cada año sólo cuando todos los campos de la compatibilidad siguen presentes.
@@ -75,7 +75,7 @@ pubrow("AG-CRUCE", "Amort. Del. Izq. P/ Ford Focus 2012-2015")
 rp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); rp.close(); pub.save(rp.name)
 publicados = leer_publicaciones(rp.name); os.unlink(rp.name)
 cruzado = cruzar_variantes(filas_cruce, publicados)
-check("un rango histórico AG cubre cada año contenido", {x.aplicacion for x in cruzado["existentes"]} == {"2012", "2013", "2014", "2015"})
+check("un rango histórico AG cubre rango y bloques contenidos", len([x for x in cruzado["existentes"] if x.compatibilidad["posicion"] == "Delantero izquierdo"]) == 3)
 check("otro vehículo o posición con el mismo SKU queda pendiente", len(cruzado["pendientes"]) == 2 and
       {x.compatibilidad["aplicacion"] for x in cruzado["pendientes"]} == {"Focus (Europa)", "Fiesta"})
 
@@ -92,8 +92,7 @@ row = [None] * 25; row[1] = "Amortiguador Delantero Izquierdo P/ Ford Focus 2013
 ra = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); ra.close(); pub_anual.save(ra.name)
 publicados_anual = leer_publicaciones(ra.name); os.unlink(ra.name)
 cruzado_anual = cruzar_variantes(objetivo, publicados_anual)
-check("una publicación anual AG sólo cubre su propio año", {x.aplicacion for x in cruzado_anual["existentes"]} == {"2013"} and
-      {x.aplicacion for x in cruzado_anual["pendientes"]} == {"2012", "2014", "2015"})
+check("una publicación anual AG no cubre un rango o bloque incompleto", not cruzado_anual["existentes"] and len(cruzado_anual["pendientes"]) == 3)
 
 fotos = openpyxl.Workbook(); hoja = fotos.active; hoja.append(["Servidor", "Carpeta", "Nombre", "Extensión"])
 for n in ("1234", "1234_2", "1234-3", "1234_11", "KIT 1234", "SINMATCH"):

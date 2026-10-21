@@ -549,6 +549,30 @@ def _titulo_ag(producto, compat, anio, permitir_exceso=False):
     return ultimo if permitir_exceso else None
 
 
+def _variantes_ag(producto, compat):
+    """Rango completo más dos bloques balanceados, subdivididos si exceden 60."""
+    inicio, fin = compat["inicio"], compat["fin"]
+    if inicio == fin:
+        titulo = _titulo_ag(producto, compat, str(inicio))
+        return ([(titulo, [inicio])] if titulo else []), ([] if titulo else [(str(inicio), "Título excede 60 caracteres")])
+    variantes, excluidas = [], []
+    rango = f"{inicio}-{fin}"
+    titulo = _titulo_ag(producto, compat, rango)
+    if titulo: variantes.append((titulo, list(range(inicio, fin + 1))))
+    else: excluidas.append((rango, "Título excede 60 caracteres"))
+    anios = list(range(inicio, fin + 1)); corte = (len(anios) + 1) // 2
+    def agregar(bloque):
+        texto = " ".join(map(str, bloque))
+        titulo_bloque = _titulo_ag(producto, compat, texto)
+        if titulo_bloque: variantes.append((titulo_bloque, bloque))
+        elif len(bloque) > 1:
+            mitad = (len(bloque) + 1) // 2
+            agregar(bloque[:mitad]); agregar(bloque[mitad:])
+        else: excluidas.append((texto, "Título excede 60 caracteres"))
+    agregar(anios[:corte]); agregar(anios[corte:])
+    return variantes, excluidas
+
+
 def _describir_ag(pieza, config):
     partes = [pieza.get("producto", ""), "", "Número de parte: " + str(pieza.get("clave", ""))]
     equivalencias = [(marca, codigos) for marca, codigos in pieza.get("equivalencias", {}).items() if codigos]
@@ -598,36 +622,28 @@ def generar_filas_con_reporte(piezas, config):
             descripcion = _describir_ag(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
             for compat in pieza.get("compatibilidades", []):
-                for anio in range(compat["inicio"], compat["fin"] + 1):
-                    compat_anual = dict(compat, producto=pieza.get("producto", ""), inicio=anio,
-                                         fin=anio, formato="master_ag")
-                    titulo = _titulo_ag(pieza.get("producto"), compat, anio)
-                    if not titulo:
-                        candidato = _titulo_ag(pieza.get("producto"), compat, anio, permitir_exceso=True)
-                        exclusion = {**_exclusion_titulo("AG", pieza.get("clave"), compat.get("fila"),
-                            candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
-                            "armadora": compat.get("marca"), "modelo": compat.get("aplicacion"),
-                            "inicio": anio, "fin": anio}
+                variantes, fuera = _variantes_ag(pieza.get("producto"), compat)
+                for anios_txt, motivo in fuera:
+                    candidato = _titulo_ag(pieza.get("producto"), compat, anios_txt, permitir_exceso=True)
+                    for anio in (int(anios_txt),) if anios_txt.isdigit() else (int(x) for x in re.findall(r"\d{4}", anios_txt)):
+                        compat_anual = dict(compat, producto=pieza.get("producto", ""), inicio=anio, fin=anio, formato="master_ag")
+                        exclusion = {**_exclusion_titulo("AG", pieza.get("clave"), compat.get("fila"), candidato, compat, anios_txt),
+                            "fila": compat.get("fila"), "clave": pieza.get("clave"), "armadora": compat.get("marca"),
+                            "modelo": compat.get("aplicacion"), "inicio": anio, "fin": anio, "motivo": motivo}
                         exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
                             anio, stock=pieza["stock"], compatibilidad=compat_anual))
-                        continue
-                    # La equivalencia de una variante AG es SKU + compatibilidad + año,
-                    # no el texto del título: así una fila repetida no genera dos veces
-                    # la misma publicación anual.
-                    par = (str(pieza.get("clave")).upper(),
-                           _sin_acentos(compat_anual["producto"]).strip(),
-                           _sin_acentos(compat_anual.get("posicion") or "").strip(),
-                           _sin_acentos(compat_anual.get("marca") or "").strip(),
-                           _sin_acentos(compat_anual.get("aplicacion") or "").strip(), anio)
-                    if par in vistos:
-                        deduplicadas += 1
-                        continue
+                for titulo, anios in variantes:
+                    compat_titulo = dict(compat, producto=pieza.get("producto", ""),
+                                         anios_cubiertos=list(anios), formato="master_ag")
+                    par = (str(pieza.get("clave")).upper(), _sin_acentos(compat_titulo["producto"]).strip(),
+                           _sin_acentos(compat_titulo.get("posicion") or "").strip(),
+                           _sin_acentos(compat_titulo.get("marca") or "").strip(),
+                           _sin_acentos(compat_titulo.get("aplicacion") or "").strip(), tuple(anios), titulo)
+                    if par in vistos: deduplicadas += 1; continue
                     vistos.add(par)
-                    filas.append(FilaPublicacion(
-                        titulo, str(pieza.get("clave") or "").strip(), pieza.get("producto", ""),
-                        precio, descripcion, str(anio), False, [], compat.get("fila"),
-                        stock=pieza["stock"], compatibilidad=compat_anual,
-                    ))
+                    etiqueta_anios = str(anios[0]) if len(anios) == 1 else f"{anios[0]}-{anios[-1]}"
+                    filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(), pieza.get("producto", ""),
+                        precio, descripcion, etiqueta_anios, False, [], compat.get("fila"), stock=pieza["stock"], compatibilidad=compat_titulo))
             continue
         if pieza.get("formato") == "master_gonher":
             descripcion = _describir_gonher(pieza, config)
