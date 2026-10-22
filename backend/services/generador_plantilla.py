@@ -141,6 +141,20 @@ ALIAS_PRODUCTO_AG = {
     "amortiguador trasero": "Amort. Tras.", "base amortiguador": "Base Amort.",
     "soporte amortiguador": "Soporte Amort.", "kit amortiguador": "Kit Amort.",
     "resorte": "Resorte",
+    "kit rotulas": "Kit Rótulas", "kit amortiguadores": "Kit Amort.",
+    "kit amortiguadores y resortes": "Kit Amort. y Resortes",
+    "kit balatas": "Kit Balatas", "kit amortiguadores y bases": "Kit Amort. y Bases",
+    "kit amortiguadores c/resortes y bases amortiguador": "Kit Amort. c/Resortes y Bases",
+    "kit resortes": "Kit Resortes", "kit bases amortiguador": "Kit Bases Amort.",
+    "kit amortiguadores resorte y base": "Kit Amort. Resorte y Base",
+    "kit resortes amortiguadores deportivos y bases": "Kit Resortes Amort. Deport. y Bases",
+    "resortes deportivos y amortiguadores": "Resortes Deport. y Amort.",
+    "amortiguadores deportivos y bases": "Amort. Deport. y Bases",
+    "kit resortes y amortiguadores deportivos": "Kit Resortes y Amort. Deport.",
+    "kit amortiguadores resortes deportivos y bases": "Kit Amort. Resortes Deport. y Bases",
+    "kit amortiguadores deportivos y resortes": "Kit Amort. Deport. y Resortes",
+    "kit amortiguadores delanteros": "Kit Amort. Delanteros",
+    "kit amortiguadores p/achaparrar": "Kit Amort. p/Achaparrar",
 }
 ALIAS_POSICION_AG = {"delantero": "Del.", "trasero": "Tras.", "izquierdo": "Izq.", "derecho": "Der."}
 
@@ -530,6 +544,12 @@ def _titulo_ag(producto, compat, anio, permitir_exceso=False):
     if compat.get("tipo_ag") == "combos":
         producto = " ".join(str(producto or "").split())
         aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
+        # En el master de combos Aplicación suele traer también el rango; los
+        # años canónicos vienen en columnas separadas y se agregan una vez aquí.
+        aplicacion = re.sub(
+            r"\s+(?:19|20)\d{2}(?:\s*[-–/a]\s*(?:(?:19|20)\d{2}|\d{2}))?\s*$",
+            "", aplicacion, flags=re.IGNORECASE,
+        ).strip()
         titulo = " ".join(x for x in (producto, "para", aplicacion, str(anio)) if x)
         if len(titulo) > MAX_TITULO:
             corto = ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto)

@@ -169,6 +169,10 @@ def _normalizar_titulo_ag(valor) -> str:
 
 def _aplicacion_ag_en_titulo(titulo, aplicacion) -> bool:
     """Acepta sólo la omisión conocida de notas parentéticas del título AG."""
+    aplicacion = re.sub(
+        r"\s+(?:19|20)\d{2}(?:\s*[-–/a]\s*(?:(?:19|20)\d{2}|\d{2}))?\s*$",
+        "", str(aplicacion or ""), flags=re.IGNORECASE,
+    ).strip()
     esperado = _normalizar(aplicacion)
     if _contiene_frase(titulo, esperado):
         return True

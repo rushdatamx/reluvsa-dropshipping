@@ -2970,4 +2970,12 @@ Verificación inicial: AG 26/26, Módulo 2 88/88, imágenes 20/20, CAUPLAS 39/39
 GONHER 24/24 y build de frontend correcto. Al recibir `kits-ag.xlsx`, se confirmó que las
 10,069 filas/2,573 SKU tienen `Stock` y `Precio` vacíos; el master anterior tampoco aporta
 stock ni SKU de combo. El endpoint ahora informa cada faltante por separado, y la prueba AG
-incluye títulos de hoja antes de encabezados y ambos campos vacíos. Regresión AG: 28/28.
+incluye títulos de hoja antes de encabezados y ambos campos vacíos. Regresión AG: 29/29.
+
+La versión posterior `Combos por aplicaciones AG (1).xlsx` sí incluye fórmulas externas a
+`[1]KITS`, aunque muchas siguen vacías o devuelven `#N/D`. El parser obtiene 51 SKU con
+stock/precio utilizables, 2,488 SKU con ambos campos vacíos y además 30 precios y 16 stocks
+inválidos. Es válido procesar sólo los SKU completos; el resto queda excluido. Los títulos
+omiten años repetidos al final de Aplicación y usan abreviaturas controladas para nombres
+largos de producto. La prueba local produjo 805 publicaciones y 1,282 filas en `Títulos por
+corregir`.
