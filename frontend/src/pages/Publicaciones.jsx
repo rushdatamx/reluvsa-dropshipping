@@ -192,7 +192,7 @@ export default function Publicaciones() {
             </select>
           </Campo>
 
-          <Campo label={proveedor === 'AG' ? 'Master Combos por aplicaciones AG' : 'Catálogo del proveedor'}
+          <Campo label={proveedor === 'AG' ? 'Kits AG' : 'Catálogo del proveedor'}
                  hint={proveedor === 'AG' ? 'Combos por aplicaciones AG.xlsx; Código, Producto, Aplicación, años, Stock y Precio' : 'El Excel con sus claves y precios'}>
             <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                    onChange={(e) => setCatalogo(e.target.files?.[0] || null)} />
@@ -317,7 +317,7 @@ export default function Publicaciones() {
           )}
           {analisis.formato === 'master_ag' && (
             <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
-              Combos por aplicaciones AG.xlsx es el master de ARGENPARTS. Consolida componentes y aplicaciones por Código; Stock y Precio deben ser únicos por SKU. Las fotos se relacionan por código completo desde FOTOS AG.xlsx.
+              Kits AG toma los combos de Combos por aplicaciones AG.xlsx. Consolida componentes y aplicaciones por Código; Stock y Precio deben ser únicos por SKU. Las fotos se relacionan por código completo desde FOTOS AG.xlsx.
             </div>
           )}
 
