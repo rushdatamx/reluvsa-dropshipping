@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, FileSpreadsheet } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
-import { subirVentasML, subirColecta, subirAlbaranes, subirKits, subirCargaERP } from '../services/api';
+import { subirVentasML, subirColecta, subirAlbaranes, subirKits, subirKitsAG, subirCargaERP } from '../services/api';
 import { Link } from 'react-router-dom';
 
 function UploadCard({ title, description, onSubmit, accept = '.xlsx', renderResult }) {
@@ -126,6 +126,11 @@ export default function Uploads() {
           title="Relación kits → componentes"
           description="Excel con 3 columnas: Paquete (KIT), Componente y Cantidad. Permite que las ventas de kits crucen su factura por los componentes reales (el proveedor no factura el código del kit). Se acumula: re-subir actualiza y agrega, no borra lo anterior."
           onSubmit={subirKits}
+        />
+        <UploadCard
+          title="Relación kits AG"
+          description="Excel de catálogo AG con Código y Componente 1 a Componente 8. Consolida aplicaciones repetidas y agrega relaciones; cada componente cuenta como una unidad. La carga queda aislada para AG."
+          onSubmit={subirKitsAG}
         />
       </div>
     </div>

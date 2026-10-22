@@ -124,6 +124,14 @@ export const subirKits = (file) => {
     timeout: 120000,
   });
 };
+export const subirKitsAG = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.post('/uploads/kits/ag', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
 
 // Conciliación ERP (solo administradores)
 export const subirCargaERP = (file) => {

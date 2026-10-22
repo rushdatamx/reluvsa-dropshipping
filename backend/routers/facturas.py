@@ -266,8 +266,9 @@ def _concepto_compatible(conn, proveedor_id: int, concepto, venta) -> bool:
         return True
     if codigo and conn.execute(
         """SELECT 1 FROM kit_componentes
-             WHERE UPPER(TRIM(kit_sku))=? AND UPPER(TRIM(componente_codigo))=?""",
-        (sku, codigo),
+             WHERE UPPER(TRIM(kit_sku))=? AND UPPER(TRIM(componente_codigo))=?
+               AND (proveedor_id IS NULL OR proveedor_id=?)""",
+        (sku, codigo, proveedor_id),
     ).fetchone():
         return True
     return False

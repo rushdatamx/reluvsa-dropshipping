@@ -424,7 +424,7 @@ def _venta_del_pedido(conn, codigo: str) -> Optional[str]:
     return ventas.pop() if len(ventas) == 1 else None
 
 
-def _desempatar_por_pedido(conn, codigo: str, matches: list, codigos_factura=None):
+def _desempatar_por_pedido(conn, proveedor_id: int, codigo: str, matches: list, codigos_factura=None):
     """Elige entre kits candidatos usando las piezas que trae el pedido de la factura.
 
     Devuelve la candidata ganadora, o None si el pedido no identifica UN solo kit — en
@@ -443,7 +443,9 @@ def _desempatar_por_pedido(conn, codigo: str, matches: list, codigos_factura=Non
         comps = {
             t
             for (cc,) in conn.execute(
-                "SELECT componente_codigo FROM kit_componentes WHERE kit_sku = ?", (kit,)
+                """SELECT componente_codigo FROM kit_componentes
+                   WHERE kit_sku = ? AND (proveedor_id IS NULL OR proveedor_id = ?)""",
+                (kit, proveedor_id),
             )
             for t in _tokens_componente(cc)
             if t.isdigit()
@@ -522,8 +524,9 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
                FROM ventas_ml v
                JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
                JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
-               WHERE v.num_venta = ? AND e.proveedor_id = ?""",
-            (hermana, proveedor_id),
+               WHERE v.num_venta = ? AND e.proveedor_id = ?
+                 AND (kc.proveedor_id IS NULL OR kc.proveedor_id = ?)""",
+            (hermana, proveedor_id, proveedor_id),
         ):
             if _componente_cruza(_tokens_componente(f["componente_codigo"]), cod_tokens_h):
                 return {"num_venta": hermana,
@@ -543,7 +546,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
            FROM ventas_ml v
            JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
-           WHERE e.proveedor_id = ?
+           WHERE e.proveedor_id = ? AND (kc.proveedor_id IS NULL OR kc.proveedor_id = ?)
              AND ( kc.componente_codigo = ?
                    OR ( LENGTH(TRIM(kc.componente_codigo)) >= 4
                         AND ( ? LIKE '%' || kc.componente_codigo || '%'
@@ -551,7 +554,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
              {f_sql}
            {o_sql}
            LIMIT 50""",
-        (proveedor_id, codigo, codigo, codigo, *f_par, *o_par),
+        (proveedor_id, proveedor_id, codigo, codigo, codigo, *f_par, *o_par),
     ).fetchall()
     for cand in candidatas_txt:
         if not _componente_ya_cubierto(conn, cand["num_venta"], codigo):
@@ -570,11 +573,11 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
            FROM ventas_ml v
            JOIN envios_colecta e ON {ENVIO_CUBRE_VENTA}
            JOIN kit_componentes kc ON kc.kit_sku = UPPER(TRIM(v.sku))
-           WHERE e.proveedor_id = ?
+           WHERE e.proveedor_id = ? AND (kc.proveedor_id IS NULL OR kc.proveedor_id = ?)
              {f_sql}
            {o_sql}
            LIMIT 2000""",
-        (proveedor_id, *f_par, *o_par),
+        (proveedor_id, proveedor_id, *f_par, *o_par),
     ).fetchall()
 
     # Ya vienen ordenados por fecha desc: el primero de cada venta gana el desempate
@@ -621,7 +624,7 @@ def _match_por_kit(conn, proveedor_id: int, codigo: str,
     # cualquiera de sus kits y volveríamos a adivinar. Si el conjunto no calza exacto con
     # UN solo kit, este desempate se abstiene y decide la descripción.
     if len(kits_distintos) > 1:
-        elegido_pedido = _desempatar_por_pedido(conn, codigo, matches, codigos_factura)
+        elegido_pedido = _desempatar_por_pedido(conn, proveedor_id, codigo, matches, codigos_factura)
         if elegido_pedido is not None:
             return {"num_venta": elegido_pedido["num_venta"],
                     "method": "kit_componente", "confidence": 0.95}
@@ -715,7 +718,7 @@ def _match_por_num_impreso(conn, proveedor_id: int, factura: dict,
             "confidence": CONFIANZA_NUM_IMPRESO}
 
 
-def _pieza_cauplas_cuadra(conn, venta, codigo: str) -> bool:
+def _pieza_cauplas_cuadra(conn, proveedor_id: int, venta, codigo: str) -> bool:
     """Confirma SKU normalizado o componente de kit para la venta declarada."""
     sku = (venta["sku"] or "").strip()
     limpio = (codigo or "").strip()
@@ -726,8 +729,9 @@ def _pieza_cauplas_cuadra(conn, venta, codigo: str) -> bool:
     if piezas_codigo and piezas_codigo & _tokens_pieza(sku):
         return True
     for row in conn.execute(
-        "SELECT componente_codigo FROM kit_componentes WHERE kit_sku = UPPER(TRIM(?))",
-        (sku,),
+        """SELECT componente_codigo FROM kit_componentes
+           WHERE kit_sku = UPPER(TRIM(?)) AND (proveedor_id IS NULL OR proveedor_id = ?)""",
+        (sku, proveedor_id),
     ):
         if _componente_cruza(_tokens_componente(row["componente_codigo"]), cod_tokens):
             return True
@@ -777,7 +781,7 @@ def resolver_num_venta_cauplas(conn, proveedor_id: int, numero: str, codigo: str
                  str(v["fecha_venta"])[:10] <= str(fecha_factura)[:10]]
     if not por_fecha:
         return {"estado": "conflicto_fecha"}
-    por_pieza = [v for v in por_fecha if _pieza_cauplas_cuadra(conn, v, codigo)]
+    por_pieza = [v for v in por_fecha if _pieza_cauplas_cuadra(conn, proveedor_id, v, codigo)]
     if not por_pieza:
         return {"estado": "conflicto_pieza"}
     compatibles = [v for v in por_pieza

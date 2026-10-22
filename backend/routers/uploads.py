@@ -10,6 +10,7 @@ from services.parser_ventas_ml import parse_ventas_ml
 from services.parser_colecta import parse_colecta
 from services.parser_albaran import parse_albaran
 from services.parser_kits import parse_kits
+from services.parser_kits_ag import parse_kits_ag
 from services.detector_archivo import detectar_tipo_xlsx
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
@@ -20,6 +21,7 @@ _NOMBRE_TIPO = {
     "colecta": "Detalle de envíos de colecta",
     "albaran": "Números de albarán",
     "kits": "Relación kits → componentes",
+    "kits_ag": "Relación de kits AG",
 }
 
 
@@ -31,11 +33,12 @@ def _validar_tipo(tmp, esperado: str):
     if detectado == esperado:
         return
     if detectado is None:
+        origen = "el catálogo AG" if esperado == "kits_ag" else "Mercado Libre"
         raise HTTPException(
             status_code=400,
             detail=(
                 f"No reconozco este archivo como un reporte de {_NOMBRE_TIPO[esperado]}. "
-                "Verifica que sea el Excel correcto descargado de Mercado Libre."
+                f"Verifica que sea el Excel correcto de {origen} y que conserve sus encabezados."
             ),
         )
     raise HTTPException(
@@ -105,6 +108,21 @@ async def subir_kits(file: UploadFile = File(...)):
     try:
         _validar_tipo(tmp, "kits")
         result = parse_kits(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return result
+
+
+@router.post("/kits/ag", dependencies=[Depends(require_admin)])
+async def subir_kits_ag(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Se espera archivo .xlsx")
+    tmp = _save_tmp(file)
+    try:
+        _validar_tipo(tmp, "kits_ag")
+        result = parse_kits_ag(tmp)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         tmp.unlink(missing_ok=True)
     return result

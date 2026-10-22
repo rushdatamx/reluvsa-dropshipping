@@ -122,7 +122,7 @@ def parse_kits(path: Path) -> dict:
             conn.execute(
                 """INSERT INTO kit_componentes (kit_sku, componente_codigo, cantidad)
                    VALUES (?, ?, ?)
-                   ON CONFLICT(kit_sku, componente_codigo)
+                   ON CONFLICT
                    DO UPDATE SET cantidad = excluded.cantidad""",
                 (kit_sku, componente, cantidad),
             )

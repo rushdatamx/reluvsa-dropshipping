@@ -352,7 +352,8 @@ _SELECT_VENTAS = """
            -- Cada componente como 'codigo|cantidad', separados por coma. Vacío si no es kit.
            (SELECT group_concat(kc.componente_codigo || '|' || kc.cantidad)
             FROM kit_componentes kc
-            WHERE kc.kit_sku = UPPER(TRIM(v.sku))) as kit_componentes_raw
+            WHERE kc.kit_sku = UPPER(TRIM(v.sku))
+              AND (kc.proveedor_id IS NULL OR kc.proveedor_id = e.proveedor_id)) as kit_componentes_raw
     FROM ventas_ml v
     LEFT JOIN envios_colecta e ON {envio_cubre_venta}
     LEFT JOIN proveedores p ON p.id = e.proveedor_id

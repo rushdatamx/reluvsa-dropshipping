@@ -79,6 +79,8 @@ def detectar_tipo_xlsx(path: Path) -> Optional[str]:
         # de relación kits (cuya 1a hoja ES la de Paquete/Componente/Cantidad).
         if "componente" in texto and "cantidad" in texto and ("paquete" in texto or "kit" in texto):
             return "kits"
+        if "código" in texto and all(f"componente {i}" in texto for i in range(1, 9)):
+            return "kits_ag"
 
         # Colecta: ancla muy específica del encabezado del reporte ML de colecta.
         if "envíos con colecta" in texto or ("fecha de la venta" in texto and "# de envío" in texto):

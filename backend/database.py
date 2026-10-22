@@ -298,7 +298,8 @@ CREATE TABLE IF NOT EXISTS kit_componentes (
     kit_sku            TEXT NOT NULL,
     componente_codigo  TEXT NOT NULL,
     cantidad           INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (kit_sku, componente_codigo)
+    proveedor_id       INTEGER REFERENCES proveedores(id) ON DELETE CASCADE,
+    PRIMARY KEY (kit_sku, componente_codigo, proveedor_id)
 );
 
 -- Cada archivo ERP es una foto auditable: sus entradas no se reemplazan cuando
@@ -573,11 +574,29 @@ SEED_PROVEEDORES = [
 ]
 
 
+def _migrar_alcance_kits(cursor):
+    columnas = {r[1] for r in cursor.execute("PRAGMA table_info(kit_componentes)")}
+    if "proveedor_id" not in columnas:
+        cursor.execute("ALTER TABLE kit_componentes RENAME TO kit_componentes_legacy")
+        cursor.execute("""CREATE TABLE kit_componentes (
+            kit_sku TEXT NOT NULL, componente_codigo TEXT NOT NULL,
+            cantidad INTEGER NOT NULL DEFAULT 1,
+            proveedor_id INTEGER REFERENCES proveedores(id) ON DELETE CASCADE,
+            PRIMARY KEY (kit_sku, componente_codigo, proveedor_id))""")
+        cursor.execute("""INSERT INTO kit_componentes (kit_sku, componente_codigo, cantidad)
+            SELECT kit_sku, componente_codigo, cantidad FROM kit_componentes_legacy""")
+        cursor.execute("DROP TABLE kit_componentes_legacy")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kitcomp_componente ON kit_componentes(componente_codigo)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_kitcomp_global_unique ON kit_componentes(kit_sku, componente_codigo) WHERE proveedor_id IS NULL")
+
+
 def init_database():
     """Crea tablas y siembra los 6 proveedores conocidos."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.executescript(SCHEMA)
+
+        _migrar_alcance_kits(cursor)
 
         _migrar_asignaciones_factura(cursor)
 
