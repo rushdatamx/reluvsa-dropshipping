@@ -54,6 +54,7 @@ AG_HEADERS = ("Producto", "Código", "SYD", "GROB", "KYB", "BOGE", "VAZLO", "Mar
               "Aplicación", "Desde", "Hasta", "Posición", "Distribuidor", "stock")
 AG_ANCLAS = ("Producto", "Código", "Aplicación", "Desde", "Hasta", "Distribuidor", "stock")
 AG_EQUIVALENCIAS = ("SYD", "GROB", "KYB", "BOGE", "VAZLO")
+AG_COMBO_ANCLAS = ("codigo", "producto", "aplicacion", "ano desde", "ano hasta", "stock", "precio")
 
 
 def _texto(val) -> str:
@@ -183,6 +184,10 @@ def _titulo_cubre_ag(titulo, compat) -> bool:
         return False
     titulo_normalizado = _normalizar_titulo_ag(titulo)
     producto = compat.get("producto", "")
+    if compat.get("tipo_ag") == "combos":
+        return bool(producto and compat.get("aplicacion") and
+                    _contiene_frase(titulo_normalizado, _normalizar_titulo_ag(producto)) and
+                    _aplicacion_ag_en_titulo(titulo_normalizado, compat.get("aplicacion", "")))
     posicion = compat.get("posicion", "")
     marca = compat.get("marca", "")
     aplicacion = compat.get("aplicacion", "")
@@ -205,8 +210,8 @@ def _titulo_cubre_ag(titulo, compat) -> bool:
 
 
 def _firma_compatibilidad_ag(compat):
-    return tuple(_normalizar_titulo_ag(compat.get(campo, ""))
-                 for campo in ("producto", "posicion", "marca", "aplicacion"))
+    campos = ("producto", "aplicacion") if compat.get("tipo_ag") == "combos" else ("producto", "posicion", "marca", "aplicacion")
+    return tuple(_normalizar_titulo_ag(compat.get(campo, "")) for campo in campos)
 
 
 @dataclass
@@ -413,11 +418,75 @@ def _parece_ag(ws):
 
 
 def _hoja_ag(wb):
+    combos = [ws for ws in wb.worksheets if _parece_ag_combos(ws)]
+    if combos:
+        return combos[0]
     completas = [ws for ws in wb.worksheets if _headers_ag(ws)[0]]
     return completas[0] if completas else next((ws for ws in wb.worksheets if _parece_ag(ws)), None)
 
 
+def _mapa_headers(ws):
+    return {_normalizar(v): i for i, v in enumerate(next(ws.iter_rows(min_row=1, max_row=1, values_only=True))) if _texto(v)}
+
+
+def _parece_ag_combos(ws):
+    cols = _mapa_headers(ws)
+    return sum(_normalizar(h) in cols for h in AG_COMBO_ANCLAS) >= 6
+
+
+def _leer_master_ag_combos(ws):
+    cols = _mapa_headers(ws)
+    alias = {"codigo": ("codigo", "código"), "producto": ("producto",),
+             "aplicacion": ("aplicacion", "aplicación"),
+             "desde": ("ano desde", "año desde", "desde", "ano inicio", "año inicio"),
+             "hasta": ("ano hasta", "año hasta", "hasta", "ano fin", "año fin"),
+             "stock": ("stock",), "precio": ("precio",)}
+    idx = {k: next((cols[_normalizar(n)] for n in names if _normalizar(n) in cols), None) for k, names in alias.items()}
+    faltan = [k for k, i in idx.items() if i is None]
+    if faltan:
+        raise ValueError("El master de combos AG requiere: " + ", ".join(faltan))
+    componentes = [i for nombre, i in cols.items() if re.fullmatch(r"componente(?:\s*\d+)?", nombre)]
+    grupos, errores, filas_master = {}, [], 0
+    for n, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not any(_texto(v) for v in fila): continue
+        filas_master += 1
+        val = lambda k: fila[idx[k]] if idx[k] < len(fila) else None
+        sku, producto = _texto(val("codigo")), _texto(val("producto"))
+        reg = {"fila": n, "clave": sku, "producto": producto, "inicio_raw": val("desde"), "fin_raw": val("hasta")}
+        grupo = grupos.setdefault(sku.upper(), {"registros": [], "sku": sku, "producto": producto})
+        grupo["registros"].append((n, fila, reg))
+    piezas, validas, invalidas, duplicados, sin_precio, inconsistentes = [], 0, 0, 0, 0, 0
+    for sku, grupo in grupos.items():
+        regs = grupo["registros"]; first = regs[0][2]
+        def err(msg, r=first): errores.append(_error(r["fila"], {"clave": r["clave"], "modelo": r.get("aplicacion"), "inicio": r["inicio_raw"], "fin": r["fin_raw"]}, msg))
+        if not sku or not grupo["producto"]: err("Falta Código o Producto"); continue
+        stocks = [_stock_entero(row[idx["stock"]])[0] for _, row, _ in regs]
+        costos = [_numero_positivo(row[idx["precio"]]) for _, row, _ in regs]
+        if any(x is None for x in stocks) or len(set(stocks)) != 1:
+            err("Stock vacío, inválido o diferente dentro del SKU"); continue
+        if any(x is None for x in costos): sin_precio += 1; err("Costo Precio inválido o vacío"); continue
+        if len(set(costos)) != 1: inconsistentes += 1; err("Costo Precio diferente dentro del SKU"); continue
+        pieza = {"clave": grupo["sku"], "linea": grupo["producto"], "producto": grupo["producto"], "formato": "master_ag", "tipo_ag": "combos", "stock": stocks[0], "costo": costos[0], "componentes": [], "compatibilidades": [], "equivalencias": {}, "filas_origen": [r[0] for r in regs]}
+        visto_comp, visto_compat = set(), set()
+        for n, fila, reg in regs:
+            for i in componentes:
+                comp = _texto(fila[i] if i < len(fila) else None)
+                if comp and _normalizar(comp) not in visto_comp: visto_comp.add(_normalizar(comp)); pieza["componentes"].append(comp)
+            aplicacion = _texto(fila[idx["aplicacion"]] if idx["aplicacion"] < len(fila) else None)
+            inicio = _anio_entero(reg["inicio_raw"]); fin = _anio_entero(reg["fin_raw"])
+            if not aplicacion or inicio is None or fin is None or not (1900 <= inicio <= fin <= 2100):
+                invalidas += 1; reg["aplicacion"] = aplicacion; err("Aplicación vacía o años inválidos", reg); continue
+            firma = (_normalizar(aplicacion), inicio, fin)
+            if firma in visto_compat: duplicados += 1; continue
+            visto_compat.add(firma); validas += 1
+            pieza["compatibilidades"].append({"aplicacion": aplicacion, "inicio": inicio, "fin": fin, "fila": n})
+        if pieza["compatibilidades"]: piezas.append(pieza)
+    return ResultadoCatalogo(piezas, "master_ag", filas_master, validas, invalidas, duplicados, True, sin_precio, inconsistentes, errores, len(grupos))
+
+
 def _leer_master_ag(ws) -> ResultadoCatalogo:
+    if _parece_ag_combos(ws):
+        return _leer_master_ag_combos(ws)
     valido, columnas = _headers_ag(ws)
     if not valido:
         faltan = [h for h in AG_HEADERS if _normalizar(h) not in columnas]

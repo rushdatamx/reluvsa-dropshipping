@@ -527,6 +527,14 @@ def _describir_gonher(pieza, config):
 
 
 def _titulo_ag(producto, compat, anio, permitir_exceso=False):
+    if compat.get("tipo_ag") == "combos":
+        producto = " ".join(str(producto or "").split())
+        aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
+        titulo = " ".join(x for x in (producto, "para", aplicacion, str(anio)) if x)
+        if len(titulo) > MAX_TITULO:
+            corto = ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto)
+            titulo = " ".join(x for x in (corto, "para", aplicacion, str(anio)) if x)
+        return titulo if permitir_exceso or len(titulo) <= MAX_TITULO else None
     producto = " ".join(str(producto or "").split())
     posicion = " ".join(str(compat.get("posicion") or "").split())
     marca = " ".join(str(compat.get("marca") or "").split())
@@ -575,6 +583,8 @@ def _variantes_ag(producto, compat):
 
 def _describir_ag(pieza, config):
     partes = [pieza.get("producto", ""), "", "Número de parte: " + str(pieza.get("clave", ""))]
+    if pieza.get("tipo_ag") == "combos" and pieza.get("componentes"):
+        partes += ["", "Componentes: " + " | ".join(pieza["componentes"])]
     equivalencias = [(marca, codigos) for marca, codigos in pieza.get("equivalencias", {}).items() if codigos]
     if equivalencias:
         partes += ["", "Equivalencias:"] + [f"{marca}: {' | '.join(codigos)}" for marca, codigos in equivalencias]
@@ -622,6 +632,7 @@ def generar_filas_con_reporte(piezas, config):
             descripcion = _describir_ag(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
             for compat in pieza.get("compatibilidades", []):
+                compat = dict(compat, tipo_ag=pieza.get("tipo_ag", "legacy"))
                 variantes, fuera = _variantes_ag(pieza.get("producto"), compat)
                 for anios_txt, motivo in fuera:
                     candidato = _titulo_ag(pieza.get("producto"), compat, anios_txt, permitir_exceso=True)

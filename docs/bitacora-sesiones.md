@@ -2956,3 +2956,16 @@ sigue siendo posible cuando todos los candidatos exceden el límite.
 Se actualizaron `docs/modulo2-publicaciones-masivas.md` y la regla breve de Módulo 2 en
 `CLAUDE.md`. Verificación: regresiones AG 19/19, CAUPLAS 38/38, GONHER 24/24, KIMS 19/19
 y KG 86/86; compilación Python correcta. La prueba directa del XLSX confirmó ambos encabezados de 37 columnas y los valores de título, precio, envío, SKU, descripción, imagen, cantidad y bodega. `git diff --check` pasó.
+
+## 2026-10-22 — Master de combos AG
+
+Se incorporó `Combos por aplicaciones AG.xlsx` como master vigente de AG, manteniendo
+`Master AG.xlsx` como formato legado. El nuevo lector consolida por Código los componentes,
+aplicaciones y compatibilidades; requiere stock y Precio válidos y consistentes, excluye
+compatibilidades con años inválidos y genera títulos `Producto para Aplicación Años` sin
+posición. FOTOS AG se cruza por el código completo del combo, sin fallback a fotos de piezas.
+La plantilla y validación HTTPS comunes conservan sus reglas actuales.
+
+Verificación: AG 26/26, Módulo 2 88/88, imágenes 20/20, CAUPLAS 39/39, KIMS 20/20,
+GONHER 24/24, build de frontend correcto y `git diff --check` limpio. No se encontró el
+libro real de combos en el workspace, así que la aceptación se comprobó con XLSX sintético.

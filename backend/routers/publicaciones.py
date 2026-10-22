@@ -160,7 +160,8 @@ async def analizar(
         if perfil.codigo_bodega == "AG":
             ruta_fotos_ag = _guardar_tmp(imagenes_ag)
             try:
-                fotos_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas))
+                fotos_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas),
+                    exact_only=any(p.get("tipo_ag") == "combos" for p in piezas))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             finally:
@@ -307,7 +308,8 @@ async def generar(
         if perfil.codigo_bodega == "AG":
             ruta_fotos_ag = _guardar_tmp(imagenes_ag)
             try:
-                galerias_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas))
+                galerias_ag, resumen_fotos = leer_imagenes_ag(ruta_fotos_ag, (p["clave"] for p in piezas),
+                    exact_only=any(p.get("tipo_ag") == "combos" for p in piezas))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             finally:

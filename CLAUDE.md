@@ -706,9 +706,11 @@ Gonher (o su huella renombrada), agrupa por Filtro y deja stock e imágenes para
 manual. `Cantidad` y GONHER quedan vacías; la plantilla suma GONHER al final sin mover
 las 36 columnas anteriores. Contrato en `docs/master-gonher-publicaciones-masivas.md`.
 
-**ARGENPARTS:** formato `master_ag`, código `AG`, mostrado como ARGENPARTS. Exige Master AG
-y FOTOS AG.xlsx; consolida equivalencias, usa costo y stock únicos por SKU y llena Imagen1–10
-sólo desde `apimagenes.s3.amazonaws.com` tras la validación común. Contrato en
+**ARGENPARTS:** formato `master_ag`, código `AG`, mostrado como ARGENPARTS. El master vigente
+es `Combos por aplicaciones AG.xlsx`; conserva compatibilidad con `Master AG.xlsx` legado.
+Consolida componentes, aplicaciones, costo y stock por SKU; los combos generan títulos sin
+posición y cruzan fotos sólo por código completo desde FOTOS AG.xlsx. Las URLs sólo salen
+desde `apimagenes.s3.amazonaws.com` tras la validación común. Contrato en
 `docs/master-ag-publicaciones-masivas.md`.
 
 **Títulos excedidos:** los libros de AG, CAUPLAS, GONHER, KG y KIM llevan siempre la hoja

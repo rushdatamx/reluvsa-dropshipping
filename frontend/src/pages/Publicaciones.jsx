@@ -192,7 +192,8 @@ export default function Publicaciones() {
             </select>
           </Campo>
 
-          <Campo label="Catálogo del proveedor" hint="El Excel con sus claves y precios">
+          <Campo label={proveedor === 'AG' ? 'Master Combos por aplicaciones AG' : 'Catálogo del proveedor'}
+                 hint={proveedor === 'AG' ? 'Combos por aplicaciones AG.xlsx; Código, Producto, Aplicación, años, Stock y Precio' : 'El Excel con sus claves y precios'}>
             <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                    onChange={(e) => setCatalogo(e.target.files?.[0] || null)} />
           </Campo>
@@ -209,7 +210,7 @@ export default function Publicaciones() {
             </Campo>
           )}
           {proveedor === 'AG' && (
-            <Campo label="Archivo de fotos AG" hint="Libro FOTOS AG.xlsx; obligatorio, hasta 10 fotos por SKU">
+            <Campo label="Archivo de fotos AG" hint="Libro FOTOS AG.xlsx; obligatorio. Los combos cruzan por código completo, hasta 10 fotos">
               <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                      onChange={(e) => setImagenesAg(e.target.files?.[0] || null)} />
             </Campo>
@@ -316,7 +317,7 @@ export default function Publicaciones() {
           )}
           {analisis.formato === 'master_ag' && (
             <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
-              ARGENPARTS consolida equivalencias y compatibilidades por SKU. Stock y costo deben ser únicos por SKU; las fotos se cruzan desde FOTOS AG.xlsx.
+              Combos por aplicaciones AG.xlsx es el master de ARGENPARTS. Consolida componentes y aplicaciones por Código; Stock y Precio deben ser únicos por SKU. Las fotos se relacionan por código completo desde FOTOS AG.xlsx.
             </div>
           )}
 

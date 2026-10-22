@@ -15,7 +15,7 @@ def _nombre(valor):
     return PurePath(str(valor or "").strip().replace("\\", "/")).stem.strip()
 
 
-def leer_imagenes_ag(ruta, skus_master: Iterable[str]) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
+def leer_imagenes_ag(ruta, skus_master: Iterable[str], exact_only: bool = False) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
     """Lee las diez hojas del libro y cruza Nombre / SKU_2 / SKU-2.
 
     El libro vigente de AG aporta ``URL FINAL``; los campos de servidor,
@@ -58,10 +58,10 @@ def leer_imagenes_ag(ruta, skus_master: Iterable[str]) -> Tuple[Dict[str, List[s
                     base = _texto(valor(servidor)).rstrip("/") or HOST
                     partes = [str(valor(carpeta) or "").strip("/"), nombre + "." + ext]
                     url = base + "/" + "/".join(p for p in partes if p)
-                if re.search(r"\b(?:combo|kit)\b", nombre, re.IGNORECASE):
+                if not exact_only and re.search(r"\b(?:combo|kit)\b", nombre, re.IGNORECASE):
                     resumen["urls_omitidas"] += 1; continue
                 sku, posicion = (nombre.upper(), 1) if nombre.upper() in skus else (None, None)
-                if sku is None:
+                if sku is None and not exact_only:
                     m = _SUFIJO.match(nombre)
                     if m and int(m.group(2)) >= 2:
                         posible = m.group(1).strip().upper()

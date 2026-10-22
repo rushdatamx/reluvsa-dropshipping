@@ -9,7 +9,7 @@ import openpyxl
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.generador_plantilla import COLUMNAS, ConfiguracionProveedor, escribir_xlsx, generar_filas_con_reporte
 from services.imagenes_ag import asignar_imagenes_ag, leer_imagenes_ag
-from services.parser_catalogo import cruzar_variantes, leer_catalogo_detallado, leer_publicaciones
+from services.parser_catalogo import cruzar_variantes, leer_catalogo_detallado, leer_publicaciones, normalizar_titulo
 from services.perfiles_catalogo import perfil_de
 from services.validacion_imagenes import _es_url_permitida
 
@@ -124,5 +124,37 @@ out = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out.close(); es
 salida = openpyxl.load_workbook(out.name, data_only=True); hoja = salida.active
 check("XLSX conserva 37 columnas, Cantidad y bodega AG", [c.value for c in hoja[1]] == COLUMNAS and hoja.cell(2, 5).value == 3 and hoja.cell(2, 31).value == 3 and hoja.cell(2, 15).value)
 salida.close(); os.unlink(out.name)
+
+# Master de combos AG: aplicación/años sin posición y componentes consolidados.
+wb = openpyxl.Workbook(); ws = wb.active
+ws.append(["Codigo", "Producto", "Aplicación", "Año desde", "Año hasta", "Componente 1", "Componente 2", "Stock", "Precio"])
+ws.append(["AG-COMBO", "Kit distribución", "Ford Focus", 2018, 2020, "A-1", "B-2", 5, 200])
+ws.append(["AG-COMBO", "Kit distribución", "Ford Focus", 2018, 2020, "B-2", "C-3", 5, 200])
+ws.append(["AG-COMBO", "Kit distribución", "Ford Fiesta", 2021, 2021, "D-4", None, 5, 200])
+ws.append(["BAD-STOCK", "Kit", "Ford Focus", 2020, 2020, "x", None, "mal", 100])
+ws.append(["BAD-COST", "Kit", "Ford Focus", 2020, 2020, "x", None, 2, 100])
+ws.append(["BAD-COST", "Kit", "Ford Fiesta", 2020, 2020, "y", None, 2, 101])
+ws.append(["BAD-YEAR", "Kit", "Ford Focus", 2022, 2020, "x", None, 1, 100])
+f = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); f.close(); wb.save(f.name)
+rc = leer_catalogo_detallado(f.name, perfil_de("AG")); os.unlink(f.name)
+check("detecta catálogo de combos AG y consolida componentes", rc.formato == "master_ag" and rc.piezas[0]["tipo_ag"] == "combos" and rc.piezas[0]["componentes"] == ["A-1", "B-2", "C-3", "D-4"])
+check("combo consolida aplicaciones repetidas y reporta años inválidos", len(rc.piezas[0]["compatibilidades"]) == 2 and rc.compatibilidades_invalidas == 1)
+check("excluye SKU con stock inválido o costos distintos", {p["clave"] for p in rc.piezas} == {"AG-COMBO"} and any("Stock" in e["motivo"] for e in rc.errores) and any("Precio diferente" in e["motivo"] for e in rc.errores))
+fc, _ = generar_filas_con_reporte(rc.piezas, ConfiguracionProveedor("AG", marca="ARGENPARTS"))
+check("títulos de combos omiten posición y la descripción lista componentes", all("para Ford" in x.titulo and len(x.titulo) <= 60 and "delantero" not in x.titulo.lower() for x in fc) and "A-1 | B-2 | C-3 | D-4" in fc[0].descripcion)
+fotos_combo = openpyxl.Workbook(); sc = fotos_combo.active; sc.append(["Servidor", "Carpeta", "Nombre", "Extensión"])
+sc.append(["https://apimagenes.s3.amazonaws.com", "AG", "AG-COMBO", "jpg"])
+sc.append(["https://apimagenes.s3.amazonaws.com", "AG", "AG-COMBO_2", "jpg"])
+ff = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); ff.close(); fotos_combo.save(ff.name)
+gc, _ = leer_imagenes_ag(ff.name, ["AG-COMBO"], exact_only=True); os.unlink(ff.name)
+check("fotos de combos cruzan sólo por código completo exacto", len(gc["AG-COMBO"]) == 10 and bool(gc["AG-COMBO"][0]) and not gc["AG-COMBO"][1])
+outc = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); outc.close()
+asignar_imagenes_ag(fc, gc)
+escribir_xlsx(fc, ConfiguracionProveedor("AG", marca="ARGENPARTS"), outc.name)
+oc = openpyxl.load_workbook(outc.name, data_only=True); hc = oc.active
+check("combo escribe precio, stock, bodega AG e imágenes en las 37 columnas", [c.value for c in hc[1]] == COLUMNAS and hc.cell(2, 5).value == 5 and hc.cell(2, 31).value == 5 and hc.cell(2, 3).value is not None and hc.cell(2, 15).value)
+oc.close(); os.unlink(outc.name)
+cruce_combo = cruzar_variantes(fc, {("AG-COMBO", normalizar_titulo("Kit distribución para Ford Focus 2018-2020"))})
+check("publicación histórica AG por SKU y compatibilidad cubre variante combo", len(cruce_combo["existentes"]) >= 1)
 print(f"\n{ok} pasaron · {bad} fallaron")
 raise SystemExit(bool(bad))
