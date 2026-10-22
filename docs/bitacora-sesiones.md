@@ -2966,6 +2966,8 @@ compatibilidades con años inválidos y genera títulos `Producto para Aplicaci�
 posición. FOTOS AG se cruza por el código completo del combo, sin fallback a fotos de piezas.
 La plantilla y validación HTTPS comunes conservan sus reglas actuales.
 
-Verificación: AG 26/26, Módulo 2 88/88, imágenes 20/20, CAUPLAS 39/39, KIMS 20/20,
-GONHER 24/24, build de frontend correcto y `git diff --check` limpio. No se encontró el
-libro real de combos en el workspace, así que la aceptación se comprobó con XLSX sintético.
+Verificación inicial: AG 26/26, Módulo 2 88/88, imágenes 20/20, CAUPLAS 39/39, KIMS 20/20,
+GONHER 24/24 y build de frontend correcto. Al recibir `kits-ag.xlsx`, se confirmó que las
+10,069 filas/2,573 SKU tienen `Stock` y `Precio` vacíos; el master anterior tampoco aporta
+stock ni SKU de combo. El endpoint ahora informa cada faltante por separado, y la prueba AG
+incluye títulos de hoja antes de encabezados y ambos campos vacíos. Regresión AG: 28/28.

@@ -54,7 +54,13 @@ AG_HEADERS = ("Producto", "Código", "SYD", "GROB", "KYB", "BOGE", "VAZLO", "Mar
               "Aplicación", "Desde", "Hasta", "Posición", "Distribuidor", "stock")
 AG_ANCLAS = ("Producto", "Código", "Aplicación", "Desde", "Hasta", "Distribuidor", "stock")
 AG_EQUIVALENCIAS = ("SYD", "GROB", "KYB", "BOGE", "VAZLO")
-AG_COMBO_ANCLAS = ("codigo", "producto", "aplicacion", "ano desde", "ano hasta", "stock", "precio")
+AG_COMBO_ALIASES = {
+    "codigo": ("codigo", "código", "codigo combo", "código combo", "sku"),
+    "producto": ("producto",), "aplicacion": ("aplicacion", "aplicación"),
+    "desde": ("ano desde", "año desde", "desde", "ano inicio", "año inicio", "inicio"),
+    "hasta": ("ano hasta", "año hasta", "hasta", "ano fin", "año fin", "ano final", "año final", "fin"),
+    "stock": ("stock",), "precio": ("precio",),
+}
 
 
 def _texto(val) -> str:
@@ -418,36 +424,45 @@ def _parece_ag(ws):
 
 
 def _hoja_ag(wb):
-    combos = [ws for ws in wb.worksheets if _parece_ag_combos(ws)]
+    combos = [ws for ws in wb.worksheets if _fila_header_ag_combos(ws)]
     if combos:
         return combos[0]
     completas = [ws for ws in wb.worksheets if _headers_ag(ws)[0]]
     return completas[0] if completas else next((ws for ws in wb.worksheets if _parece_ag(ws)), None)
 
 
-def _mapa_headers(ws):
-    return {_normalizar(v): i for i, v in enumerate(next(ws.iter_rows(min_row=1, max_row=1, values_only=True))) if _texto(v)}
+def _mapa_headers(ws, fila=1):
+    valores = next(ws.iter_rows(min_row=fila, max_row=fila, values_only=True), ())
+    return {_normalizar(v): i for i, v in enumerate(valores) if _texto(v)}
+
+
+def _fila_header_ag_combos(ws):
+    """Encuentra el encabezado del master aun si hay título/notas arriba."""
+    for fila in range(1, min(ws.max_row, 15) + 1):
+        cols = _mapa_headers(ws, fila)
+        presentes = sum(any(_normalizar(alias) in cols for alias in aliases)
+                        for aliases in AG_COMBO_ALIASES.values())
+        if presentes == len(AG_COMBO_ALIASES):
+            return fila
+    return None
 
 
 def _parece_ag_combos(ws):
-    cols = _mapa_headers(ws)
-    return sum(_normalizar(h) in cols for h in AG_COMBO_ANCLAS) >= 6
+    return _fila_header_ag_combos(ws) is not None
 
 
 def _leer_master_ag_combos(ws):
-    cols = _mapa_headers(ws)
-    alias = {"codigo": ("codigo", "código"), "producto": ("producto",),
-             "aplicacion": ("aplicacion", "aplicación"),
-             "desde": ("ano desde", "año desde", "desde", "ano inicio", "año inicio"),
-             "hasta": ("ano hasta", "año hasta", "hasta", "ano fin", "año fin"),
-             "stock": ("stock",), "precio": ("precio",)}
-    idx = {k: next((cols[_normalizar(n)] for n in names if _normalizar(n) in cols), None) for k, names in alias.items()}
+    fila_header = _fila_header_ag_combos(ws)
+    cols = _mapa_headers(ws, fila_header) if fila_header else {}
+    idx = {k: next((cols[_normalizar(n)] for n in names if _normalizar(n) in cols), None)
+           for k, names in AG_COMBO_ALIASES.items()}
     faltan = [k for k, i in idx.items() if i is None]
     if faltan:
         raise ValueError("El master de combos AG requiere: " + ", ".join(faltan))
     componentes = [i for nombre, i in cols.items() if re.fullmatch(r"componente(?:\s*\d+)?", nombre)]
     grupos, errores, filas_master = {}, [], 0
-    for n, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+    for n, fila in enumerate(ws.iter_rows(min_row=(fila_header or 1) + 1, values_only=True),
+                               (fila_header or 1) + 1):
         if not any(_texto(v) for v in fila): continue
         filas_master += 1
         val = lambda k: fila[idx[k]] if idx[k] < len(fila) else None
@@ -460,12 +475,28 @@ def _leer_master_ag_combos(ws):
         regs = grupo["registros"]; first = regs[0][2]
         def err(msg, r=first): errores.append(_error(r["fila"], {"clave": r["clave"], "modelo": r.get("aplicacion"), "inicio": r["inicio_raw"], "fin": r["fin_raw"]}, msg))
         if not sku or not grupo["producto"]: err("Falta Código o Producto"); continue
-        stocks = [_stock_entero(row[idx["stock"]])[0] for _, row, _ in regs]
-        costos = [_numero_positivo(row[idx["precio"]]) for _, row, _ in regs]
-        if any(x is None for x in stocks) or len(set(stocks)) != 1:
-            err("Stock vacío, inválido o diferente dentro del SKU"); continue
-        if any(x is None for x in costos): sin_precio += 1; err("Costo Precio inválido o vacío"); continue
-        if len(set(costos)) != 1: inconsistentes += 1; err("Costo Precio diferente dentro del SKU"); continue
+        stocks_raw = [row[idx["stock"]] if idx["stock"] < len(row) else None for _, row, _ in regs]
+        stocks_parseados = [_stock_entero(v) for v in stocks_raw]
+        stocks = [valor for valor, _ in stocks_parseados]
+        costos_raw = [row[idx["precio"]] if idx["precio"] < len(row) else None for _, row, _ in regs]
+        costos = [_numero_positivo(v) for v in costos_raw]
+        invalido = False
+        if any(valor is None for valor in stocks):
+            motivo = ("Stock vacío dentro del SKU" if any(v is None or (isinstance(v, str) and not v.strip()) for v in stocks_raw)
+                      else "Stock inválido dentro del SKU")
+            err(motivo); invalido = True
+        elif len(set(stocks)) != 1:
+            err("Stock diferente dentro del SKU"); invalido = True
+        if any(valor is None for valor in costos):
+            sin_precio += 1
+            motivo = ("Precio vacío dentro del SKU" if any(v is None or (isinstance(v, str) and not v.strip()) for v in costos_raw)
+                      else "Precio inválido dentro del SKU")
+            err(motivo); invalido = True
+        elif len(set(costos)) != 1:
+            inconsistentes += 1
+            err("Precio diferente dentro del SKU"); invalido = True
+        if invalido:
+            continue
         pieza = {"clave": grupo["sku"], "linea": grupo["producto"], "producto": grupo["producto"], "formato": "master_ag", "tipo_ag": "combos", "stock": stocks[0], "costo": costos[0], "componentes": [], "compatibilidades": [], "equivalencias": {}, "filas_origen": [r[0] for r in regs]}
         visto_comp, visto_compat = set(), set()
         for n, fila, reg in regs:

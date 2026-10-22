@@ -79,6 +79,15 @@ def _leer_o_400(ruta, perfil):
             detail="No pude leer este archivo como Excel. Verifica que sea el catálogo del proveedor.",
         )
     if not resultado.piezas:
+        if perfil.codigo_bodega == "AG" and resultado.formato == "master_ag":
+            motivos = Counter(error.get("motivo", "Registro inválido") for error in resultado.errores)
+            detalle = "; ".join(f"{motivo}: {cantidad}" for motivo, cantidad in motivos.most_common(4))
+            if not detalle:
+                detalle = "No se encontraron filas de datos debajo de los encabezados."
+            raise HTTPException(
+                status_code=400,
+                detail=f"Leí el master AG, pero no quedaron combos utilizables. {detalle}",
+            )
         raise HTTPException(
             status_code=400,
             detail=("No encontré piezas en el archivo. ¿Es el catálogo de "
