@@ -45,6 +45,7 @@ export default function Publicaciones() {
   const [nombres, setNombres] = useState({});
   const [envioPendiente, setEnvioPendiente] = useState(false);
   const [proveedor, setProveedor] = useState('KG');
+  const [tipoAg, setTipoAg] = useState('kits');
   const [catalogo, setCatalogo] = useState(null);
   const [publicacionesML, setPublicacionesML] = useState(null);
   const [imagenesCauplas, setImagenesCauplas] = useState(null);
@@ -85,7 +86,7 @@ export default function Publicaciones() {
     if (!catalogo) return;
     setCargando(true); setError(null); setAnalisis(null); setLineasSel([]); setSistemasSel([]);
     try {
-      const { data } = await pubAnalizar(proveedor, catalogo, publicacionesML, imagenesCauplas, imagenesAg);
+      const { data } = await pubAnalizar(proveedor, catalogo, publicacionesML, imagenesCauplas, imagenesAg, tipoAg);
       setAnalisis(data);
     } catch (err) {
       setError(err.response?.data?.detail || 'No pude analizar el catálogo.');
@@ -104,6 +105,7 @@ export default function Publicaciones() {
         publicaciones_ml: publicacionesML,
         imagenes_cauplas: imagenesCauplas,
         imagenes_ag: imagenesAg,
+        tipo_ag: tipoAg,
         lineas: lineasSel.length ? JSON.stringify(lineasSel) : '',
         sistemas: sistemasSel.length ? JSON.stringify(sistemasSel) : '',
         solo_faltantes: true,
@@ -192,8 +194,17 @@ export default function Publicaciones() {
             </select>
           </Campo>
 
-          <Campo label={proveedor === 'AG' ? 'Kits AG' : 'Catálogo del proveedor'}
-                 hint={proveedor === 'AG' ? 'Combos por aplicaciones AG.xlsx; Código, Producto, Aplicación, años, Stock y Precio' : 'El Excel con sus claves y precios'}>
+          {proveedor === 'AG' && (
+            <Campo label="Formato de catálogo AG">
+              <select value={tipoAg} onChange={(e) => { setTipoAg(e.target.value); setCatalogo(null); setAnalisis(null); }} className={inputCls}>
+                <option value="kits">Kits AG</option>
+                <option value="individuales">Productos individuales AG</option>
+              </select>
+            </Campo>
+          )}
+
+          <Campo label={proveedor === 'AG' ? (tipoAg === 'kits' ? 'Catálogo de kits AG' : 'Catálogo de productos individuales AG') : 'Catálogo del proveedor'}
+                 hint={proveedor === 'AG' ? (tipoAg === 'kits' ? 'Combos por aplicaciones AG.xlsx; Código, Producto, Aplicación, años, Stock y Precio' : 'Master AG.xlsx; catálogo individual con equivalencias y compatibilidades') : 'El Excel con sus claves y precios'}>
             <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                    onChange={(e) => setCatalogo(e.target.files?.[0] || null)} />
           </Campo>
@@ -210,7 +221,7 @@ export default function Publicaciones() {
             </Campo>
           )}
           {proveedor === 'AG' && (
-            <Campo label="Archivo de fotos AG" hint="Libro FOTOS AG.xlsx; obligatorio. Los combos cruzan por código completo, hasta 10 fotos">
+            <Campo label="Archivo de fotos AG" hint={`Libro FOTOS AG.xlsx; obligatorio. ${tipoAg === 'kits' ? 'Los kits cruzan por código completo' : 'Los productos cruzan por SKU y número de imagen'}, hasta 10 fotos`}>
               <input type="file" accept=".xlsx" className="w-full text-sm mt-2"
                      onChange={(e) => setImagenesAg(e.target.files?.[0] || null)} />
             </Campo>
@@ -317,7 +328,9 @@ export default function Publicaciones() {
           )}
           {analisis.formato === 'master_ag' && (
             <div className="mb-3 p-3 bg-notion-bg rounded-lg text-xs text-notion-text-secondary">
-              Kits AG toma los combos de Combos por aplicaciones AG.xlsx. Consolida componentes y aplicaciones por Código; Stock y Precio deben ser únicos por SKU. Las fotos se relacionan por código completo desde FOTOS AG.xlsx.
+              {tipoAg === 'kits'
+                ? 'Kits AG toma los combos de Combos por aplicaciones AG.xlsx. Consolida componentes y aplicaciones por Código; Stock y Precio deben ser únicos por SKU. Las fotos se relacionan por código completo desde FOTOS AG.xlsx.'
+                : 'Productos individuales AG procesa Master AG.xlsx y conserva equivalencias, compatibilidades, stock y fotos por SKU desde FOTOS AG.xlsx.'}
             </div>
           )}
 

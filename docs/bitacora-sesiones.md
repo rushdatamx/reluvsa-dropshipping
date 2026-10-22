@@ -2979,3 +2979,15 @@ inválidos. Es válido procesar sólo los SKU completos; el resto queda excluido
 omiten años repetidos al final de Aplicación y usan abreviaturas controladas para nombres
 largos de producto. La prueba local produjo 805 publicaciones y 1,282 filas en `Títulos por
 corregir`.
+
+## 2026-10-22 — Opciones AG para productos individuales y kits
+
+Publicaciones masivas ofrece ahora **Kits AG** y **Productos individuales AG**. La opción
+define el nombre/formato del catálogo esperado y se envía tanto al análisis como a la
+generación; cargar el tipo contrario devuelve un error claro. Ambas requieren `FOTOS AG.xlsx`:
+los productos individuales conservan el cruce por SKU y sufijos de galería, mientras que
+los combos mantienen el cruce exacto por código completo. Las solicitudes anteriores que
+omiten la opción siguen usando autodetección.
+
+Verificación local: candado de formato en ambas direcciones y aceptación de ambos formatos,
+regresión AG 29/29, Módulo 2 88/88, build de frontend correcto y `git diff --check` limpio.

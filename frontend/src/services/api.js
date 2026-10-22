@@ -163,13 +163,14 @@ export const mlSyncCuenta = (cuenta, tipo = 'incremental') =>
 // Módulo 2 — Publicaciones masivas (admin). Excel -> Excel, no toca la API de ML.
 export const pubProveedores = () => api.get('/publicaciones/proveedores');
 
-export const pubAnalizar = (codigoBodega, catalogo, publicacionesML, imagenesCauplas, imagenesAg) => {
+export const pubAnalizar = (codigoBodega, catalogo, publicacionesML, imagenesCauplas, imagenesAg, tipoAg) => {
   const fd = new FormData();
   fd.append('codigo_bodega', codigoBodega);
   fd.append('catalogo', catalogo);
   if (publicacionesML) fd.append('publicaciones_ml', publicacionesML);
   if (imagenesCauplas) fd.append('imagenes_cauplas', imagenesCauplas);
   if (imagenesAg) fd.append('imagenes_ag', imagenesAg);
+  if (tipoAg) fd.append('tipo_ag', tipoAg);
   return api.post('/publicaciones/analizar', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000,

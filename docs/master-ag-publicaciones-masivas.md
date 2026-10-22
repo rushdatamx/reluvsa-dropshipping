@@ -1,11 +1,14 @@
 # Master AG — Publicaciones masivas
 
-ARGENPARTS se identifica en el portal como `AG` y se muestra como **ARGENPARTS**. Es un flujo local Excel → Excel: no llama a Mercado Libre.
+ARGENPARTS se identifica en el portal como `AG` y se muestra como **ARGENPARTS**. En Publicaciones masivas se elige **Kits AG** o **Productos individuales AG** antes de cargar el catálogo. Es un flujo local Excel → Excel: no llama a Mercado Libre.
 
 ## Archivos obligatorios
 
-1. `Combos por aplicaciones AG.xlsx`, detectado por encabezados aunque cambie el nombre de hoja: `Codigo`, `Producto`, `Aplicación`, `Año desde`, `Año hasta`, `Stock` y `Precio`. `Codigo` es el SKU, `Producto` el nombre y `Precio` el costo proveedor. Las columnas `Componente` o `Componente N` se consolidan por SKU.
-2. `FOTOS AG.xlsx`, leído hasta en sus diez hojas. Cada fila aporta Servidor, Carpeta, Nombre y Extensión para formar la URL.
+1. Para **Kits AG**, `Combos por aplicaciones AG.xlsx`, detectado por encabezados aunque cambie el nombre de hoja: `Codigo`, `Producto`, `Aplicación`, `Año desde`, `Año hasta`, `Stock` y `Precio`. `Codigo` es el SKU, `Producto` el nombre y `Precio` el costo proveedor. Las columnas `Componente` o `Componente N` se consolidan por SKU.
+2. Para **Productos individuales AG**, `Master AG.xlsx`, con los encabezados del formato legado definidos en `parser_catalogo.py` (`Código`, `Producto`, compatibilidad, equivalencias, `stock` y `Distribuidor`).
+3. En ambas opciones, `FOTOS AG.xlsx`, leído hasta en sus diez hojas. Cada fila aporta Servidor, Carpeta, Nombre y Extensión para formar la URL.
+
+La opción elegida viaja en análisis y generación. El backend rechaza un master de combos cuando se eligieron productos individuales, y viceversa, con un mensaje que indica el archivo esperado. Las solicitudes API antiguas que no envían la opción conservan la autodetección existente.
 
 El formato anterior `Master AG.xlsx` sigue aceptado como legado. Costo o stock distintos, vacíos o inválidos en filas del mismo SKU excluyen el SKU completo. Stock debe ser un entero no negativo. Una fila válida es una compatibilidad; años ausentes, inválidos o invertidos se excluyen y se reportan. En Combos se consolidan aplicaciones repetidas y componentes sin duplicados.
 
@@ -15,7 +18,7 @@ Una compatibilidad de varios años genera un título con el rango completo y dos
 
 ## Fotos
 
-En el formato legado, el nombre completo del SKU es Imagen1 y también se aceptan `SKU_2`…`SKU_10` y `SKU-2`…`SKU-10`. En Combos sólo se acepta coincidencia exacta entre el código completo y el nombre de foto; no se usan imágenes de componentes ni sufijos. Duplicados, posiciones mayores a 10 y SKU que no existen en el master se omiten; análisis devuelve detectadas, cruzadas, omitidas, sin match y SKU sin fotos.
+En Productos individuales, el nombre completo del SKU es Imagen1 y también se aceptan `SKU_2`…`SKU_10` y `SKU-2`…`SKU-10`. En Kits sólo se acepta coincidencia exacta entre el código completo y el nombre de foto; no se usan imágenes de componentes ni sufijos. Duplicados, posiciones mayores a 10 y SKU que no existen en el master se omiten; análisis devuelve detectadas, cruzadas, omitidas, sin match y SKU sin fotos.
 
 Al generar, las URLs pasan el candado común: únicamente HTTPS en `apimagenes.s3.amazonaws.com`, sin redirecciones, respuesta `image/*` y al menos 1200×1200. Las no verificadas se vacían sin mover las posiciones de la galería.
 

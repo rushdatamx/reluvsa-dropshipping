@@ -86,7 +86,7 @@ def _leer_o_400(ruta, perfil):
                 detalle = "No se encontraron filas de datos debajo de los encabezados."
             raise HTTPException(
                 status_code=400,
-                detail=f"Leí el master AG, pero no quedaron combos utilizables. {detalle}",
+                detail=f"Leí el catálogo AG, pero no quedaron productos utilizables. {detalle}",
             )
         raise HTTPException(
             status_code=400,
@@ -117,6 +117,21 @@ def _leer_o_400(ruta, perfil):
     return resultado
 
 
+def _validar_tipo_ag(resultado, tipo_ag):
+    """Valida la opción AG elegida; solicitudes antiguas conservan autodetección."""
+    if not tipo_ag:
+        return
+    if tipo_ag not in {"individuales", "kits"}:
+        raise HTTPException(status_code=400, detail="La opción de catálogo AG no es válida.")
+    es_kits = any(p.get("tipo_ag") == "combos" for p in resultado.piezas)
+    esperado = "kits" if es_kits else "individuales"
+    if esperado != tipo_ag:
+        catalogo = "Combos por aplicaciones AG.xlsx" if tipo_ag == "kits" else "Master AG.xlsx"
+        opcion = "Kits AG" if tipo_ag == "kits" else "Productos individuales AG"
+        raise HTTPException(status_code=400,
+            detail=f"{opcion} requiere {catalogo}; el archivo cargado corresponde a la otra opción de AG.")
+
+
 @router.get("/proveedores")
 def listar_proveedores_soportados(_=Depends(require_admin)):
     """Proveedores con perfil de catálogo listo."""
@@ -135,6 +150,7 @@ async def analizar(
     publicaciones_ml: UploadFile = File(None),
     imagenes_cauplas: UploadFile = File(None),
     imagenes_ag: UploadFile = File(None),
+    tipo_ag: str = Form(""),
     _=Depends(require_admin),
 ):
     """Lee el catálogo y lo cruza contra lo ya publicado.
@@ -157,6 +173,7 @@ async def analizar(
 
     try:
         lectura = _leer_o_400(ruta_cat, perfil)
+        if perfil.codigo_bodega == "AG": _validar_tipo_ag(lectura, tipo_ag)
         piezas = lectura.piezas
         fotos_cauplas = None
         if perfil.codigo_bodega == "CAUPLAS":
@@ -274,6 +291,7 @@ async def generar(
     publicaciones_ml: UploadFile = File(None),
     imagenes_cauplas: UploadFile = File(None),
     imagenes_ag: UploadFile = File(None),
+    tipo_ag: str = Form(""),
     descripcion_base: str = Form(""),
     marca: str = Form(""),
     categoria_ml: str = Form(""),
@@ -302,6 +320,7 @@ async def generar(
 
     try:
         lectura = _leer_o_400(ruta_cat, perfil)
+        if perfil.codigo_bodega == "AG": _validar_tipo_ag(lectura, tipo_ag)
         piezas = lectura.piezas
         if lectura.formato == "master_kims" and (not math.isfinite(tipo_cambio_usd) or tipo_cambio_usd <= 0):
             raise HTTPException(status_code=400, detail="El tipo de cambio USD debe ser mayor que cero.")

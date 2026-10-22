@@ -326,8 +326,9 @@ familias (radiadores y bombas no van en la misma categoría), habría que mapear
 
 ## 6. Cómo lo usa Gaby
 
-1. **Publicaciones masivas** en el menú → elige proveedor
-2. Sube el **catálogo**, para CAUPLAS también el CSV obligatorio de ImageKit, y
+1. **Publicaciones masivas** en el menú → elige proveedor; para ARGENPARTS elige
+   también **Kits AG** o **Productos individuales AG**
+2. Sube el **catálogo**, para AG el archivo FOTOS AG obligatorio, para CAUPLAS el CSV obligatorio de ImageKit, y
    opcionalmente el reporte de **Publicaciones ML**
 3. Ve variantes estimadas, existentes y faltantes, y **filtra por Producto**
 4. Ajusta marca, categoría y los % del precio
