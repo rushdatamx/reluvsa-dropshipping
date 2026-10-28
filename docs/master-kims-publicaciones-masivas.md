@@ -27,10 +27,48 @@ Por SKU se consolidan OEM (`alterna_1`–`alterna_4`, columnas B:E; `original` e
 comentarios, posiciones, sistemas, fotos y todas las compatibilidades. Cilindros,
 tipo, múltiplo, dimensiones y UPC no se exportan en esta versión.
 
-Cada rango produce un título `Producto para Armadora Modelo Versión Motor Años`.
+Cada compatibilidad de varios años produce un título por año y una variante
+adicional con el rango completo: `2018`, `2019`, `2020` y `2018/2020`. Una
+compatibilidad de un solo año produce una única publicación. No se generan bloques
+intermedios de años.
+
+### Contrato de expansión y deduplicación
+
+`generar_filas_con_reporte` delega la expansión en `_variantes_kims` de
+`backend/services/generador_plantilla.py`. La función devuelve pares
+`(etiqueta, compatibilidad)` en orden cronológico: un diccionario copiado por cada
+año, con `inicio == fin == año`, seguido del diccionario original copiado para el
+rango. La etiqueta de este último es `Inicio/Fin`. Las validaciones de años viven
+en el lector (`parser_catalogo.py`); el generador recibe sólo compatibilidades
+válidas y no debe corregir ni invertir rangos.
+
+El generador construye cada título por separado llamando a `_titulo_kims`. Para
+cada una prueba, en este orden: título con armadora; sin armadora; y sin armadora
+ni versión. Producto, modelo, motor cuando existe y año son estructurales. No se
+abrevia ni recorta el texto. Si los tres intentos exceden `MAX_TITULO` (60), se
+crea una exclusión para esa variante y continúa con las demás; la fila pendiente
+conserva el candidato largo y sus datos comerciales para la hoja de corrección.
+
+La clave de deduplicación es `(SKU en mayúsculas, título normalizado)`. El título
+se normaliza quitando acentos, convirtiendo a minúsculas y colapsando espacios.
+Esto permite que compatibilidades distintas que terminan en el mismo título no
+creen publicaciones duplicadas, sin colapsar años o rangos cuyo título sí difiere.
+Las variantes conservadas repiten precio calculado, descripción completa, fotos,
+stock y marca del SKU; sólo cambian título y etiqueta de aplicación. La descripción
+no se reduce a la compatibilidad que originó cada publicación.
+
+La regresión `backend/scripts/test_publicaciones_kims.py` fija el ejemplo de
+2018–2020 (tres títulos anuales más el rango), el caso de un año (una publicación),
+la exclusión de años invertidos en el lector, el límite de 60 caracteres y la
+plantilla XLSX resultante. La verificación del libro debe comprobar encabezados y
+37 columnas, además de la propagación de precio, stock, marca e imágenes.
+
+Cada variante produce el título `Producto para Armadora Modelo Versión Motor Años`.
 Si no cabe en 60 caracteres se omite armadora; después, versión. Producto,
 modelo, motor presente y años nunca se eliminan ni se cortan. Si aun así no cabe,
-la variante se excluye y queda en el reporte de errores.
+esa variante se excluye y queda en el reporte de errores, sin impedir las otras
+variantes de la compatibilidad. Las variantes se deduplican por SKU y título
+normalizado.
 
 La descripción incluye producto, OEM, combustible, comentarios, posiciones,
 compatibilidades completas y la descripción base de RELUVSA. La marca de cada

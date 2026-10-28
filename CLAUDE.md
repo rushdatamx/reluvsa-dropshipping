@@ -699,7 +699,8 @@ filas inválidas**. El catálogo anterior de 3,676 piezas sigue aceptado como fo
 **KIMS:** formato `master_kims`, código `KIM`, detectado por encabezados. Línea base:
 19,289 filas / 7,945 SKU observados / 4,852 utilizables / 10,799 variantes. Convierte USD
 con tipo de cambio editable, usa marca por SKU, filtra sistema → producto y valida FOTO 1–4
-sólo desde `www.kimsauto.com.mx`. Contrato en `docs/master-kims-publicaciones-masivas.md`.
+sólo desde `www.kimsauto.com.mx`. Cada rango genera una publicación por año más otra con
+el rango completo; un solo año genera una. Contrato en `docs/master-kims-publicaciones-masivas.md`.
 
 **GONHER:** formato `master_gonher`, código y marca `GONHER`. Procesa sólo la hoja
 Gonher (o su huella renombrada), agrupa por Filtro y deja stock e imágenes para captura

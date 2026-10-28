@@ -338,6 +338,22 @@ def _titulo_kims(producto, compat, permitir_exceso=False) -> Optional[str]:
     return ultimo if permitir_exceso else None
 
 
+def _variantes_kims(producto, compat):
+    """Devuelve títulos anuales y, para rangos, una variante con el rango completo."""
+    inicio, fin = compat["inicio"], compat["fin"]
+    anios = [inicio] if inicio == fin else list(range(inicio, fin + 1)) + [None]
+    variantes = []
+    for anio in anios:
+        variante = dict(compat)
+        if anio is not None:
+            variante.update(inicio=anio, fin=anio)
+            etiqueta = str(anio)
+        else:
+            etiqueta = f"{inicio}/{fin}"
+        variantes.append((etiqueta, variante))
+    return variantes
+
+
 def _motor_gonher_reducido(motor):
     texto = " ".join(str(motor or "").split())
     arquitectura = re.search(r"\b(?:L|V|H|I|B|W)\s*\d{1,2}\b", texto, re.IGNORECASE)
@@ -712,26 +728,25 @@ def generar_filas_con_reporte(piezas, config):
             precio = calcular_precio(pieza.get("costo_usd") * config.tipo_cambio_usd,
                                      pieza.get("linea", ""), config.params_precio)
             for compat in pieza.get("compatibilidades", []):
-                titulo = _titulo_kims(pieza.get("producto"), compat)
-                if not titulo:
-                    candidato = _titulo_kims(pieza.get("producto"), compat, permitir_exceso=True)
-                    anio = f"{compat.get('inicio')}/{compat.get('fin')}"
-                    exclusion = {**_exclusion_titulo("KIM", pieza.get("clave"), compat.get("fila"),
-                        candidato, compat, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
-                        "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
-                        "inicio": compat.get("inicio"), "fin": compat.get("fin")}
-                    exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
-                        anio, imagenes=pieza.get("imagenes", []), stock=pieza["stock"], marca=pieza.get("marca", "")))
-                    continue
-                par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
-                if par in vistos:
-                    deduplicadas += 1; continue
-                vistos.add(par)
-                filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
-                    pieza.get("producto", ""), precio, descripcion,
-                    f"{compat.get('inicio')}/{compat.get('fin')}", False,
-                    pieza.get("imagenes", []), compat.get("fila"), stock=pieza["stock"],
-                    marca=pieza.get("marca", "")))
+                for anio, variante in _variantes_kims(pieza.get("producto"), compat):
+                    titulo = _titulo_kims(pieza.get("producto"), variante)
+                    if not titulo:
+                        candidato = _titulo_kims(pieza.get("producto"), variante, permitir_exceso=True)
+                        exclusion = {**_exclusion_titulo("KIM", pieza.get("clave"), compat.get("fila"),
+                            candidato, variante, anio), "fila": compat.get("fila"), "clave": pieza.get("clave"),
+                            "armadora": compat.get("armadora"), "modelo": compat.get("modelo"),
+                            "inicio": variante.get("inicio"), "fin": variante.get("fin")}
+                        exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion,
+                            anio, imagenes=pieza.get("imagenes", []), stock=pieza["stock"], marca=pieza.get("marca", "")))
+                        continue
+                    par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                    if par in vistos:
+                        deduplicadas += 1; continue
+                    vistos.add(par)
+                    filas.append(FilaPublicacion(titulo, str(pieza.get("clave") or "").strip(),
+                        pieza.get("producto", ""), precio, descripcion, anio, False,
+                        pieza.get("imagenes", []), compat.get("fila"), stock=pieza["stock"],
+                        marca=pieza.get("marca", "")))
             continue
         if pieza.get("formato") == "master_cauplas":
             descripcion = _describir_cauplas(pieza, config)

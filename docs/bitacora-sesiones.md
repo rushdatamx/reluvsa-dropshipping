@@ -2991,3 +2991,15 @@ omiten la opción siguen usando autodetección.
 
 Verificación local: candado de formato en ambas direcciones y aceptación de ambos formatos,
 regresión AG 29/29, Módulo 2 88/88, build de frontend correcto y `git diff --check` limpio.
+
+## 2026-10-28 — Variantes anuales para KIMS
+
+KIMS ahora genera una publicación por cada año de la compatibilidad y una variante extra con
+el rango completo. Las compatibilidades de un solo año generan una sola publicación. Cada
+título se valida de manera independiente contra 60 caracteres; las variantes que exceden el
+límite siguen apareciendo en el reporte de exclusiones. Se mantienen la deduplicación por SKU
+y título normalizado, la descripción completa y los campos comerciales del SKU.
+
+Verificación: regresión KIMS 23/23, incluyendo XLSX con cinco variantes para 2018–2020, una
+variante para 2021, 37 columnas y propagación de precio, stock, marca e imágenes. `git diff
+--check` limpio.
