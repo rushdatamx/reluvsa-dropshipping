@@ -63,8 +63,8 @@ def guardar(wb):
 
 
 print("\n=== 1. PERFIL Y DETECCIÓN ===")
-check("CAUPLAS, GONHER, KIMS, KG y AG son proveedores soportados",
-      proveedores_soportados() == ["AG", "CAUPLAS", "GONHER", "KG", "KIM"])
+check("proveedores actuales incluyen DIFIRSA",
+      proveedores_soportados() == ["AG", "CAUPLAS", "DIFIRSA", "GONHER", "KG", "KIM"])
 check("la marca predeterminada de CAUPLAS es editable desde CAUPLAS",
       perfil_de("CAUPLAS").marca_ml == "CAUPLAS")
 check("CAUPLAS sólo autoriza fotos de ImageKit",
@@ -185,7 +185,7 @@ check("si el rango excede 60, divide en años sin recortar",
 check("todos los títulos respetan estrictamente 60 caracteres", all(len(f.titulo) <= 60 for f in fa))
 check("deduplica por SKU + título normalizado", sum(f.sku == "DUP" for f in fa) == 1)
 
-print("\n=== 4. CRUCE Y PLANTILLA DE 37 COLUMNAS ===")
+print("\n=== 4. CRUCE Y PLANTILLA ===")
 pub = openpyxl.Workbook(); ps = pub.active; ps.append([""] * 17)
 row = [""] * 17; row[1] = f500.titulo.upper(); row[16] = "OTRO&500"; ps.append(row)
 publicados = leer_publicaciones(guardar(pub)); cruce = cruzar_variantes(filas, publicados)
@@ -202,7 +202,8 @@ check("las variantes del mismo SKU conservan idéntica galería",
 escribir_xlsx(filas, cfg, salida.name)
 wo = openpyxl.load_workbook(salida.name, data_only=True); so = wo.active
 encabezados = [c.value for c in so[1]]; idx = {h: i + 1 for i, h in enumerate(encabezados)}
-check("plantilla conserva exactamente 37 columnas", encabezados == COLUMNAS and len(encabezados) == 37)
+check("plantilla conserva las columnas previas y agrega DIFIRSA",
+      encabezados == COLUMNAS and len(encabezados) == 38 and encabezados[-1] == "DIFIRSA")
 check("CAUPLAS escribe hasta diez imágenes y conserva posición",
       so.cell(2, idx["Imagen1"]).value == "https://ik.imagekit.io/cauplas/500.jpg" and
       so.cell(2, idx["Imagen2"]).value == "https://ik.imagekit.io/cauplas/500-2.jpg" and

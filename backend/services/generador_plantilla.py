@@ -1,7 +1,7 @@
 """
 Generador de la plantilla de publicaciones masivas para Mercado Libre.
 
-Convierte el catálogo de un proveedor en el .xlsx de 37 columnas que Gaby sube a
+Convierte el catálogo de un proveedor en el .xlsx que Gaby sube a
 ML — el mismo formato de 'PENDIENTES ACDELCO.xlsx', que es la plantilla real que
 ella usa hoy.
 
@@ -34,7 +34,7 @@ from services.aplicaciones_kg import Aplicacion, parse_aplicaciones
 from services.perfiles_catalogo import PerfilCatalogo
 from services.precio_publicacion import ParametrosPrecio, calcular_precio
 
-# Las 37 columnas de la plantilla, en el orden EXACTO que espera Mercado Libre.
+# Las columnas de la plantilla, en el orden EXACTO que espera Mercado Libre.
 # 🔴 No reordenar ni renombrar: ML lee por posición y encabezado.
 COLUMNAS = [
     "Titulo", "Categoria", "Precio", "Moneda(MXN,ARS,COP)", "Cantidad",
@@ -46,11 +46,11 @@ COLUMNAS = [
     "Imagen6", "Imagen7", "Imagen8", "Imagen9", "Imagen10",
     "UPC", "Marca", "Talla", "Color", "Modelo",
     "Canal(mercadolibre,mshops,ambos)",
-    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER",
+    "AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER", "DIFIRSA",
 ]
 
-# Las 7 bodegas del final: el stock va en la columna del proveedor, 0 en las demás.
-BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER"]
+# Las 8 bodegas del final: el stock va en la columna del proveedor, 0 en las demás.
+BODEGAS = ["AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO", "GONHER", "DIFIRSA"]
 
 # Las constantes que Gaby marcó en AMARILLO PURO: siempre van iguales.
 # "Envio Gratis" no pertenece aquí: se deriva del precio final de cada fila.
@@ -504,6 +504,23 @@ def _describir_cauplas(pieza, config):
     return "\n".join(str(x).strip() for x in partes)
 
 
+def _describir_difrisa(pieza, config):
+    partes = [pieza.get("producto", ""), "", "Número de parte: " + str(pieza.get("clave", ""))]
+    if pieza.get("equivalencias"):
+        partes += ["", "Equivalencias: " + " | ".join(pieza["equivalencias"])]
+    if pieza.get("oems"):
+        partes += ["", "OEM: " + " | ".join(pieza["oems"])]
+    compatibles = []
+    for c in pieza.get("compatibilidades", []):
+        anios = str(c["inicio"]) if c["inicio"] == c["fin"] else f"{c['inicio']}-{c['fin']}"
+        compatibles.append(" ".join(x for x in (c.get("armadora"), c.get("modelo"), c.get("motor"), anios) if x))
+    if compatibles:
+        partes += ["", "Compatibilidades:"] + compatibles
+    if config.descripcion_base:
+        partes += ["", config.descripcion_base.strip()]
+    return "\n".join(str(x).strip() for x in partes)
+
+
 def _describir_kims(pieza, config):
     partes = [pieza.get("producto", "")]
     if pieza.get("oems"): partes += ["", "OEM: " + " | ".join(pieza["oems"])]
@@ -664,6 +681,27 @@ def _fila_pendiente(exclusion, pieza, titulo, precio, descripcion, aplicacion,
 def generar_filas_con_reporte(piezas, config):
     filas, exclusiones, deduplicadas, vistos = [], [], 0, set()
     for pieza in piezas:
+        if pieza.get("formato") == "master_difrisa":
+            descripcion = _describir_difrisa(pieza, config)
+            precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
+            for compat in pieza.get("compatibilidades", []):
+                titulos, fuera = _variantes_cauplas(pieza.get("producto"), compat)
+                for anios, motivo in fuera:
+                    candidato = _titulo_cauplas(pieza.get("producto"), compat, anios, permitir_exceso=True)
+                    exclusion = {**_exclusion_titulo("DIFIRSA", pieza.get("clave"), compat.get("fila"), candidato, compat, anios),
+                                 "fila": compat.get("fila"), "clave": pieza.get("clave"), "motivo": motivo}
+                    exclusiones.append(_fila_pendiente(exclusion, pieza, candidato, precio, descripcion, anios,
+                        stock=None, marca="Engine Fil", linea=pieza.get("linea")))
+                for titulo in titulos:
+                    par = (str(pieza.get("clave")).upper(), " ".join(_sin_acentos(titulo).split()))
+                    if par in vistos:
+                        deduplicadas += 1
+                        continue
+                    vistos.add(par)
+                    filas.append(FilaPublicacion(titulo, pieza["clave"], pieza["linea"], precio, descripcion,
+                        f"{compat.get('inicio')}-{compat.get('fin')}", False, [], compat.get("fila"),
+                        stock=None, marca="Engine Fil", compatibilidad=compat))
+            continue
         if pieza.get("formato") == "master_ag":
             descripcion = _describir_ag(pieza, config)
             precio = calcular_precio(pieza.get("costo"), pieza.get("linea", ""), config.params_precio)
@@ -813,7 +851,7 @@ def generar_filas_con_reporte(piezas, config):
 def generar_filas(piezas, config: ConfiguracionProveedor,
                   incluir_truncadas: bool = False) -> List[FilaPublicacion]:
     """Expande cada pieza del catálogo en sus N publicaciones."""
-    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
+    if piezas and piezas[0].get("formato") in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag", "master_difrisa"}:
         return generar_filas_con_reporte(piezas, config)[0]
     filas: List[FilaPublicacion] = []
 
@@ -845,7 +883,7 @@ def generar_filas(piezas, config: ConfiguracionProveedor,
 
 def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
                   destino, titulos_por_corregir=None) -> int:
-    """Escribe el .xlsx con las 37 columnas listo para subir a ML."""
+    """Escribe el .xlsx listo para subir a ML."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Publicaciones"
@@ -893,7 +931,7 @@ def escribir_xlsx(filas: List[FilaPublicacion], config: ConfiguracionProveedor,
     for col, ancho in (("A", 58), ("M", 60), ("L", 18)):
         ws.column_dimensions[col].width = ancho
 
-    if config.codigo_bodega.strip().upper() in {"AG", "CAUPLAS", "GONHER", "KG", "KIM"}:
+    if config.codigo_bodega.strip().upper() in {"AG", "CAUPLAS", "GONHER", "KG", "KIM", "DIFIRSA"}:
         pendientes = wb.create_sheet("Títulos por corregir")
         for col, nombre in enumerate(COLUMNAS, 1):
             celda = pendientes.cell(1, col, nombre)

@@ -590,6 +590,64 @@ def _leer_master_ag(ws) -> ResultadoCatalogo:
         True, sin_precio, inconsistentes, errores, len(observados))
 
 
+def _leer_master_difrisa(ws) -> ResultadoCatalogo:
+    """DIFIRSA: primera hoja, Producto A, compatibilidad B:F, SKU H, equivalencias I:O, OEM P, precio Q, stock R."""
+    headers = [_normalizar(c.value) for c in ws[1]]
+    if len(headers) < 18 or headers[0] != "producto" or headers[7] != "engine fil":
+        raise ValueError("El master DIFIRSA requiere Producto en A y Engine Fil en H.")
+    grupos, errores, validas, invalidas = {}, [], 0, 0
+    filas_master = sku_observados = 0
+    for n, row in enumerate(ws.iter_rows(min_row=2, max_col=18, values_only=True), 2):
+        if not any(_texto(v) for v in row):
+            continue
+        filas_master += 1
+        producto, sku = _texto(row[0]), _texto(row[7])
+        if sku:
+            sku_observados += 1
+        if not sku or not producto:
+            errores.append(_error(n, {"clave": sku, "modelo": producto}, "Falta Engine Fil o Producto"))
+            continue
+        compat = {"armadora": _texto(row[1]), "modelo": _texto(row[2]), "motor": _texto(row[3]),
+                  "inicio_raw": row[4], "fin_raw": row[5], "producto": producto, "fila": n}
+        tiene_compat = all((compat["armadora"], compat["modelo"], compat["motor"], compat["inicio_raw"], compat["fin_raw"]))
+        grupo = grupos.setdefault(sku.upper(), {"clave": sku, "producto": producto, "linea": producto,
+            "formato": "master_difrisa", "compatibilidades": [], "equivalencias": [], "oems": [],
+            "filas_origen": [], "precios": [], "stock": None})
+        grupo["filas_origen"].append(n)
+        if tiene_compat:
+            inicio, fin = _anio_entero(compat["inicio_raw"]), _anio_entero(compat["fin_raw"])
+            if inicio is not None and fin is not None and 1900 <= inicio <= fin <= 2100:
+                grupo["compatibilidades"].append({**compat, "inicio": inicio, "fin": fin})
+                validas += 1
+            else:
+                invalidas += 1
+                errores.append(_error(n, {"clave": sku, **compat}, "Años de compatibilidad inválidos"))
+        else:
+            invalidas += 1
+            errores.append(_error(n, {"clave": sku, **compat}, "Compatibilidad incompleta (columnas B:F)"))
+        precio = _numero_positivo(row[16])
+        if precio is not None: grupo["precios"].append(precio)
+        for value in row[8:15]:
+            _agregar_unico(grupo["equivalencias"], _texto(value))
+        _agregar_unico(grupo["oems"], _texto(row[15]))
+    piezas, sin_precio = [], 0
+    for p in grupos.values():
+        precios_raw = p.pop("precios")
+        precios = set(precios_raw)
+        p["costo"] = next(iter(precios)) if len(precios_raw) == len(p["filas_origen"]) and len(precios) == 1 else None
+        # Precio inválido en cualquier fila impide asignar un precio engañoso.
+        n_filas = len(p["filas_origen"])
+        if len(precios_raw) != n_filas or len(precios) != 1:
+            p["costo"] = None
+            sin_precio += 1
+            errores.append(_error(p["filas_origen"][0], {"clave": p["clave"]}, "Precio inválido o inconsistente"))
+        if p["compatibilidades"]:
+            piezas.append(p)
+    return ResultadoCatalogo(piezas, "master_difrisa", filas_master, validas, invalidas,
+                             precio_presente=True, sku_sin_precio=sin_precio, errores=errores,
+                             sku_unicos_master=len(grupos))
+
+
 def _leer_master_kims(ws) -> ResultadoCatalogo:
     valido, columnas = _headers_kims(ws)
     if not valido:
@@ -1120,6 +1178,9 @@ def _leer_legado(wb, perfil):
 def leer_catalogo_detallado(ruta, perfil: PerfilCatalogo) -> ResultadoCatalogo:
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     try:
+        if perfil.codigo_bodega == "DIFIRSA":
+            # DIFIRSA debe procesarse únicamente desde la primera pestaña.
+            return _leer_master_difrisa(wb.worksheets[0])
         hoja_ag = _hoja_ag(wb)
         if hoja_ag is not None:
             return _leer_master_ag(hoja_ag)

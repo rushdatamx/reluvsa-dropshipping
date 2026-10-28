@@ -91,6 +91,11 @@ PERFILES: Dict[str, PerfilCatalogo] = {
         marca_ml="KeepOnGreen",
         dominios_imagenes=("kgmedia.mx",),
     ),
+    "DIFIRSA": PerfilCatalogo(
+        codigo_bodega="DIFIRSA", nombre_hoja=None, fila_header=1,
+        col_clave=7, col_linea=0, col_aplicaciones=1, col_precio_costo=16,
+        anclas_header=("producto", "engine fil"), marca_ml="Engine Fil",
+    ),
 }
 
 

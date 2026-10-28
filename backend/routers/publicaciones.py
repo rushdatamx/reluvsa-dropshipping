@@ -95,7 +95,7 @@ def _leer_o_400(ruta, perfil):
                     f"{chr(65 + perfil.col_clave)}."),
         )
     formato_esperado = {"AG": "master_ag", "CAUPLAS": "master_cauplas", "KIM": "master_kims",
-                        "GONHER": "master_gonher"}.get(perfil.codigo_bodega)
+                        "GONHER": "master_gonher", "DIFIRSA": "master_difrisa"}.get(perfil.codigo_bodega)
     if formato_esperado and resultado.formato != formato_esperado:
         raise HTTPException(
             status_code=400,
@@ -196,7 +196,7 @@ async def analizar(
         publicados = set()
         if ruta_pub:
             try:
-                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}
+                publicados = (leer_publicaciones(ruta_pub) if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag", "master_difrisa"}
                               else leer_skus_publicados(ruta_pub))
             except Exception:
                 raise HTTPException(
@@ -206,22 +206,22 @@ async def analizar(
                 )
 
         cfg = ConfiguracionProveedor(codigo_bodega=codigo_bodega)
-        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag", "master_difrisa"}:
             candidatos, reporte = generar_filas_con_reporte(piezas, cfg)
             cruce_v = cruzar_variantes(candidatos, publicados)
             filas = cruce_v["pendientes"]
             sku_publicados = {sku for sku, _ in publicados}
             por_producto = []
-            productos = ({p["linea"] for p in piezas} if lectura.formato in {"master_kg", "master_kims", "master_ag"} else
+            productos = ({p["linea"] for p in piezas} if lectura.formato in {"master_kg", "master_kims", "master_ag", "master_difrisa"} else
                          {producto for p in piezas for producto in p.get("lineas", [])})
             for producto in sorted(productos):
-                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato in {"master_kg", "master_kims", "master_ag"}
+                pp = [p for p in piezas if (p["linea"] == producto if lectura.formato in {"master_kg", "master_kims", "master_ag", "master_difrisa"}
                                             else producto in p.get("lineas", []))]
                 cand = [f for f in candidatos if f.linea == producto]
                 pend = [f for f in filas if f.linea == producto]
                 por_producto.append({"linea": producto, "producto": producto, "piezas": len(pp),
                     "compatibilidades": (sum(len(p["compatibilidades"]) for p in pp)
-                        if lectura.formato in {"master_kg", "master_kims", "master_ag"} else
+                        if lectura.formato in {"master_kg", "master_kims", "master_ag", "master_difrisa"} else
                         sum(1 for p in pp for c in p["compatibilidades"]
                             if c.get("producto" if lectura.formato == "master_cauplas" else "linea") == producto)),
                     "publicaciones": len(cand), "publicaciones_faltantes": len(pend)})
@@ -305,7 +305,7 @@ async def generar(
     solo_faltantes: bool = Form(True),
     _=Depends(require_admin),
 ):
-    """Genera el .xlsx con las 37 columnas listo para subir a Mercado Libre."""
+    """Genera el .xlsx listo para subir a Mercado Libre."""
     perfil = _perfil_o_400(codigo_bodega)
     if perfil.codigo_bodega == "CAUPLAS" and not imagenes_cauplas:
         raise HTTPException(status_code=400, detail="CAUPLAS requiere el Archivo de imágenes CAUPLAS (.csv).")
@@ -401,7 +401,7 @@ async def generar(
         )
 
         titulos_por_corregir = []
-        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
+        if lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag", "master_difrisa"}:
             filas, reporte_titulos = generar_filas_con_reporte(piezas, config)
             titulos_por_corregir = [e for e in reporte_titulos["exclusiones"]
                                      if e.get("motivo") == "Título excede 60 caracteres"]
@@ -411,7 +411,7 @@ async def generar(
             asignar_imagenes_cauplas(filas + [e["fila_publicacion"] for e in titulos_por_corregir], galerias_cauplas)
         if galerias_ag is not None:
             asignar_imagenes_ag(filas + [e["fila_publicacion"] for e in titulos_por_corregir], galerias_ag)
-        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag"}:
+        if ruta_pub and solo_faltantes and lectura.formato in {"master_kg", "master_cauplas", "master_kims", "master_gonher", "master_ag", "master_difrisa"}:
             filas = cruzar_variantes(filas, leer_publicaciones(ruta_pub))["pendientes"]
         if not filas and not titulos_por_corregir:
             raise HTTPException(

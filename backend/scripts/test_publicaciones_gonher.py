@@ -74,7 +74,8 @@ check("deduplica SKU + título normalizado", sum(f.sku == "FULL" for f in ft) ==
 salida = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); salida.close()
 escribir_xlsx(filas, cfg, salida.name); wo = openpyxl.load_workbook(salida.name, data_only=True); so = wo.active
 idx = {c.value: c.column for c in so[1]}
-check("plantilla tiene 37 columnas y GONHER al final", so.max_column == 37 and COLUMNAS[-1] == "GONHER")
+check("plantilla conserva columnas y DIFIRSA queda al final",
+      so.max_column == 38 and COLUMNAS[-2] == "GONHER" and COLUMNAS[-1] == "DIFIRSA")
 check("stock GONHER queda vacío y otras bodegas en cero", so.cell(2, idx["Cantidad"]).value is None and so.cell(2, idx["GONHER"]).value is None and all(so.cell(2, idx[b]).value == 0 for b in ("AG", "CAUPLAS", "KG", "KIM", "MATRIZ", "VAZLO")))
 os.unlink(salida.name)
 

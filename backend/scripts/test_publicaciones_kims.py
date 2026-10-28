@@ -78,7 +78,8 @@ check("marca propia viaja por fila", filas[0].marca == "KIMS PRO")
 tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); tmp.close()
 escribir_xlsx(filas, cfg, tmp.name)
 wb = openpyxl.load_workbook(tmp.name, data_only=True); ws = wb.active
-check("XLSX conserva las 37 columnas", ws.max_column == 37 and [c.value for c in ws[1]] == COLUMNAS)
+check("XLSX conserva las columnas previas y agrega DIFIRSA al final",
+      ws.max_column == 38 and [c.value for c in ws[1]] == COLUMNAS and COLUMNAS[-1] == "DIFIRSA")
 indices = {c.value: c.column for c in ws[1]}
 check("XLSX escribe cada una de las cinco variantes", ws.max_row == 6, ws.max_row)
 check("XLSX escribe marca del catálogo en cada variante",

@@ -122,7 +122,7 @@ check("fotos AG sólo permiten el host HTTPS exacto", _es_url_permitida(
 asignar_imagenes_ag(filas, galeria)
 out = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); out.close(); escribir_xlsx(filas, ConfiguracionProveedor(codigo_bodega="AG", marca="ARGENPARTS"), out.name)
 salida = openpyxl.load_workbook(out.name, data_only=True); hoja = salida.active
-check("XLSX conserva 37 columnas, Cantidad y bodega AG", [c.value for c in hoja[1]] == COLUMNAS and hoja.cell(2, 5).value == 3 and hoja.cell(2, 31).value == 3 and hoja.cell(2, 15).value)
+check("XLSX conserva la plantilla, Cantidad y bodega AG", [c.value for c in hoja[1]] == COLUMNAS and hoja.cell(2, 5).value == 3 and hoja.cell(2, 31).value == 3 and hoja.cell(2, 15).value)
 salida.close(); os.unlink(out.name)
 
 # Master de combos AG: aplicación/años sin posición y componentes consolidados.
@@ -162,7 +162,7 @@ outc = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); outc.close()
 asignar_imagenes_ag(fc, gc)
 escribir_xlsx(fc, ConfiguracionProveedor("AG", marca="ARGENPARTS"), outc.name)
 oc = openpyxl.load_workbook(outc.name, data_only=True); hc = oc.active
-check("combo escribe precio, stock, bodega AG e imágenes en las 37 columnas", [c.value for c in hc[1]] == COLUMNAS and hc.cell(2, 5).value == 5 and hc.cell(2, 31).value == 5 and hc.cell(2, 3).value is not None and hc.cell(2, 15).value)
+check("combo escribe precio, stock, bodega AG e imágenes en la plantilla", [c.value for c in hc[1]] == COLUMNAS and hc.cell(2, 5).value == 5 and hc.cell(2, 31).value == 5 and hc.cell(2, 3).value is not None and hc.cell(2, 15).value)
 oc.close(); os.unlink(outc.name)
 cruce_combo = cruzar_variantes(fc, {("AG-COMBO", normalizar_titulo("Kit distribución para Ford Focus 2018-2020"))})
 check("publicación histórica AG por SKU y compatibilidad cubre variante combo", len(cruce_combo["existentes"]) >= 1)
