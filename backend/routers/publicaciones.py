@@ -79,6 +79,13 @@ def _leer_o_400(ruta, perfil):
             detail="No pude leer este archivo como Excel. Verifica que sea el catálogo del proveedor.",
         )
     if not resultado.piezas:
+        if perfil.codigo_bodega == "DIFIRSA" and resultado.formato == "master_difrisa":
+            motivos = Counter(error.get("motivo", "Registro inválido") for error in resultado.errores)
+            detalle = "; ".join(f"{motivo}: {cantidad}" for motivo, cantidad in motivos.most_common(4))
+            raise HTTPException(status_code=400, detail=(
+                "Leí los encabezados DIFIRSA, pero no quedaron piezas con compatibilidades utilizables. "
+                f"{detalle or 'Revisa las filas de compatibilidad.'}"
+            ))
         if perfil.codigo_bodega == "AG" and resultado.formato == "master_ag":
             motivos = Counter(error.get("motivo", "Registro inválido") for error in resultado.errores)
             detalle = "; ".join(f"{motivo}: {cantidad}" for motivo, cantidad in motivos.most_common(4))

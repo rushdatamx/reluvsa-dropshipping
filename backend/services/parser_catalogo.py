@@ -591,10 +591,18 @@ def _leer_master_ag(ws) -> ResultadoCatalogo:
 
 
 def _leer_master_difrisa(ws) -> ResultadoCatalogo:
-    """DIFIRSA: primera hoja, Producto A, compatibilidad B:F, SKU H, equivalencias I:O, OEM P, precio Q, stock R."""
+    """Lee los dos formatos conocidos de la primera hoja del master DIFIRSA."""
     headers = [_normalizar(c.value) for c in ws[1]]
-    if len(headers) < 18 or headers[0] != "producto" or headers[7] != "engine fil":
-        raise ValueError("El master DIFIRSA requiere Producto en A y Engine Fil en H.")
+    nuevo = (len(headers) >= 18 and headers[0] == "producto" and
+             headers[1] in {"armadora", "marca"} and headers[2] in {"automovil", "automóvil", "modelo"} and
+             headers[3] in {"cilindros", "cilindro"} and headers[4] == "litros" and
+             headers[5] in {"ano", "año", "anio"} and headers[7] == "engine fil")
+    anterior = (len(headers) >= 18 and headers[0] == "producto" and
+                headers[1] == "armadora" and headers[2] == "modelo" and
+                headers[3] == "motor" and headers[4] in {"inicio", "ano inicio", "año inicio"} and
+                headers[5] in {"fin", "ano final", "año final"} and headers[7] == "engine fil")
+    if not nuevo and not anterior:
+        raise ValueError("Encabezados DIFIRSA no reconocidos: se esperaba Producto, compatibilidad y Engine Fil en H.")
     grupos, errores, validas, invalidas = {}, [], 0, 0
     filas_master = sku_observados = 0
     for n, row in enumerate(ws.iter_rows(min_row=2, max_col=18, values_only=True), 2):
@@ -607,12 +615,20 @@ def _leer_master_difrisa(ws) -> ResultadoCatalogo:
         if not sku or not producto:
             errores.append(_error(n, {"clave": sku, "modelo": producto}, "Falta Engine Fil o Producto"))
             continue
-        compat = {"armadora": _texto(row[1]), "modelo": _texto(row[2]), "motor": _texto(row[3]),
-                  "inicio_raw": row[4], "fin_raw": row[5], "producto": producto, "fila": n}
+        if nuevo:
+            cilindros, litros = _texto(row[3]), _texto(row[4])
+            motor = " ".join(x for x in (cilindros, litros if litros.upper().endswith("L") else (litros + "L" if litros else "")) if x)
+            raw_anios = _texto(row[5])
+            rango = re.fullmatch(r"\s*(\d{4})\s*[-–—]\s*(\d{4})\s*", raw_anios)
+            inicio_raw, fin_raw = (rango.group(1), rango.group(2)) if rango else (row[5], row[5])
+        else:
+            motor, inicio_raw, fin_raw = _texto(row[3]), row[4], row[5]
+        compat = {"armadora": _texto(row[1]), "modelo": _texto(row[2]), "motor": motor,
+                  "inicio_raw": inicio_raw, "fin_raw": fin_raw, "producto": producto, "fila": n}
         tiene_compat = all((compat["armadora"], compat["modelo"], compat["motor"], compat["inicio_raw"], compat["fin_raw"]))
         grupo = grupos.setdefault(sku.upper(), {"clave": sku, "producto": producto, "linea": producto,
             "formato": "master_difrisa", "compatibilidades": [], "equivalencias": [], "oems": [],
-            "filas_origen": [], "precios": [], "stock": None})
+            "filas_origen": [], "precios": [], "stocks": []})
         grupo["filas_origen"].append(n)
         if tiene_compat:
             inicio, fin = _anio_entero(compat["inicio_raw"]), _anio_entero(compat["fin_raw"])
@@ -627,12 +643,18 @@ def _leer_master_difrisa(ws) -> ResultadoCatalogo:
             errores.append(_error(n, {"clave": sku, **compat}, "Compatibilidad incompleta (columnas B:F)"))
         precio = _numero_positivo(row[16])
         if precio is not None: grupo["precios"].append(precio)
+        stock_raw = row[17]
+        if stock_raw not in (None, ""):
+            try: grupo["stocks"].append(int(float(str(stock_raw).strip())))
+            except (TypeError, ValueError): pass
         for value in row[8:15]:
             _agregar_unico(grupo["equivalencias"], _texto(value))
         _agregar_unico(grupo["oems"], _texto(row[15]))
     piezas, sin_precio = [], 0
     for p in grupos.values():
         precios_raw = p.pop("precios")
+        stocks = p.pop("stocks")
+        p["stock"] = stocks[0] if len(stocks) == len(p["filas_origen"]) and len(set(stocks)) == 1 else None
         precios = set(precios_raw)
         p["costo"] = next(iter(precios)) if len(precios_raw) == len(p["filas_origen"]) and len(precios) == 1 else None
         # Precio inválido en cualquier fila impide asignar un precio engañoso.
