@@ -576,6 +576,7 @@ def _describir_gonher(pieza, config):
 def _titulo_ag(producto, compat, anio, permitir_exceso=False):
     if compat.get("tipo_ag") == "combos":
         producto = " ".join(str(producto or "").split())
+        posicion = " ".join(str(compat.get("posicion") or "").split())
         aplicacion = " ".join(str(compat.get("aplicacion") or "").split())
         # En el master de combos Aplicación suele traer también el rango; los
         # años canónicos vienen en columnas separadas y se agregan una vez aquí.
@@ -583,10 +584,10 @@ def _titulo_ag(producto, compat, anio, permitir_exceso=False):
             r"\s+(?:19|20)\d{2}(?:\s*[-–/a]\s*(?:(?:19|20)\d{2}|\d{2}))?\s*$",
             "", aplicacion, flags=re.IGNORECASE,
         ).strip()
-        titulo = " ".join(x for x in (producto, "para", aplicacion, str(anio)) if x)
+        titulo = " ".join(x for x in (producto, posicion, "para", aplicacion, str(anio)) if x)
         if len(titulo) > MAX_TITULO:
             corto = ALIAS_PRODUCTO_AG.get(_sin_acentos(producto), producto)
-            titulo = " ".join(x for x in (corto, "para", aplicacion, str(anio)) if x)
+            titulo = " ".join(x for x in (corto, posicion, "para", aplicacion, str(anio)) if x)
         return titulo if permitir_exceso or len(titulo) <= MAX_TITULO else None
     producto = " ".join(str(producto or "").split())
     posicion = " ".join(str(compat.get("posicion") or "").split())

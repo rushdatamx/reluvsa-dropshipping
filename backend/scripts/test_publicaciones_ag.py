@@ -125,7 +125,7 @@ salida = openpyxl.load_workbook(out.name, data_only=True); hoja = salida.active
 check("XLSX conserva la plantilla, Cantidad y bodega AG", [c.value for c in hoja[1]] == COLUMNAS and hoja.cell(2, 5).value == 3 and hoja.cell(2, 31).value == 3 and hoja.cell(2, 15).value)
 salida.close(); os.unlink(out.name)
 
-# Master de combos AG: aplicación/años sin posición y componentes consolidados.
+# Master de combos AG: aplicación/años, posición opcional y componentes consolidados.
 wb = openpyxl.Workbook(); ws = wb.active
 ws.append(["Codigo", "Producto", "Aplicación", "Año desde", "Año hasta", "Componente 1", "Componente 2", "Stock", "Precio"])
 ws.append(["AG-COMBO", "Kit distribución", "Ford Focus", 2018, 2020, "A-1", "B-2", 5, 200])
@@ -144,12 +144,21 @@ wb = openpyxl.Workbook(); wh = wb.active; wh.append(["Combos por aplicaciones AG
 fh = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); fh.close(); wb.save(fh.name)
 rh = leer_catalogo_detallado(fh.name, perfil_de("AG")); os.unlink(fh.name)
 check("detecta encabezados del master AG debajo de filas de título", len(rh.piezas) == 1 and rh.piezas[0]["clave"] == "SKU-ROW3")
+wb = openpyxl.Workbook(); wp = wb.active
+wp.append(["Codigo", "Producto", "Aplicación", "Posición", "Año desde", "Año hasta", "Stock", "Precio"])
+wp.append(["POS", "Kit", "Ford Focus", "Delantero izquierdo", 2019, 2020, 2, 125])
+wp.append(["POS", "Kit", "Ford Focus", "Delantero derecho", 2019, 2020, 2, 125])
+fp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); fp.close(); wb.save(fp.name)
+rp = leer_catalogo_detallado(fp.name, perfil_de("AG")); os.unlink(fp.name)
+check("combos conserva y separa posiciones distintas", len(rp.piezas[0]["compatibilidades"]) == 2 and {c["posicion"] for c in rp.piezas[0]["compatibilidades"]} == {"Delantero izquierdo", "Delantero derecho"})
 wb = openpyxl.Workbook(); wm = wb.active; wm.append(["Codigo", "Producto", "Aplicación", "Año desde", "Año hasta", "Stock", "Precio"]); wm.append(["MISSING", "Kit", "Ford Focus", 2019, 2020, None, None])
 fm = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False); fm.close(); wb.save(fm.name)
 rm = leer_catalogo_detallado(fm.name, perfil_de("AG")); os.unlink(fm.name)
 check("reporta Stock y Precio vacíos por separado", not rm.piezas and {e["motivo"] for e in rm.errores} == {"Stock vacío dentro del SKU", "Precio vacío dentro del SKU"})
 fc, _ = generar_filas_con_reporte(rc.piezas, ConfiguracionProveedor("AG", marca="ARGENPARTS"))
-check("títulos de combos omiten posición y años duplicados y describen componentes", all("para Ford" in x.titulo and len(x.titulo) <= 60 and "delantero" not in x.titulo.lower() and x.titulo.count("2018") <= 1 for x in fc) and "A-1 | B-2 | C-3 | D-4" in fc[0].descripcion)
+check("títulos de combos sin posición mantienen formato y describen componentes", all("para Ford" in x.titulo and len(x.titulo) <= 60 and x.titulo.count("2018") <= 1 for x in fc) and "A-1 | B-2 | C-3 | D-4" in fc[0].descripcion and "Delantero" not in fc[0].descripcion)
+fp_rows, _ = generar_filas_con_reporte(rp.piezas, ConfiguracionProveedor("AG", marca="ARGENPARTS"))
+check("posición de kit aparece en títulos y descripción asociada", len(fp_rows) >= 4 and all("Kit Delantero" in x.titulo and len(x.titulo) <= 60 for x in fp_rows) and "Ford Focus Delantero izquierdo 2019-2020" in fp_rows[0].descripcion and "Ford Focus Delantero derecho 2019-2020" in fp_rows[0].descripcion)
 f_largo, _ = generar_filas_con_reporte([{"formato": "master_ag", "tipo_ag": "combos", "clave": "LONG", "producto": "Kit amortiguadores c/resortes y bases amortiguador", "linea": "Kit amortiguadores c/resortes y bases amortiguador", "stock": 1, "costo": 100, "componentes": [], "compatibilidades": [{"aplicacion": "Ford Focus 2012-2019", "inicio": 2012, "fin": 2019}]}], ConfiguracionProveedor("AG", marca="ARGENPARTS"))
 check("alias controlado permite títulos de combos de producto largo bajo 60", bool(f_largo) and all(len(x.titulo) <= 60 and "2012-2019 2012-2019" not in x.titulo for x in f_largo))
 fotos_combo = openpyxl.Workbook(); sc = fotos_combo.active; sc.append(["Servidor", "Carpeta", "Nombre", "Extensión"])

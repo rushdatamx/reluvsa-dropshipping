@@ -57,6 +57,7 @@ AG_EQUIVALENCIAS = ("SYD", "GROB", "KYB", "BOGE", "VAZLO")
 AG_COMBO_ALIASES = {
     "codigo": ("codigo", "código", "codigo combo", "código combo", "sku"),
     "producto": ("producto",), "aplicacion": ("aplicacion", "aplicación"),
+    "posicion": ("posicion", "posición"),
     "desde": ("ano desde", "año desde", "desde", "ano inicio", "año inicio", "inicio"),
     "hasta": ("ano hasta", "año hasta", "hasta", "ano fin", "año fin", "ano final", "año final", "fin"),
     "stock": ("stock",), "precio": ("precio",),
@@ -444,9 +445,10 @@ def _fila_header_ag_combos(ws):
     """Encuentra el encabezado del master aun si hay título/notas arriba."""
     for fila in range(1, min(ws.max_row, 15) + 1):
         cols = _mapa_headers(ws, fila)
-        presentes = sum(any(_normalizar(alias) in cols for alias in aliases)
-                        for aliases in AG_COMBO_ALIASES.values())
-        if presentes == len(AG_COMBO_ALIASES):
+        requeridos = (k for k in AG_COMBO_ALIASES if k != "posicion")
+        presentes = sum(any(_normalizar(alias) in cols for alias in AG_COMBO_ALIASES[k])
+                        for k in requeridos)
+        if presentes == len(AG_COMBO_ALIASES) - 1:
             return fila
     return None
 
@@ -460,7 +462,7 @@ def _leer_master_ag_combos(ws):
     cols = _mapa_headers(ws, fila_header) if fila_header else {}
     idx = {k: next((cols[_normalizar(n)] for n in names if _normalizar(n) in cols), None)
            for k, names in AG_COMBO_ALIASES.items()}
-    faltan = [k for k, i in idx.items() if i is None]
+    faltan = [k for k, i in idx.items() if i is None and k != "posicion"]
     if faltan:
         raise ValueError("El master de combos AG requiere: " + ", ".join(faltan))
     componentes = [i for nombre, i in cols.items() if re.fullmatch(r"componente(?:\s*\d+)?", nombre)]
@@ -511,10 +513,11 @@ def _leer_master_ag_combos(ws):
             inicio = _anio_entero(reg["inicio_raw"]); fin = _anio_entero(reg["fin_raw"])
             if not aplicacion or inicio is None or fin is None or not (1900 <= inicio <= fin <= 2100):
                 invalidas += 1; reg["aplicacion"] = aplicacion; err("Aplicación vacía o años inválidos", reg); continue
-            firma = (_normalizar(aplicacion), inicio, fin)
+            posicion = _texto(fila[idx["posicion"]] if idx.get("posicion") is not None and idx["posicion"] < len(fila) else None)
+            firma = (_normalizar(aplicacion), _normalizar(posicion), inicio, fin)
             if firma in visto_compat: duplicados += 1; continue
             visto_compat.add(firma); validas += 1
-            pieza["compatibilidades"].append({"aplicacion": aplicacion, "inicio": inicio, "fin": fin, "fila": n})
+            pieza["compatibilidades"].append({"aplicacion": aplicacion, "posicion": posicion, "inicio": inicio, "fin": fin, "fila": n})
         if pieza["compatibilidades"]: piezas.append(pieza)
     return ResultadoCatalogo(piezas, "master_ag", filas_master, validas, invalidas, duplicados, True, sin_precio, inconsistentes, errores, len(grupos))
 
