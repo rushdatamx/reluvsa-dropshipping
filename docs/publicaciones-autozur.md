@@ -21,16 +21,24 @@ Autozur espera una fila por compatibilidad. Por eso `UserProductID`, `TITULO` y
 
 ## Regla de seguridad del cruce
 
-Una publicación sólo queda lista automáticamente cuando fabricante, modelo,
-rango de años y litros están presentes y producen coincidencias coherentes. Los
-cilindros filtran adicionalmente cuando aparecen en el título.
+Una publicación queda lista automáticamente cuando modelo, rango de años y
+litros producen coincidencias exactas. Los cilindros filtran adicionalmente
+cuando aparecen en el título. Si falta fabricante, se aplican primero esos
+filtros y sólo se infiere la marca cuando queda una sola; si quedan varias,
+las propuestas se muestran para decisión individual.
 
 Se manda a revisión cuando:
 
-- el fabricante se infiere únicamente por un modelo globalmente único;
+- el fabricante o la combinación vehicular sigue siendo ambigua;
 - falta la cilindrada;
-- el título agrega una versión o submodelo después del modelo base;
 - el motor exacto no existe, pero hay vehículos del mismo modelo y años.
+
+Los descriptores posteriores al modelo (incluidos sufijos de generación como
+“II”) no fuerzan revisión cuando años y motor encuentran coincidencias exactas.
+Las variantes de submodelo compatibles se conservan como propuestas. La acción
+masiva sólo aplica a resultados exactos clasificados como seguros; nunca incluye
+propuestas aproximadas ni registros ambiguos. El Excel mantiene las 17 columnas
+y genera una fila por vehículo compatible.
 
 Una revisión no entra al archivo de salida hasta que Gaby la aprueba. Los casos
 sin propuesta se excluyen. El motor no inventa fabricantes, años, cilindrada ni

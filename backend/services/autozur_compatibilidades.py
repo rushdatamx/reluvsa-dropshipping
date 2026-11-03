@@ -216,21 +216,15 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
                 modelo = opcion
                 break
 
-    # Si el título omite fabricante (p. ej. "P/ Spark 1.2 2017"), sólo se puede
-    # inferir cuando el modelo pertenece a una única marca. Si el mismo modelo
-    # vive en varias marcas se conserva ambiguo.
+    # Con marca omitida, identificar el modelo por el inicio y aplazar la
+    # inferencia hasta aplicar años/motor: un modelo puede existir en varias marcas.
     if not fabricante:
         modelos_globales = sorted(catalogo.fabricantes_por_modelo, key=len, reverse=True)
         for opcion in modelos_globales:
             if _empieza_con(cabeza, opcion):
+                modelo = opcion
                 marcas = catalogo.fabricantes_por_modelo[opcion]
-                if len(marcas) == 1:
-                    fabricante, modelo = marcas[0], opcion
-                    resto = cabeza
-                    fabricante_inferido = True
-                else:
-                    modelo = opcion
-                    modelo_ambiguo = True
+                modelo_ambiguo = len(marcas) > 1
                 break
 
     detalle_modelo = resto[len(modelo):].strip(" -/") if modelo and _empieza_con(resto, modelo) else ""
@@ -252,9 +246,10 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
 
 def _filtrar_candidatos(parsed: dict, catalogo: CatalogoIndexado) -> List[List[str]]:
     fabricante, modelo = parsed["fabricante"], parsed["modelo"]
-    if not fabricante or not modelo:
+    if not modelo:
         return []
-    candidatos = catalogo.por_fabricante_modelo.get((fabricante, modelo), [])
+    candidatos = (catalogo.por_fabricante_modelo.get((fabricante, modelo), []) if fabricante else
+                  [f for (marca, mod), filas in catalogo.por_fabricante_modelo.items() if mod == modelo for f in filas])
     if parsed["anio_desde"] is not None:
         candidatos = [
             f for f in candidatos
@@ -285,6 +280,13 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
     for posicion, fila in enumerate(publicaciones):
         parsed = interpretar_titulo(fila[1], catalogo)
         candidatos = _filtrar_candidatos(parsed, catalogo)
+        marcas_candidatas = sorted({normalizar(c[0]) for c in candidatos})
+        if not parsed["fabricante"] and len(marcas_candidatas) == 1 and candidatos:
+            parsed["fabricante"] = marcas_candidatas[0]
+            parsed["fabricante_inferido"] = True
+            parsed["modelo_ambiguo"] = False
+        elif not parsed["fabricante"] and len(marcas_candidatas) > 1:
+            parsed["modelo_ambiguo"] = True
         bloqueos = []
         observaciones = []
         if parsed["fabricante_inferido"]:
@@ -303,11 +305,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
             bloqueos.append("El título no contiene un año utilizable.")
         if not parsed["litros"]:
             bloqueos.append("El título no contiene la cilindrada en litros.")
-        if parsed["detalle_modelo"]:
-            bloqueos.append(
-                f"El título agrega «{parsed['detalle_modelo']}» después del modelo; revisa submodelo o carrocería."
-            )
-        if not candidatos and parsed["fabricante"] and parsed["modelo"]:
+        if not candidatos and parsed["modelo"]:
             propuestas = _filtrar_candidatos({**parsed, "litros": "", "cilindros": ""}, catalogo)
             if propuestas:
                 candidatos = propuestas
@@ -316,6 +314,8 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
                 )
             elif not bloqueos:
                 bloqueos.append("No se encontraron vehículos con la combinación exacta del título.")
+        if parsed["detalle_modelo"] and candidatos and (not parsed["litros"] or parsed["anio_desde"] is None):
+            bloqueos.append(f"El título agrega «{parsed['detalle_modelo']}» después del modelo; revisa submodelo o carrocería.")
 
         # La lista automática exige fabricante/modelo/años/cilindrada exactos.
         # Cilindros/configuración sólo restringen cuando aparecen explícitamente.
@@ -333,6 +333,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
             "titulo": fila[1],
             "sku": fila[2],
             "estado": estado,
+            "aprobacion_masiva_segura": estado == "lista" and bool(candidatos),
             "motivo": " ".join(observaciones + bloqueos),
             "extraido": parsed,
             "candidatos": candidatos,
@@ -379,7 +380,7 @@ def resumen_para_cliente(session_id: str, analisis: dict) -> dict:
     items = []
     for r in analisis["resultados"]:
         items.append({
-            k: r[k] for k in ("id", "user_product_id", "titulo", "sku", "estado", "motivo", "extraido")
+            k: r[k] for k in ("id", "user_product_id", "titulo", "sku", "estado", "motivo", "extraido", "aprobacion_masiva_segura")
         } | {
             "compatibilidades": len(r["candidatos"]),
             "muestra": r["candidatos"][:5],

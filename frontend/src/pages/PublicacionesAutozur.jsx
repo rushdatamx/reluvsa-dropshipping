@@ -183,6 +183,11 @@ export default function PublicacionesAutozur() {
               <p className="text-xs text-notion-text-secondary mt-1">Las ambiguas sólo se exportan después de aprobarlas.</p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
+              <button onClick={() => setDecisiones((prev) => ({ ...prev, ...Object.fromEntries(analisis.resultados.filter((r) => r.aprobacion_masiva_segura).map((r) => [r.id, 'aprobada'])) }))}
+                disabled={!analisis.resultados.some((r) => r.aprobacion_masiva_segura)}
+                className="px-3 py-2 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
+                Aprobar coincidencias seguras
+              </button>
               <div className="relative">
                 <Search size={15} className="absolute left-3 top-3 text-gray-400" />
                 <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }}
