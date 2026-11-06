@@ -14,6 +14,7 @@ import unicodedata
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -38,10 +39,9 @@ SESSION_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_TTL_SEGUNDOS = 24 * 60 * 60
 
 _ANIO = re.compile(r"\b(?:19|20)\d{2}\b")
-_MOTOR = re.compile(r"\b([LVIHWR]\s*\d{1,2})\b", re.IGNORECASE)
+_MOTOR = re.compile(r"\b((?:[LVHWR]\s*\d{1,2}|I\d{1,2}))\b", re.IGNORECASE)
 _LITROS_CON_L = re.compile(r"\b(\d{1,2}(?:[.,]\d+)?)\s*[lL]\b")
 _DECIMAL = re.compile(r"\b(\d{1,2}[.,]\d+)\b")
-_MARCADOR = re.compile(r"\bP\s*/\s*", re.IGNORECASE)
 
 
 def normalizar(valor) -> str:
@@ -164,97 +164,112 @@ def leer_publicaciones(ruta) -> List[List[str]]:
     return filas
 
 
-def _empieza_con(texto: str, opcion: str) -> bool:
-    return texto == opcion or texto.startswith(opcion + " ")
+@lru_cache(maxsize=8192)
+def _patron_nombre(opcion: str):
+    return re.compile(r"(?<![A-Z0-9.,-])" + re.escape(opcion) + r"(?![A-Z0-9.,-])")
+
+
+def _apariciones(texto: str, opcion: str):
+    # Una palabra completa no puede nacer dentro de un decimal o código.
+    return list(_patron_nombre(opcion).finditer(texto))
 
 
 def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
-    limpio = normalizar(titulo)
-    marcador = _MARCADOR.search(limpio)
-    vehiculo = limpio[marcador.end():].strip() if marcador else limpio
-
+    vehiculo = normalizar(titulo.replace(",", "."))
     anios = [int(a) for a in _ANIO.findall(vehiculo)]
-    anio_desde, anio_hasta = (min(anios), max(anios)) if anios else (None, None)
-
-    motor_m = _MOTOR.search(vehiculo)
-    cilindros = ""
-    if motor_m:
-        cilindros = re.sub(r"\s+", "", motor_m.group(1)).upper()
-
-    litros_m = _LITROS_CON_L.search(vehiculo)
-    if not litros_m:
-        # Los títulos históricos suelen omitir la L: "Camaro 4.1 1975/1979".
-        decimales = list(_DECIMAL.finditer(vehiculo))
-        litros_m = decimales[-1] if decimales else None
-    litros = _numero_normalizado(litros_m.group(1)) if litros_m else ""
-
-    limite = len(vehiculo)
-    cortes = [m.start() for m in (_ANIO.search(vehiculo), motor_m, litros_m) if m]
-    if cortes:
-        limite = min(cortes)
-    cabeza = vehiculo[:limite].strip(" -/")
-
-    alias_fabricante = {
-        "VW": "VOLKSWAGEN",
-        "MERCEDES BENZ": "MERCEDES-BENZ",
-    }
-    fabricante = ""
-    fabricante_inferido = False
-    modelo_ambiguo = False
-    resto = cabeza
-    opciones_fabricante = sorted(set(catalogo.fabricantes) | set(alias_fabricante), key=len, reverse=True)
-    for opcion in opciones_fabricante:
-        if _empieza_con(cabeza, opcion):
-            fabricante = alias_fabricante.get(opcion, opcion)
-            resto = cabeza[len(opcion):].strip(" -/")
-            break
-
-    modelo = ""
-    if fabricante:
-        for opcion in catalogo.modelos_por_fabricante.get(fabricante, []):
-            if _empieza_con(resto, opcion):
-                modelo = opcion
-                break
-
-    # Con marca omitida, identificar el modelo por el inicio y aplazar la
-    # inferencia hasta aplicar años/motor: un modelo puede existir en varias marcas.
-    if not fabricante:
-        modelos_globales = sorted(catalogo.fabricantes_por_modelo, key=len, reverse=True)
-        for opcion in modelos_globales:
-            if _empieza_con(cabeza, opcion):
-                modelo = opcion
-                marcas = catalogo.fabricantes_por_modelo[opcion]
-                modelo_ambiguo = len(marcas) > 1
-                break
-
-    detalle_modelo = resto[len(modelo):].strip(" -/") if modelo and _empieza_con(resto, modelo) else ""
-
+    desde, hasta = (min(anios), max(anios)) if anios else (None, None)
+    motores = list(_MOTOR.finditer(vehiculo))
+    cilindros_detectados = sorted({re.sub(r"\s+", "", m.group(1)) for m in motores})
+    medidas = list(_LITROS_CON_L.finditer(vehiculo)) + list(_DECIMAL.finditer(vehiculo))
+    litros_detectados = sorted({_numero_normalizado(m.group(1)) for m in medidas})
+    alias = {"VW": "VOLKSWAGEN", "MERCEDES BENZ": "MERCEDES-BENZ"}
+    marcas = sorted({alias.get(op, op) for op in set(catalogo.fabricantes) | set(alias)
+                     if _apariciones(vehiculo, op)})
+    fabricante = marcas[0] if len(marcas) == 1 else ""
+    ocupados = [m.span() for m in medidas + motores] + [m.span() for m in _ANIO.finditer(vehiculo)]
+    hallados = []
+    for modelo in catalogo.fabricantes_por_modelo:
+        if marcas and not set(marcas).intersection(catalogo.fabricantes_por_modelo[modelo]):
+            continue
+        for m in _apariciones(vehiculo, modelo):
+            if any(m.start() < fin and m.end() > ini for ini, fin in ocupados):
+                continue
+            if modelo.isdigit() and not marcas:
+                continue
+            hallados.append((modelo, m.start(), m.end()))
+    # Sólo elimina nombres contenidos en la misma aparición de uno compuesto.
+    hallados = [h for h in hallados if not any(
+        otro[1] <= h[1] and h[2] <= otro[2] and len(otro[0]) > len(h[0])
+        for otro in hallados)]
+    modelos = sorted({h[0] for h in hallados})
+    ambiguos = []
+    if len(marcas) > 1:
+        ambiguos.append("El título contiene marcas contradictorias: " + ", ".join(marcas) + ".")
+    if len(modelos) > 1:
+        ambiguos.append("El título contiene múltiples modelos: " + ", ".join(modelos) + ".")
+    if len(litros_detectados) > 1 or len(cilindros_detectados) > 1:
+        ambiguos.append("El título contiene múltiples motores; requiere revisión.")
+    if re.search(r"(?<![A-Z0-9.,-])\d{2}\s*[-/]\s*\d{2}(?![A-Z0-9.,-])", vehiculo):
+        ambiguos.append("El título contiene años abreviados; requiere revisión.")
+    origen = "explicita" if litros_detectados else ""
+    # Un entero inmediatamente posterior al modelo es generación, no litros.
+    if not litros_detectados and modelos:
+        generaciones = []
+        for _, _, fin in hallados:
+            m = re.match(r"\s+(?:I{1,3}|[0-9]+)\b", vehiculo[fin:])
+            if m:
+                generaciones.append((fin, fin + m.end()))
+        opciones = set()
+        for m in re.finditer(r"(?<![A-Z0-9.,-])(?:1[0-2]|[1-9])(?![A-Z0-9.,-])", vehiculo):
+            if any(m.start() < fin and m.end() > ini for ini, fin in
+                   ocupados + generaciones + [(h[1], h[2]) for h in hallados]):
+                continue
+            valor = _numero_normalizado(m.group())
+            if any(_numero_normalizado(f[4]) == valor and
+                   (desde is None or desde <= int(f[2]) <= hasta)
+                   for (marca, mod), filas in catalogo.por_fabricante_modelo.items()
+                   if mod in modelos and (not marcas or marca in marcas) for f in filas):
+                opciones.add(valor)
+        litros_detectados = sorted(opciones)
+        if opciones:
+            origen = "entero_inferido"
+            ambiguos.append("Cilindrada propuesta a partir de un motor entero sin unidad; requiere revisión.")
+            if len(opciones) > 1:
+                ambiguos.append("Existen múltiples motores enteros posibles.")
     return {
-        "fabricante": fabricante,
-        "modelo": modelo,
-        "litros": litros,
-        "cilindros": cilindros,
-        "anio_desde": anio_desde,
-        "anio_hasta": anio_hasta,
-        "texto_vehiculo": vehiculo,
-        "modelo_detectado": resto,
-        "detalle_modelo": detalle_modelo,
-        "fabricante_inferido": fabricante_inferido,
-        "modelo_ambiguo": modelo_ambiguo,
+        "fabricante": fabricante, "modelo": modelos[0] if len(modelos) == 1 else "",
+        "litros": litros_detectados[0] if len(litros_detectados) == 1 else "",
+        "cilindros": cilindros_detectados[0] if len(cilindros_detectados) == 1 else "",
+        "anio_desde": desde, "anio_hasta": hasta, "texto_vehiculo": vehiculo,
+        "modelo_detectado": ", ".join(modelos), "detalle_modelo": "",
+        "fabricante_inferido": False,
+        "modelo_ambiguo": len(modelos) > 1 or bool(modelos and not fabricante and
+            len(catalogo.fabricantes_por_modelo[modelos[0]]) > 1),
+        "modelos": modelos, "fabricantes_detectados": marcas,
+        "litros_detectados": litros_detectados, "origen_litros": origen,
+        "ambiguedades": ambiguos,
     }
 
 
 def _filtrar_candidatos(parsed: dict, catalogo: CatalogoIndexado) -> List[List[str]]:
     fabricante, modelo = parsed["fabricante"], parsed["modelo"]
+    if parsed.get("modelos") and len(parsed["modelos"]) > 1:
+        return [f for mod in parsed["modelos"] for f in _filtrar_candidatos(
+            {**parsed, "modelo": mod, "modelos": []}, catalogo)]
     if not modelo:
         return []
     candidatos = (catalogo.por_fabricante_modelo.get((fabricante, modelo), []) if fabricante else
                   [f for (marca, mod), filas in catalogo.por_fabricante_modelo.items() if mod == modelo for f in filas])
+    marcas = parsed.get("fabricantes_detectados", [])
+    if marcas:
+        candidatos = [f for f in candidatos if normalizar(f[0]) in marcas]
     if parsed["anio_desde"] is not None:
         candidatos = [
             f for f in candidatos
             if parsed["anio_desde"] <= int(f[2]) <= parsed["anio_hasta"]
         ]
+    if parsed.get("litros_detectados"):
+        candidatos = [f for f in candidatos if _numero_normalizado(f[4]) in parsed["litros_detectados"]]
     if parsed["litros"]:
         candidatos = [f for f in candidatos if _numero_normalizado(f[4]) == parsed["litros"]]
     if parsed["cilindros"]:
@@ -281,13 +296,15 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
         parsed = interpretar_titulo(fila[1], catalogo)
         candidatos = _filtrar_candidatos(parsed, catalogo)
         marcas_candidatas = sorted({normalizar(c[0]) for c in candidatos})
-        if not parsed["fabricante"] and len(marcas_candidatas) == 1 and candidatos:
+        if (not parsed["fabricante"] and not parsed["ambiguedades"]
+                and parsed["litros"] and parsed["anio_desde"] is not None
+                and len(marcas_candidatas) == 1 and candidatos):
             parsed["fabricante"] = marcas_candidatas[0]
             parsed["fabricante_inferido"] = True
             parsed["modelo_ambiguo"] = False
         elif not parsed["fabricante"] and len(marcas_candidatas) > 1:
             parsed["modelo_ambiguo"] = True
-        bloqueos = []
+        bloqueos = list(parsed["ambiguedades"])
         observaciones = []
         if parsed["fabricante_inferido"]:
             observaciones.append(
@@ -295,22 +312,22 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
                 "sólo corresponde a esta marca en el catálogo."
             )
         elif not parsed["fabricante"]:
-            if parsed["modelo_ambiguo"]:
+            if len(marcas_candidatas) > 1:
                 bloqueos.append("El modelo aparece asociado a varias marcas en el catálogo.")
             else:
-                bloqueos.append("No se identificó un fabricante al inicio de la sección P/.")
-        if parsed["fabricante"] and not parsed["modelo"]:
+                bloqueos.append("No se identificó un fabricante inequívoco en el título.")
+        if parsed["fabricante"] and not parsed["modelos"]:
             bloqueos.append("El modelo del título no coincide exactamente con el catálogo.")
         if parsed["anio_desde"] is None:
             bloqueos.append("El título no contiene un año utilizable.")
-        if not parsed["litros"]:
+        if not parsed["litros_detectados"]:
             bloqueos.append("El título no contiene la cilindrada en litros.")
-        if not candidatos and parsed["modelo"]:
-            propuestas = _filtrar_candidatos({**parsed, "litros": "", "cilindros": ""}, catalogo)
+        if not candidatos and (parsed["modelo"] or parsed["modelos"]):
+            propuestas = _filtrar_candidatos({**parsed, "litros": "", "litros_detectados": [], "cilindros": ""}, catalogo)
             if propuestas:
                 candidatos = propuestas
                 bloqueos.append(
-                    "El motor exacto no aparece en el catálogo; se muestran opciones del mismo modelo y años."
+                    "El motor solicitado no coincide con estas propuestas; se muestran otros motores del mismo modelo y años."
                 )
             elif not bloqueos:
                 bloqueos.append("No se encontraron vehículos con la combinación exacta del título.")

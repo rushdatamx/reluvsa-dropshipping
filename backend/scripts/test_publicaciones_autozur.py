@@ -11,10 +11,12 @@ from services.autozur_compatibilidades import (
 
 
 fallos = 0
+total_checks = 0
 
 
 def check(nombre, condicion, detalle=""):
-    global fallos
+    global fallos, total_checks
+    total_checks += 1
     if condicion:
         print(f"  ✓ {nombre}")
     else:
@@ -103,6 +105,48 @@ trafic = ["11", "Bomba P/ Renault Trafic II 1.6 2018", "T-1"] + [""] * 14
 r_trafic = analizar([trafic], catalogo)["resultados"][0]
 check("Trafic II conserva coincidencia exacta", r_trafic["estado"] == "lista" and len(r_trafic["candidatos"]) == 1, r_trafic)
 
+# Catálogo sintético adicional para colisiones y generaciones.
+for marca, modelo, litros in [("NISSAN", "TSURU", "1.6"), ("NISSAN", "TSURU", "2"),
+                              ("MAZDA", "2", "1.5"), ("VOLKSWAGEN", "CRAFTER", "2"),
+                              ("AUDI", "A4", "2"), ("CHEVROLET", "GRAND CAMARO", "4.1")]:
+    fila = [marca, modelo, "1999", "Base", litros, "4", "", "", "", "", "", ""]
+    catalogo.por_fabricante_modelo.setdefault((marca, modelo), []).append(fila)
+    catalogo.fabricantes_por_modelo.setdefault(modelo, []).append(marca)
+    if marca not in catalogo.fabricantes:
+        catalogo.fabricantes.append(marca)
+
+def resolver(titulo):
+    return analizar([["X", titulo, "SKU"] + [""] * 14], catalogo)["resultados"][0]
+
+from itertools import permutations
+for partes in permutations(["Tsuru", "1.6", "1999"]):
+    r = resolver("Bomba " + " ".join(partes))
+    check("permutación " + " ".join(partes), r["estado"] == "lista" and len(r["candidatos"]) == 1, r)
+for titulo in ["Para Nissan Tsuru I 1.6 1999", "Tsuru 2 1.6 1999", "1999 1,6L Tsuru", "Tsuru 1.6 1999 Nissan"]:
+    r = resolver(titulo)
+    check(titulo, r["estado"] == "lista" and not r["extraido"]["cilindros"], r)
+for titulo in ["Tsuru GSR 2 1999", "Tsuru 2.0 1999", "Tsuru 1.6 2.0 1999", "Nissan Mazda Tsuru 1.6 1999", "Tsuru Crafter 2 L 1999"]:
+    r = resolver(titulo)
+    esperado = "lista" if titulo == "Tsuru 2.0 1999" else "revision"
+    check(titulo, r["estado"] == esperado, r)
+check("entero sólo propone motor existente", {f[4] for f in resolver("Tsuru GSR 2 1999")["candidatos"]} == {"2"})
+for motor in ["2.0", "2,0", "2.0L", "2 L"]:
+    check("cilindrada equivalente " + motor, resolver("Crafter " + motor + " 1999")["estado"] == "lista")
+check("años abreviados requieren revisión", resolver("Tsuru 1.6 1999 00-02")["estado"] == "revision")
+check("generación no infiere litros", resolver("Tsuru 2 1999")["extraido"]["litros"] == "")
+check("Crafter no se convierte en Mazda 2", resolver("Crafter 2.0 1999")["extraido"]["modelos"] == ["CRAFTER"])
+check("marca VW restringe A4", all(f[0] == "Volkswagen" for f in resolver("VW Jetta A4 2.0 2018")["candidatos"]))
+check("modelo compuesto más específico", resolver("Grand Camaro 4.1 1999")["extraido"]["modelos"] == ["GRAND CAMARO"])
+check("modelo compuesto conserva orden", resolver("Camaro Grand 4.1 1999")["extraido"]["modelos"] == ["CAMARO"])
+check("modelo numérico exige marca", not resolver("2 1.5 1999")["candidatos"])
+check("modelo numérico separado del motor", resolver("Mazda 2 1.5 1999")["estado"] == "lista")
+check("código L4 explícito", resolver("Tsuru L4 1.6 1999")["extraido"]["cilindros"] == "L4")
+# Sin el motor 2.0 en catálogo, sus propuestas 1.6 nunca son automáticas.
+solo16 = catalogo.por_fabricante_modelo[("NISSAN", "TSURU")].pop()
+check("otro motor requiere revisión", resolver("Tsuru 2.0 1999")["estado"] == "revision")
+catalogo.por_fabricante_modelo[("NISSAN", "TSURU")].append(solo16)
+base[15:17] = ["Delantera", "Nota original"]
+
 print("\n=== ARCHIVO DE SALIDA ===")
 analisis = analizar([base, inferida, jeep, submodelo], catalogo)
 session = {"publicaciones": [base, inferida, jeep, submodelo], **analisis}
@@ -120,10 +164,16 @@ try:
     check("repite UserProductID, título y SKU", filas[0][:3] == filas[1][:3] == tuple(base[:3]), filas[:2])
     check("llena los atributos disponibles del vehículo", filas[0][3:9] == tuple(vehiculos[0][:6]), filas[0])
     check("conserva combustible vacío sin inventarlo", filas[0][12] is None, filas[0])
+    check("conserva posición y notas", filas[0][15:17] == ("Delantera", "Nota original"))
     wb.close()
+    revision = ["R", "Tsuru GSR 2 1999", "R-SKU"] + [""] * 14
+    datos = [base, revision]
+    sesion_revision = {"publicaciones": datos, **analizar(datos, catalogo)}
+    check("revisión excluida por defecto", escribir_resultado(sesion_revision, [], [], ruta) == 2)
+    check("aprobación por publicación incluye revisión", escribir_resultado(sesion_revision, [1], [], ruta) == 3)
+    check("exclusión gana a aprobación", escribir_resultado(sesion_revision, [1], [1], ruta) == 2)
 finally:
     ruta.unlink(missing_ok=True)
 
-total_checks = 27
 print(f"\n{total_checks - fallos} pasaron · {fallos} fallaron")
 raise SystemExit(1 if fallos else 0)

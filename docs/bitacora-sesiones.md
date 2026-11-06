@@ -3058,3 +3058,20 @@ Pendiente externo antes del uso diario: validar con Gaby una importación peque�
 con una variante, un paquete, una activación y una pausa. No se ejecutó una importación real
 ni se hizo despliegue en esta sesión. Los cambios previos del usuario en documentación se
 conservaron.
+
+
+## 2026-11-06 — Compatibilidades Autozur: lectura flexible
+
+Se sustituyó el parser por búsqueda de nombres completos en todo el título y
+extracción independiente de motor/años. Se conserva el orden interno de modelos
+compuestos, los guiones y la restricción por marca explícita. Se evitan modelos
+nacidos dentro de decimales, años o códigos de motor; los numéricos requieren marca.
+Las cilindradas múltiples y los enteros inferidos del catálogo requieren revisión.
+Se corrigió `Tsuru I 1.6` (antes detectaba I1) y se explican motores alternativos.
+No se modificaron UI, sesiones, endpoints ni Excel; cero llamadas a ML o migraciones.
+
+Base real reproducida: 836/478/458 y 26,268 compatibilidades automáticas. Nuevo
+resultado: 864/547/361 y 26,205. Se inspeccionaron las 46 promociones a listas y
+los cambios de candidatos; 18 listas pasan a revisión. Detalle, índices y límites
+en `docs/publicaciones-autozur.md`. Se preservaron cambios locales de documentación
+ajenos al alcance. Regresión: 58/58, contador real; compilación frontend correcta.

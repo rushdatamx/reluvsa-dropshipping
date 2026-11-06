@@ -531,6 +531,10 @@ Convenciones:
   separado de Publicaciones masivas y sin API de ML. Cruza título contra el catálogo
   vehicular, manda ambigüedades a revisión y repite una fila por compatibilidad. Reglas y
   línea base en `docs/publicaciones-autozur.md`.
+  El lector busca en todo el título: varios modelos/motores o marcas contradictorias
+  y cilindradas enteras inferidas requieren revisión. Los modelos numéricos exigen
+  marca explícita y un token separado del motor. Conservar aprobación por publicación
+  y las 17 columnas; no recalcular sesiones antiguas.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 
