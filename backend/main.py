@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import init_database
 from routers import admin, auth, conciliacion_erp, devoluciones, envios, facturas, incidencias, metricas, ml, proveedores, publicaciones, publicaciones_autozur, uploads, ventas, webhooks
 from services import sync_ml, sync_devoluciones
+from routers import actualizacion_stock
 
 app = FastAPI(
     title="Portal Dropshipping RELUVSA",
@@ -33,6 +34,8 @@ app.add_middleware(
 init_database()
 
 # Routers
+app.add_middleware(actualizacion_stock.UploadLimitMiddleware)
+app.include_router(actualizacion_stock.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(proveedores.router)
@@ -57,6 +60,7 @@ def arrancar_scheduler_ml():
     Va en startup y no a nivel de módulo para que importar `main` (tests) no
     lance hilos. Se puede apagar sin redeploy con la config `sync_auto_activo`.
     """
+    actualizacion_stock.svc.start_cleanup()
     sync_ml.iniciar_scheduler()
     sync_devoluciones.iniciar_scheduler()
 

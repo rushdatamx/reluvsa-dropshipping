@@ -218,3 +218,17 @@ export const autozurDetalle = (sessionId, resultadoId) =>
   });
 
 export default api;
+
+// Actualización de stock: trabajos locales de Excel, sólo administradores.
+export const stockAnalizar = (cuenta, exporte, archivos) => {
+  const fd = new FormData();
+  fd.append('cuenta', cuenta);
+  fd.append('exporte', exporte);
+  fd.append('proveedores', JSON.stringify(Object.keys(archivos)));
+  Object.values(archivos).forEach(file => fd.append('stocks', file));
+  return api.post('/actualizacion-stock/analizar', fd, { timeout: 300000 });
+};
+export const stockEstado = id => api.get(`/actualizacion-stock/${id}`);
+export const stockResultados = (id, params) => api.get(`/actualizacion-stock/${id}/resultados`, { params });
+export const stockGenerar = id => api.post(`/actualizacion-stock/${id}/generar`);
+export const stockDescargar = (id, nombre) => api.get(`/actualizacion-stock/${id}/archivos/${nombre}`, { responseType: 'blob', timeout: 120000 });

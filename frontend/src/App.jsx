@@ -13,6 +13,7 @@ import Metricas from './pages/Metricas';
 import Uploads from './pages/Uploads';
 import Publicaciones from './pages/Publicaciones';
 import PublicacionesAutozur from './pages/PublicacionesAutozur';
+import ActualizacionStock from './pages/ActualizacionStock';
 import MercadoLibre from './pages/MercadoLibre';
 import Proveedores from './pages/Proveedores';
 import ConciliacionERP from './pages/ConciliacionERP';
@@ -43,6 +44,7 @@ function Shell() {
             <Route path="/devoluciones" element={<AdminOnly><Devoluciones /></AdminOnly>} />
             <Route path="/metricas" element={<Metricas />} />
             <Route path="/publicaciones" element={<AdminOnly><Publicaciones /></AdminOnly>} />
+            <Route path="/actualizacion-stock" element={<AdminOnly><ActualizacionStock /></AdminOnly>} />
             <Route path="/publicaciones-autozur" element={<AdminOnly><PublicacionesAutozur /></AdminOnly>} />
             <Route path="/uploads" element={<AdminOnly><Uploads /></AdminOnly>} />
             <Route path="/conciliacion-erp" element={<AdminOnly><ConciliacionERP /></AdminOnly>} />

@@ -41,3 +41,6 @@ kits/
 .claude/settings.local.json
 .vercel
 .env*
+
+# Exportes y stock del cliente
+actualizacion-stock/

@@ -15,6 +15,7 @@ const NAV_ADMIN = [
   { to: '/conciliacion-erp', label: 'Conciliación ERP', icon: ClipboardCheck },
   { to: '/publicaciones', label: 'Publicaciones masivas', icon: PackagePlus },
   { to: '/publicaciones-autozur', label: 'Compatibilidades Autozur', icon: CarFront },
+  { to: '/actualizacion-stock', label: 'Actualización de stock', icon: PackagePlus },
   { to: '/mercadolibre', label: 'Mercado Libre', icon: Store },
   { to: '/proveedores', label: 'Proveedores', icon: Users },
 ];

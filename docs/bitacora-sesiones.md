@@ -3003,3 +3003,58 @@ y título normalizado, la descripción completa y los campos comerciales del SKU
 Verificación: regresión KIMS 23/23, incluyendo XLSX con cinco variantes para 2018–2020, una
 variante para 2021, 37 columnas y propagación de precio, stock, marca e imágenes. `git diff
 --check` limpio.
+
+## 2026-11-06 — Actualización de stock AutoAzur
+
+Implementado el apartado administrativo `/actualizacion-stock` y entrada del menú, con el
+estilo actual del portal (skill frontend-design). Servicio independiente de procesamiento y
+API `/api/actualizacion-stock`: carga multipart con proveedor explícito, análisis y generación
+en segundo plano, consulta de estado, resultados paginados, Excel modificados, ZIP y reporte
+CSV de pendientes/resumen. No hay llamadas a ML ni cambios en sus datos, tablas o migraciones.
+Contrato completo: `docs/actualizacion-stock.md`.
+
+Reglas implementadas: cuentas/bodegas verificadas, marcas de Nereus, coincidencia exacta antes
+de prefijos permitidos, códigos numéricos/ceros iniciales, colisiones conservadoras, duplicados
+e inválidos, stock directo de kits y paquetes `&` con repeticiones por código resuelto. Una
+ambigüedad bloquea toda la fila; bodegas inválidas también. Sólo se actualizan proveedores
+cargados, H suma todas las bodegas y E cambia únicamente entre ACTIVO/PAUSADO con umbral 5.
+Originales intactos; conserva Q, S, identificadores, demás columnas y orden. Los Excel incluyen
+sólo filas modificadas y se dividen/remezclan por filas hasta verificar cada parte <=9,500,000
+bytes reales. Celdas vacías se conservan como blancos equivalentes.
+
+Límites comprobados durante la recepción: 100 MB por archivo, 250 MB por carga. Autorización
+admin en todas las operaciones/descargas; identificadores aleatorios, caducidad 24 h y limpieza
+periódica de temporales, incluyendo huérfanos de reinicios. Trabajos en memoria y resultados
+JSONL en disco, Excel secuencial. `actualizacion-stock/` excluido de Git; no se incorporaron los
+archivos del cliente a los tests.
+
+Verificación final:
+
+- 14 pruebas nuevas aprobadas: reglas de ambas cuentas, límites 0/4/5/6, estados ajenos,
+  prefijos/ambigüedad/duplicados, paquetes repetidos/distintos y faltantes, kits directos,
+  preservación de fechas/fórmulas/identificadores, partición/tamaños/orden, cargas parciales,
+  permisos, caducidad, recepción limitada, errores y ciclo asíncrono con descargas.
+- Archivos reales Nereus: 125,589 filas de datos, 46,388 modificadas, una parte de
+  **6,771,442 bytes**; 417 incidencias pendientes. Análisis ~17 s; generación y verificación
+  integral del volumen ~65 s acumulados en local.
+- Archivos reales RELUVSA: 145,337 filas de datos, 44,689 modificadas, una parte de
+  **7,084,856 bytes**; 528,506 incidencias pendientes por origen o fila/proveedor. Ese número
+  supera las filas porque se revisan cuatro proveedores por fila y cada ausencia se reporta;
+  no representa 528 mil publicaciones distintas. Análisis ~27 s; ciclo completo ~82 s.
+- Se reabrieron todas las partes reales y se compararon contra las filas modificadas y el
+  exporte original: columnas/orden/identificadores, valores conservados, sumas H y estados,
+  cantidad de filas y ausencia de filas repetidas introducidas. La partición en varias partes
+  se ejercitó con un límite reducido en fixtures sintéticas.
+- Frontend compilado con `npm run build`; rutas registradas y app importada correctamente.
+  `git diff --check` limpio.
+- Diagnóstico general: 35 suites pasan y permanecen los cinco fallos preexistentes. Se
+  reprodujeron en un directorio temporal extraído de `git archive HEAD backend`, sin los
+  cambios de esta sesión: `test_cauplas_factura_anterior.py`, `test_fecha_factura_venta.py`,
+  `test_kit_varios_conceptos.py` y `test_paso0_num_venta_pdf.py` por `e.cuenta_ml` ausente en
+  fixtures; `test_fecha_efectiva_ml.py` por UNIQUE de `ventas_ml.num_venta`. No se modificaron.
+  La dependencia local rapidfuzz se instaló únicamente bajo `/tmp` para ese diagnóstico.
+
+Pendiente externo antes del uso diario: validar con Gaby una importación pequeña en AutoAzur
+con una variante, un paquete, una activación y una pausa. No se ejecutó una importación real
+ni se hizo despliegue en esta sesión. Los cambios previos del usuario en documentación se
+conservaron.
