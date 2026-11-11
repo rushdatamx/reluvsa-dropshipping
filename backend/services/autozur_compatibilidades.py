@@ -220,20 +220,28 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
             if m:
                 generaciones.append((fin, fin + m.end()))
         opciones = set()
+        generaciones_con_motor = set()
         for m in re.finditer(r"(?<![A-Z0-9.,-])(?:1[0-2]|[1-9])(?![A-Z0-9.,-])", vehiculo):
             if any(m.start() < fin and m.end() > ini for ini, fin in
-                   ocupados + generaciones + [(h[1], h[2]) for h in hallados]):
+                   ocupados + [(h[1], h[2]) for h in hallados]):
                 continue
             valor = _numero_normalizado(m.group())
-            if any(_numero_normalizado(f[4]) == valor and
+            es_generacion = any(m.start() < fin and m.end() > ini for ini, fin in generaciones)
+            coincide = any(_numero_normalizado(f[4]) == valor and
+                   (not es_generacion or re.search(r"[.,]\d", str(f[4]))) and
                    (desde is None or desde <= int(f[2]) <= hasta)
                    for (marca, mod), filas in catalogo.por_fabricante_modelo.items()
-                   if mod in modelos and (not marcas or marca in marcas) for f in filas):
+                   if mod in modelos and (not marcas or marca in marcas) for f in filas)
+            if coincide:
                 opciones.add(valor)
+                if es_generacion:
+                    generaciones_con_motor.add(valor)
         litros_detectados = sorted(opciones)
         if opciones:
             origen = "entero_inferido"
             ambiguos.append("Cilindrada propuesta a partir de un motor entero sin unidad; requiere revisión.")
+            if generaciones_con_motor:
+                ambiguos.append("El entero también puede indicar una generación; se propone como posible cilindrada y requiere confirmación.")
             if len(opciones) > 1:
                 ambiguos.append("Existen múltiples motores enteros posibles.")
     return {

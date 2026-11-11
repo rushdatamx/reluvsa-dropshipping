@@ -123,6 +123,14 @@ for marca, modelo, litros in [("NISSAN", "TSURU", "1.6"), ("NISSAN", "TSURU", "2
     if marca not in catalogo.fabricantes:
         catalogo.fabricantes.append(marca)
 
+# El entero contiguo a un modelo puede proponerse como cilindrada sólo con respaldo del catálogo.
+for anio in (1996, 1997, 1998):
+    catalogo.por_fabricante_modelo.setdefault(("FORD", "BRONCO"), []).append(
+        ["Ford", "Bronco", str(anio), "Base", "5.0", "8", "SUV", "", "", "", "", ""])
+catalogo.fabricantes_por_modelo["BRONCO"] = ["FORD"]
+catalogo.modelos_por_fabricante.setdefault("FORD", []).append("BRONCO")
+catalogo.fabricantes.append("FORD")
+
 def resolver(titulo):
     return analizar([["X", titulo, "SKU"] + [""] * 14], catalogo)["resultados"][0]
 
@@ -138,6 +146,18 @@ for titulo in ["Tsuru GSR 2 1999", "Tsuru 2.0 1999", "Tsuru 1.6 2.0 1999", "Niss
     esperado = "lista" if titulo == "Tsuru 2.0 1999" else "revision"
     check(titulo, r["estado"] == esperado, r)
 check("entero sólo propone motor existente", {f[4] for f in resolver("Tsuru GSR 2 1999")["candidatos"]} == {"2"})
+bronco = resolver("Bomba de agua P/ Ford Bronco 5 1996/1998")
+check("Bronco 5 propone sólo filas 5.0 y queda en revisión",
+      bronco["estado"] == "revision" and bronco["extraido"]["litros"] == "5"
+      and {f[4] for f in bronco["candidatos"]} == {"5.0"}, bronco)
+check("Bronco explica la ambigüedad generación/cilindrada",
+      "también puede indicar una generación" in bronco["motivo"], bronco["motivo"])
+sin_50 = [f for f in catalogo.por_fabricante_modelo[("FORD", "BRONCO")] if f[2] != "1996"]
+catalogo.por_fabricante_modelo[("FORD", "BRONCO")] = sin_50
+check("Bronco 5 sin motor de catálogo no inventa coincidencia",
+      resolver("Bomba de agua P/ Ford Bronco 5 1996")["estado"] == "sin_coincidencia")
+catalogo.por_fabricante_modelo[("FORD", "BRONCO")].insert(0,
+    ["Ford", "Bronco", "1996", "Base", "5.0", "8", "SUV", "", "", "", "", ""])
 for motor in ["2.0", "2,0", "2.0L", "2 L"]:
     check("cilindrada equivalente " + motor, resolver("Crafter " + motor + " 1999")["estado"] == "lista")
 check("años abreviados requieren revisión", resolver("Tsuru 1.6 1999 00-02")["estado"] == "revision")

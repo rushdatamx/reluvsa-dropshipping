@@ -252,7 +252,7 @@ export default function PublicacionesAutozur() {
                   <Dato label="Fabricante" value={x.fabricante} />
                   <Dato label="Modelo" value={x.modelo} />
                   <Dato label="Años" value={x.anio_desde ? `${x.anio_desde}–${x.anio_hasta}` : ''} />
-                  <Dato label="Litros" value={x.litros} />
+                  <Dato label={x.origen_litros === 'entero_inferido' ? 'Litros propuestos' : 'Litros'} value={x.litros} />
                   <Dato label="Cilindros" value={x.cilindros} />
                 </div>
 
