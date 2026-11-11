@@ -342,16 +342,25 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
 
         candidatos = _filtrar_candidatos(parsed, catalogo)
         marcas_candidatas = sorted({normalizar(c[0]) for c in candidatos})
+        marca_ambigua = not parsed["fabricante"] and len(marcas_candidatas) > 1
         if (not parsed["fabricante"] and not parsed["ambiguedades"]
                 and parsed["litros"] and parsed["anio_desde"] is not None
                 and len(marcas_candidatas) == 1 and candidatos):
             parsed["fabricante"] = marcas_candidatas[0]
             parsed["fabricante_inferido"] = True
             parsed["modelo_ambiguo"] = False
-        elif not parsed["fabricante"] and len(marcas_candidatas) > 1:
+        elif marca_ambigua:
             parsed["modelo_ambiguo"] = True
+            # Una aprobación por publicación incluiría todas estas filas; no
+            # mostrar propuestas de marcas distintas como un único paquete.
+            candidatos = []
         bloqueos = list(parsed["ambiguedades"])
         observaciones = []
+        if marca_ambigua:
+            bloqueos.append(
+                "El modelo, motor y años coinciden con varias marcas; se requiere identificar "
+                "la marca. Se ocultaron las propuestas para evitar aprobar compatibilidades de otra marca."
+            )
         if parsed["fabricante_inferido"]:
             observaciones.append(
                 f"Fabricante inferido como {parsed['fabricante']} porque {parsed['modelo']} "
@@ -368,7 +377,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
             bloqueos.append("El título no contiene un año utilizable.")
         if not parsed["litros_detectados"]:
             bloqueos.append("El título no contiene la cilindrada en litros.")
-        if not candidatos and (parsed["modelo"] or parsed["modelos"]):
+        if not candidatos and not marca_ambigua and (parsed["modelo"] or parsed["modelos"]):
             propuestas = _filtrar_candidatos({**parsed, "litros": "", "litros_detectados": [], "cilindros": ""}, catalogo)
             if propuestas:
                 candidatos = propuestas

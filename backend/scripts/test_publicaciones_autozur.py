@@ -130,7 +130,6 @@ for anio in (1996, 1997, 1998):
 catalogo.fabricantes_por_modelo["BRONCO"] = ["FORD"]
 catalogo.modelos_por_fabricante.setdefault("FORD", []).append("BRONCO")
 catalogo.fabricantes.append("FORD")
-
 def resolver(titulo):
     return analizar([["X", titulo, "SKU"] + [""] * 14], catalogo)["resultados"][0]
 
@@ -202,6 +201,23 @@ try:
     check("exclusión gana a aprobación", escribir_resultado(sesion_revision, [1], [1], ruta) == 2)
 finally:
     ruta.unlink(missing_ok=True)
+
+# Modelo compartido: ninguna marca debe quedar incluida en un paquete aprobable sin confirmación.
+for marca, submodelo in [("GMC", "Sierra SLT"), ("CHEVROLET", "Silverado")]:
+    catalogo.por_fabricante_modelo.setdefault((marca, "K3500"), []).extend([
+        [marca.title(), "K3500", "1999", submodelo, "5.7", "8", "Pickup", "", "", "", "", ""],
+        [marca.title(), "K3500", "2000", submodelo, "5.7", "8", "Pickup", "", "", "", "", ""],
+    ])
+    catalogo.fabricantes_por_modelo.setdefault("K3500", []).append(marca)
+    catalogo.modelos_por_fabricante.setdefault(marca, []).append("K3500")
+    if marca not in catalogo.fabricantes:
+        catalogo.fabricantes.append(marca)
+k3500 = resolver("Kit De Cadena De Distribución P/ K3500 5.7 1999 2000")
+check("modelo/motor/años compartidos entre marcas no ofrecen propuestas aprobables",
+      k3500["estado"] == "revision" and not k3500["candidatos"]
+      and not k3500["aprobacion_masiva_segura"], k3500)
+check("K3500 explica que falta identificar la marca",
+      "se requiere identificar la marca" in k3500["motivo"], k3500["motivo"])
 
 print(f"\n{total_checks - fallos} pasaron · {fallos} fallaron")
 raise SystemExit(1 if fallos else 0)
