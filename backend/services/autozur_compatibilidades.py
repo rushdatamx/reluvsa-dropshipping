@@ -287,13 +287,51 @@ def _filtrar_candidatos(parsed: dict, catalogo: CatalogoIndexado) -> List[List[s
     return unicos
 
 
-def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict:
+_SUSPENSION = re.compile(r"\b(?:HORQUILLA|AMORTIGUADOR(?:ES)?|RESORTES?)\b", re.IGNORECASE)
+
+
+def es_publicacion_suspension(fila: Sequence[str]) -> bool:
+    return bool(_SUSPENSION.search(normalizar(fila[1])))
+
+
+def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: str = "general") -> dict:
+    if modo not in ("general", "suspension"):
+        raise ValueError("El apartado solicitado no es válido.")
+    if modo == "suspension":
+        publicaciones = [fila for fila in publicaciones if es_publicacion_suspension(fila)]
+        if not publicaciones:
+            raise ValueError("No se encontraron publicaciones de suspensión (horquillas, amortiguadores o resortes).")
     resultados = []
     conteos = defaultdict(int)
     compatibilidades = 0
 
     for posicion, fila in enumerate(publicaciones):
         parsed = interpretar_titulo(fila[1], catalogo)
+        if modo == "suspension":
+            parsed["litros"] = ""
+            parsed["litros_detectados"] = []
+            parsed["cilindros"] = ""
+            candidatos = _filtrar_candidatos(parsed, catalogo)
+            bloqueos = list(parsed["ambiguedades"])
+            if not parsed["fabricante"]:
+                bloqueos.append("No se identificó un fabricante inequívoco; confirma la marca.")
+            if len(parsed["modelos"]) != 1:
+                bloqueos.append("El modelo no es inequívoco; confirma el modelo del vehículo.")
+            if parsed["anio_desde"] is None:
+                bloqueos.append("El título no contiene un año utilizable.")
+            if not candidatos and parsed["modelo"]:
+                bloqueos.append("No se encontraron vehículos de ese modelo y año en el catálogo.")
+            estado = "lista" if candidatos and not bloqueos else ("revision" if candidatos or parsed["modelo_ambiguo"] else "sin_coincidencia")
+            conteos[estado] += 1
+            if estado == "lista":
+                compatibilidades += len(candidatos)
+            resultados.append({
+                "id": posicion, "user_product_id": fila[0], "titulo": fila[1], "sku": fila[2],
+                "estado": estado, "aprobacion_masiva_segura": estado == "lista" and bool(candidatos),
+                "motivo": " ".join(bloqueos), "extraido": parsed, "candidatos": candidatos,
+            })
+            continue
+
         candidatos = _filtrar_candidatos(parsed, catalogo)
         marcas_candidatas = sorted({normalizar(c[0]) for c in candidatos})
         if (not parsed["fabricante"] and not parsed["ambiguedades"]
@@ -365,6 +403,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado) -> dict
             "sin_coincidencia": conteos["sin_coincidencia"],
             "compatibilidades_automaticas": compatibilidades,
             "filas_catalogo": catalogo.filas,
+            "modo": modo,
         },
     }
 

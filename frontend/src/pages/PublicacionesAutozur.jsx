@@ -47,6 +47,7 @@ export default function PublicacionesAutozur() {
   const [publicaciones, setPublicaciones] = useState(null);
   const [catalogo, setCatalogo] = useState(null);
   const [analisis, setAnalisis] = useState(null);
+  const [modo, setModo] = useState('general');
   const [decisiones, setDecisiones] = useState({});
   const [detalles, setDetalles] = useState({});
   const [cargandoDetalle, setCargandoDetalle] = useState(null);
@@ -61,7 +62,7 @@ export default function PublicacionesAutozur() {
     if (!publicaciones || !catalogo) return;
     setCargando(true); setError(null); setAnalisis(null); setDecisiones({}); setDetalles({}); setPagina(1);
     try {
-      const { data } = await autozurAnalizar(publicaciones, catalogo);
+      const { data } = await autozurAnalizar(publicaciones, catalogo, modo);
       setAnalisis(data);
       setEstado(data.revision ? 'revision' : 'lista');
     } catch (err) {
@@ -135,9 +136,17 @@ export default function PublicacionesAutozur() {
       </div>}
 
       <div className="bg-white rounded-xl border border-notion-border p-5 mb-4">
+        <div className="flex gap-2 mb-5" role="tablist" aria-label="Apartado de compatibilidades">
+          {[['general', 'Compatibilidades generales'], ['suspension', 'Suspensión']].map(([valor, texto]) =>
+            <button key={valor} type="button" role="tab" aria-selected={modo === valor}
+              onClick={() => { setModo(valor); setAnalisis(null); setDecisiones({}); setError(null); }}
+              className={`px-3 py-2 rounded-lg text-sm font-semibold ${modo === valor ? 'bg-reluvsa-black text-reluvsa-yellow' : 'border border-notion-border hover:bg-notion-bg'}`}>
+              {texto}
+            </button>)}
+        </div>
         <div className="flex items-center gap-2 mb-4">
           <span className="w-6 h-6 rounded-full bg-reluvsa-black text-reluvsa-yellow text-xs font-bold flex items-center justify-center">1</span>
-          <h3 className="font-semibold">Carga los archivos de Autozur</h3>
+          <h3 className="font-semibold">{modo === 'suspension' ? 'Analiza publicaciones de suspensión' : 'Carga los archivos de Autozur'}</h3>
         </div>
         <div className="grid md:grid-cols-2 gap-5">
           <CampoArchivo label="Publicaciones sin compatibilidad"
@@ -145,11 +154,12 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Las propuestas se cruzan por fabricante, modelo y año; el motor no limita los resultados.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
             {cargando ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
-            {cargando ? 'Analizando 349 mil vehículos…' : 'Analizar compatibilidades'}
+            {cargando ? 'Analizando 349 mil vehículos…' : modo === 'suspension' ? 'Analizar suspensión' : 'Analizar compatibilidades'}
           </button>
           <p className="text-xs text-notion-text-secondary">El proceso es local y no modifica publicaciones en Mercado Libre.</p>
         </div>

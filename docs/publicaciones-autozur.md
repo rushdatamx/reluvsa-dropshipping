@@ -19,6 +19,13 @@ Autozur espera una fila por compatibilidad. Por eso `UserProductID`, `TITULO` y
 6. Gaby aprueba o excluye los casos revisables.
 7. Descarga un Excel con las mismas 17 columnas y una fila por compatibilidad.
 
+La pantalla incluye un apartado **Suspensión** que recibe los mismos archivos y
+procesa sólo títulos con “horquilla”, “amortiguador(es)” o “resorte(s)”. En ese
+apartado se proponen vehículos por fabricante, modelo y año, sin filtrar por
+litros ni cilindros. Fabricante o modelo no inequívocos requieren revisión; las
+decisiones de aprobación/exclusión y la descarga se limitan a las publicaciones
+de suspensión. El apartado general conserva el cruce descrito abajo.
+
 ## Regla de seguridad del cruce
 
 Una publicación queda lista automáticamente cuando un único modelo, años de cuatro

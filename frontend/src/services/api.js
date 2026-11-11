@@ -190,10 +190,11 @@ export const pubGenerar = (payload) => {
 };
 
 // Publicaciones Autozur: ambos archivos se procesan localmente. No usa la API de ML.
-export const autozurAnalizar = (publicaciones, catalogo) => {
+export const autozurAnalizar = (publicaciones, catalogo, modo = 'general') => {
   const fd = new FormData();
   fd.append('publicaciones', publicaciones);
   fd.append('catalogo', catalogo);
+  fd.append('modo', modo);
   return api.post('/publicaciones-autozur/analizar', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000,

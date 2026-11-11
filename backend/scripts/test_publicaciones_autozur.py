@@ -66,6 +66,14 @@ resultado = analizar([base], catalogo)
 check("cruce exacto queda listo", resultado["resultados"][0]["estado"] == "lista", resultado)
 check("una publicación obtiene dos compatibilidades", len(resultado["resultados"][0]["candidatos"]) == 2, resultado)
 
+suspension = ["S1", "Horquilla Chevrolet Camaro 1976", "S-SKU"] + [""] * 14
+r_suspension = analizar([suspension, base], catalogo, "suspension")
+check("apartado suspensión descarta publicaciones generales", r_suspension["resumen"]["publicaciones"] == 1 and r_suspension["resultados"][0]["titulo"] == suspension[1], r_suspension)
+check("horquilla propone todas las variantes de motor por modelo y año", {f[4] for f in r_suspension["resultados"][0]["candidatos"]} == {"4.1", "5.0"}, r_suspension)
+sin_marca_suspension = ["S2", "Amortiguador Camaro 1976", "S-SKU"] + [""] * 14
+check("marca ausente queda para revisión", analizar([sin_marca_suspension], catalogo, "suspension")["resultados"][0]["estado"] == "revision")
+check("resortes se detectan como suspensión", analizar([["S3", "Resortes Volkswagen Jetta 2018", "S-SKU"] + [""] * 14], catalogo, "suspension")["resumen"]["publicaciones"] == 1)
+
 inferida = ["2", "Base P/ Spark 1.2 2017", "S-1"] + [""] * 14
 r_inferida = analizar([inferida], catalogo)["resultados"][0]
 check("fabricante único inferido queda listo", r_inferida["estado"] == "lista", r_inferida)
