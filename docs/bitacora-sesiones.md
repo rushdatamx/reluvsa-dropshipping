@@ -3090,3 +3090,23 @@ Verificación: 87/87 comprobaciones sin red en `test_publicaciones_autozur.py`,
 incluyendo Matiz Pontiac/Chevrolet con y sin marca explícita, marca contradictoria,
 rango acotado, modelo de una sola marca, datos incompletos, aislamiento del general
 y exportación con aprobación/exclusión. `npm run build` compiló correctamente.
+
+## 2026-11-12 — Iniciador de mediación en Devoluciones
+
+La tabla y el detalle agregan “Mediación iniciada por”, derivado exclusivamente del
+historial GET de ML. Se elige la apertura dispute/opened más reciente comparando
+fechas UTC y se resuelve change_by contra players (seller, buyer o mediator).
+Actores ambiguos y fechas inválidas quedan sin atribución; no se deduce del
+iniciador del reclamo ni de quien lo cerró. Se guardan actor normalizado, fecha
+y consulta satisfactoria con migración idempotente. El caso se persiste antes
+del historial y los errores dejan el aviso pendiente para backoff, conservando
+el dato previo. El CLI --solo-historial completa pendientes de ambas cuentas.
+
+Preflight real: status_history devolvió listas en ambas cuentas; principal
+5565339781 abrió respondent y secundaria 5583556840 abrió complainant. Backup
+verificado: /data/dropshipping.db.bak-mediacion-20261112_190725 (210759680 bytes,
+integrity_check=ok). Pasaron pruebas de devoluciones (incluye reaperturas, UTC,
+actores, empates, conservación ante error, reintentos y migración doble), cliente
+solo lectura, sync ML y build frontend. api-guardian revisó el diff de seguridad.
+Se incluyen los cambios de esta sesión: scroll nativo, ordenamiento por encabezados
+y etiquetas explícitas del filtro Revisado.

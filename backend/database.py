@@ -499,6 +499,9 @@ CREATE TABLE IF NOT EXISTS ml_devoluciones (
     raw_return TEXT,
     productos_json TEXT,
     mediacion INTEGER NOT NULL DEFAULT 0,
+    mediacion_iniciada_por TEXT,
+    mediacion_fecha_apertura TEXT,
+    mediacion_historial_consultado_en TEXT,
     revisado INTEGER NOT NULL DEFAULT 0,
     seguimiento_usuario TEXT,
     seguimiento_fecha TEXT,
@@ -606,6 +609,7 @@ def init_database():
         _migrar_proveedor_desde_lugar_indicado(cursor)
         _migrar_columna_deposito(cursor)
         _migrar_columna_albaran(cursor)
+        _migrar_columnas_mediacion(cursor)
         _migrar_columna_pack_id(cursor)
         _migrar_columna_total_neto(cursor)
         _migrar_columna_fecha_creacion_ml(cursor)
@@ -854,6 +858,13 @@ def _migrar_columna_albaran(cursor):
     if "albaran" not in cols:
         cursor.execute("ALTER TABLE ventas_ml ADD COLUMN albaran TEXT")
         print("[migracion] ventas_ml.albaran agregada.")
+
+
+def _migrar_columnas_mediacion(cursor):
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(ml_devoluciones)")}
+    for nombre in ("mediacion_iniciada_por", "mediacion_fecha_apertura", "mediacion_historial_consultado_en"):
+        if nombre not in cols:
+            cursor.execute(f"ALTER TABLE ml_devoluciones ADD COLUMN {nombre} TEXT")
 
 
 def _migrar_columna_num_venta_pdf(cursor):

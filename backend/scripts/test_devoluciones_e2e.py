@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
 from jose import jwt  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
-from database import get_db  # noqa: E402
+from database import get_db, _migrar_columnas_mediacion  # noqa: E402
 from main import app  # noqa: E402
 from models import UserInfo  # noqa: E402
 from routers.auth import ALGORITHM, SECRET_KEY, require_admin  # noqa: E402
@@ -60,6 +60,8 @@ def fake_get(path, **kwargs):
 
 
 def fake_optional(path, **kwargs):
+    if path.endswith(("/status_history", "/status-history")):
+        return []
     optional_paths.append(path)
     if path.endswith("/detail"):
         return {"due_date": "2026-10-17T12:00:00+00:00", "action_responsible": "seller" if "/101/" in path else "mediator"}
@@ -168,6 +170,66 @@ try:
     assert ",before:" in rango and ".000+00:00" in rango
     rango_params = next(p for p in search_params if "range" in p)
     assert rango_params["type"] == "returns"
+    # El iniciador del reclamo y quien lo cerró no determinan la mediación.
+    history = []
+    def historial(path, **kwargs):
+        return history
+    ml_client.get_opcional = historial
+    players = {"players": [{"role": "respondent", "type": "seller"}, {"role": "complainant", "type": "buyer"}]}
+    def apertura(actor, fecha):
+        return {"stage": "dispute", "status": "opened", "date": fecha, "change_by": actor}
+    for role, expected in (("respondent", "reluvsa"), ("complainant", "cliente"), ("mediator", "mercado_libre"), ("unknown", "no_identificado")):
+        history[:] = [apertura(role, "2026-10-10T10:00:00Z")]
+        assert sync_devoluciones.actualizar_historial("principal", "101", players) == expected
+    history[:] = [apertura("respondent", "2026-10-10T10:00:00Z"), apertura("complainant", "2026-10-10T09:00:00-04:00")]
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) == "cliente"
+    history.append(apertura("unknown", "2026-10-11T10:00:00Z"))
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) == "no_identificado"
+    history[:] = [apertura("respondent", "invalid")]
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) == "no_identificado"
+    history[:] = [apertura("respondent", "2026-10-10T10:00:00Z"), apertura("complainant", "2026-10-10T10:00:00Z")]
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) == "no_identificado"
+    assert sync_devoluciones.actualizar_historial("principal", "101", {"players": None}) == "no_identificado"
+    history[:] = []
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) is None
+    history[:] = [apertura("respondent", "2026-10-10T10:00:00Z")]
+    assert sync_devoluciones.actualizar_historial("principal", "101", players) == "reluvsa"
+    def failing_history(*args, **kwargs):
+        raise ml_client.MLError("GET respondió 429")
+    ml_client.get_opcional = failing_history
+    try:
+        sync_devoluciones.actualizar_historial("principal", "101", players)
+        raise AssertionError("Un error del historial debe permitir reintento")
+    except ml_client.MLError:
+        pass
+    with get_db() as conn:
+        row = conn.execute("SELECT mediacion_iniciada_por, revisado FROM ml_devoluciones WHERE cuenta_ml='principal' AND claim_id='101'").fetchone()
+        assert row["mediacion_iniciada_por"] == "reluvsa" and row["revisado"] == 1
+    import sqlite3
+    legacy = sqlite3.connect(":memory:")
+    legacy.execute("CREATE TABLE ml_devoluciones (cuenta_ml TEXT, claim_id TEXT, revisado INTEGER)")
+    legacy.execute("INSERT INTO ml_devoluciones VALUES ('principal','1',1)")
+    _migrar_columnas_mediacion(legacy.cursor())
+    _migrar_columnas_mediacion(legacy.cursor())
+    assert legacy.execute("SELECT revisado, mediacion_iniciada_por FROM ml_devoluciones").fetchone() == (1, None)
+    legacy.close()
+    # Un fallo de historial persiste el caso pero conserva el aviso para reintento.
+    def history_failure(path, **kwargs):
+        if path.endswith("/status_history"):
+            raise ml_client.MLError("GET respondió 403")
+        return fake_optional(path, **kwargs)
+    ml_client.get_opcional = history_failure
+    with get_db() as conn:
+        conn.execute("UPDATE ml_notificaciones SET procesada=1")
+        conn.execute("INSERT INTO ml_notificaciones(topic,resource,recibido_en,procesada,cuenta_ml) VALUES ('post_purchase','/post-purchase/v1/claims/101','now',0,'principal')")
+    sync_devoluciones._retry_at.clear()
+    assert sync_devoluciones.procesar_pendientes()["errores"] == 1
+    with get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ml_notificaciones WHERE procesada=0").fetchone()[0] == 1
+    sync_devoluciones._retry_at.clear()
+    ml_client.get_opcional = fake_optional
+    assert sync_devoluciones.procesar_pendientes()["procesados"] == 1
+    print("✅ historial: actores, zonas horarias, reaperturas, desconocidos, fechas inválidas, empates y conservación ante errores")
     print("✅ postventa: duplicados, reintento 403/429, reclamo sin devolución, cruce exacto, SKU múltiples, plazo, filtros, marcas, evidencia y permisos")
 finally:
     ml_client.get, ml_client.get_opcional = old_get, old_optional

@@ -35,7 +35,7 @@ function Shell() {
     <BrowserRouter>
       <div className="min-h-screen flex bg-notion-bg-subtle">
         <Sidebar />
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 p-6 lg:p-8">
           <Routes>
             <Route path="/" element={isAdmin() ? <Dashboard /> : <Ventas />} />
             <Route path="/ventas" element={<Ventas />} />

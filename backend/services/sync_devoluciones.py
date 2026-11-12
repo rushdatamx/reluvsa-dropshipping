@@ -18,7 +18,7 @@ _reconcile_retry_at = {}
 
 
 def _fecha_utc(value):
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
@@ -53,6 +53,42 @@ def _hay_mediacion(claim):
             if (action.get("action") or "").lower() == "send_message_to_mediator":
                 return True
     return False
+
+
+def actualizar_historial(cuenta, claim_id, claim=None):
+    """GET del historial; errores conservan datos y permiten reintentar el aviso."""
+    if claim is None:
+        with get_db() as conn:
+            row = conn.execute("SELECT raw_claim FROM ml_devoluciones WHERE cuenta_ml=? AND claim_id=?", (cuenta, claim_id)).fetchone()
+        claim = json.loads(row[0] or "{}")
+    path = f"/post-purchase/v1/claims/{claim_id}"
+    eventos = ml_client.get_opcional(path + "/status_history", cuenta_ml=cuenta)
+    if eventos is None:
+        eventos = ml_client.get_opcional(path + "/status-history", cuenta_ml=cuenta)
+    if not isinstance(eventos, list) or any(not isinstance(e, dict) for e in eventos):
+        raise ml_client.MLError("Historial de mediación no disponible")
+    candidatos = [e for e in eventos if e.get("stage") == "dispute" and e.get("status") == "opened"]
+    actor = fecha = None
+    if candidatos:
+        actor = "no_identificado"
+        if all(_fecha_utc(e.get("date")) for e in candidatos):
+            fecha = max(_fecha_utc(e["date"]) for e in candidatos)
+            actores = set()
+            for evento in candidatos:
+                if _fecha_utc(evento["date"]) != fecha:
+                    continue
+                tipos = {p.get("type") for p in (claim.get("players") or []) if isinstance(p, dict) and evento.get("change_by") and p.get("role") == evento.get("change_by")}
+                if evento.get("change_by") == "mediator":
+                    actores.add("mercado_libre")
+                else:
+                    actores.add({"seller": "reluvsa", "buyer": "cliente"}.get(next(iter(tipos)), "no_identificado") if len(tipos) == 1 else "no_identificado")
+            if len(actores) == 1:
+                actor = actores.pop()
+    with get_db() as conn:
+        conn.execute("""UPDATE ml_devoluciones SET mediacion_iniciada_por=?,
+            mediacion_fecha_apertura=?, mediacion_historial_consultado_en=?
+            WHERE cuenta_ml=? AND claim_id=?""", (actor, fecha, datetime.now(timezone.utc).isoformat(), cuenta, claim_id))
+    return actor
 
 
 def procesar_reclamo(cuenta, claim_id):
@@ -95,8 +131,9 @@ def procesar_reclamo(cuenta, claim_id):
         conn.execute("""INSERT INTO ml_devoluciones
             (cuenta_ml, claim_id, order_id, pack_id, return_id, estado_ml, estado_devolucion,
              accion_pendiente, fecha_limite, unidades_reclamadas, motivo, reason_id, detalle,
-             creado_ml, actualizado_ml, raw_claim, raw_return, productos_json, mediacion)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             creado_ml, actualizado_ml, raw_claim, raw_return, productos_json, mediacion,
+             mediacion_iniciada_por, mediacion_fecha_apertura, mediacion_historial_consultado_en)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(cuenta_ml,claim_id) DO UPDATE SET
              order_id=excluded.order_id, pack_id=excluded.pack_id, return_id=excluded.return_id,
              estado_ml=excluded.estado_ml, estado_devolucion=excluded.estado_devolucion,
@@ -105,7 +142,8 @@ def procesar_reclamo(cuenta, claim_id):
              reason_id=excluded.reason_id, detalle=excluded.detalle,
              actualizado_ml=excluded.actualizado_ml, raw_claim=excluded.raw_claim,
              raw_return=excluded.raw_return, productos_json=excluded.productos_json,
-             mediacion=excluded.mediacion""",
+             mediacion=excluded.mediacion,
+             mediacion_iniciada_por=ml_devoluciones.mediacion_iniciada_por""",
             (cuenta, str(claim_id), str(order_id) if order_id else None,
              str(pack_id) if pack_id else None, str(returned.get("id")) if returned and returned.get("id") else None,
              claim.get("status"), returned.get("status") if returned else None,
@@ -113,7 +151,9 @@ def procesar_reclamo(cuenta, claim_id):
              reason_id, detail.get("description"), claim.get("date_created"),
              claim.get("last_updated") or now, json.dumps(claim, ensure_ascii=False),
              json.dumps(returned, ensure_ascii=False) if returned else None,
-             json.dumps(productos, ensure_ascii=False), int(_hay_mediacion(claim))))
+             json.dumps(productos, ensure_ascii=False), int(_hay_mediacion(claim)),
+             None, None, None))
+    actualizar_historial(cuenta, str(claim_id), claim)
     return True
 
 
