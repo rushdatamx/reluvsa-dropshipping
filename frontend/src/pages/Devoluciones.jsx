@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { actualizarDevolucion, descargarEvidenciaDevolucion, detalleDevolucion, listarDevoluciones, subirEvidenciaDevolucion } from '../services/api';
 
+// Corte fijo del reinicio operativo, medianoche en Monterrey (UTC-6).
+const INICIO_DEVOLUCIONES = Date.parse('2026-11-12T00:00:00-06:00');
+
 const fecha = (value) => value ? new Date(value).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Monterrey' }) : 'Sin fecha';
 const plazo = (item, ahora) => {
   const limite = Date.parse(item.fecha_limite);
@@ -82,6 +85,7 @@ export default function Devoluciones() {
   </label>;
   const almacenes = data.almacenes || [];
   const itemsFiltrados = useMemo(() => data.items.filter((item) => {
+    if (!(Date.parse(item.creado_ml) >= INICIO_DEVOLUCIONES)) return false;
     if (!vencimiento) return true;
     const estado = plazo(item, ahora);
     if (vencimiento === 'vencido' || vencimiento === 'sin_fecha') return estado.tipo === vencimiento;
@@ -132,7 +136,7 @@ export default function Devoluciones() {
   </th>;
 
   return <div>
-    <PageHeader title="Devoluciones" subtitle="Casos de Mercado Libre y seguimiento interno" />
+    <PageHeader title="Devoluciones" subtitle="Casos creados desde el 12 de noviembre de 2026 · Seguimiento interno" />
     {error && <p role="alert" className="mb-4 rounded bg-red-50 text-red-700 p-3">{error}</p>}
     <div className="flex flex-wrap gap-4 mb-4">
       {filtro('cuenta', 'Cuenta', [['', 'Todas'], ['principal', 'Principal'], ['secundaria', 'Secundaria']])}
