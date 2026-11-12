@@ -3110,3 +3110,9 @@ actores, empates, conservación ante error, reintentos y migración doble), clie
 solo lectura, sync ML y build frontend. api-guardian revisó el diff de seguridad.
 Se incluyen los cambios de esta sesión: scroll nativo, ordenamiento por encabezados
 y etiquetas explícitas del filtro Revisado.
+
+Cierre productivo: commit 68a5bed en main; Railway cd172546-21bf-4896-9fda-4b5f6b8d748a
+SUCCESS y frontend Vercel Ready (bundle main.cd399df8.js). El procesamiento
+--solo-historial terminó con 523 procesados, 288 atribuidos, 235 sin apertura,
+0 no identificados y 0 errores. La muestra guardada coincide con GET real:
+5565339781 → RELUVSA; 5583556840 → Cliente. api-guardian APROBADO.
