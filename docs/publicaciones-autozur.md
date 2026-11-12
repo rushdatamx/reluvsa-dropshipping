@@ -21,8 +21,10 @@ Autozur espera una fila por compatibilidad. Por eso `UserProductID`, `TITULO` y
 
 La pantalla incluye un apartado **Suspensión** que recibe los mismos archivos y
 procesa sólo títulos con “horquilla”, “amortiguador(es)” o “resorte(s)”. En ese
-apartado se proponen vehículos por fabricante, modelo y año, sin filtrar por
-litros ni cilindros. Fabricante o modelo no inequívocos requieren revisión; las
+apartado se proponen vehículos por modelo y cada año del rango detectado, de
+todas las marcas del catálogo incluso si el título menciona una. No se filtra por
+fabricante, litros ni cilindros. Todas las propuestas requieren revisión y
+aprobación; sin modelo o año utilizable no se ofrecen candidatos aprobables. Las
 decisiones de aprobación/exclusión y la descarga se limitan a las publicaciones
 de suspensión. El apartado general conserva el cruce descrito abajo.
 

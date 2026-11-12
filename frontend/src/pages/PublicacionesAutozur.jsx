@@ -154,7 +154,7 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
-        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Las propuestas se cruzan por fabricante, modelo y año; el motor no limita los resultados.</p>}
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Las propuestas se cruzan por modelo y cada año del rango detectado, incluyendo todas las marcas del catálogo aunque el título mencione una. Requieren revisión y aprobación; el motor no limita los resultados.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">

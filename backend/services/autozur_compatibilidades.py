@@ -174,7 +174,7 @@ def _apariciones(texto: str, opcion: str):
     return list(_patron_nombre(opcion).finditer(texto))
 
 
-def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
+def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado, ignorar_marca: bool = False) -> dict:
     vehiculo = normalizar(titulo.replace(",", "."))
     anios = [int(a) for a in _ANIO.findall(vehiculo)]
     desde, hasta = (min(anios), max(anios)) if anios else (None, None)
@@ -189,12 +189,12 @@ def interpretar_titulo(titulo: str, catalogo: CatalogoIndexado) -> dict:
     ocupados = [m.span() for m in medidas + motores] + [m.span() for m in _ANIO.finditer(vehiculo)]
     hallados = []
     for modelo in catalogo.fabricantes_por_modelo:
-        if marcas and not set(marcas).intersection(catalogo.fabricantes_por_modelo[modelo]):
+        if not ignorar_marca and marcas and not set(marcas).intersection(catalogo.fabricantes_por_modelo[modelo]):
             continue
         for m in _apariciones(vehiculo, modelo):
             if any(m.start() < fin and m.end() > ini for ini, fin in ocupados):
                 continue
-            if modelo.isdigit() and not marcas:
+            if modelo.isdigit() and not marcas and not ignorar_marca:
                 continue
             hallados.append((modelo, m.start(), m.end()))
     # Sólo elimina nombres contenidos en la misma aparición de uno compuesto.
@@ -314,28 +314,31 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
     compatibilidades = 0
 
     for posicion, fila in enumerate(publicaciones):
-        parsed = interpretar_titulo(fila[1], catalogo)
+        parsed = interpretar_titulo(fila[1], catalogo, ignorar_marca=modo == "suspension")
         if modo == "suspension":
             parsed["litros"] = ""
             parsed["litros_detectados"] = []
             parsed["cilindros"] = ""
-            candidatos = _filtrar_candidatos(parsed, catalogo)
-            bloqueos = list(parsed["ambiguedades"])
-            if not parsed["fabricante"]:
-                bloqueos.append("No se identificó un fabricante inequívoco; confirma la marca.")
+            # La marca del título es informativa: buscar en todo el catálogo.
+            candidatos = _filtrar_candidatos(
+                {**parsed, "fabricante": "", "fabricantes_detectados": []}, catalogo
+            ) if parsed["modelos"] and parsed["anio_desde"] is not None else []
+            bloqueos = [
+                "Las propuestas corresponden al modelo y año detectados y pueden incluir varias marcas. "
+                "Revisa y aprueba las compatibilidades antes de descargarlas.",
+                *parsed["ambiguedades"],
+            ]
             if len(parsed["modelos"]) != 1:
                 bloqueos.append("El modelo no es inequívoco; confirma el modelo del vehículo.")
             if parsed["anio_desde"] is None:
                 bloqueos.append("El título no contiene un año utilizable.")
             if not candidatos and parsed["modelo"]:
                 bloqueos.append("No se encontraron vehículos de ese modelo y año en el catálogo.")
-            estado = "lista" if candidatos and not bloqueos else ("revision" if candidatos or parsed["modelo_ambiguo"] else "sin_coincidencia")
+            estado = "revision" if candidatos else "sin_coincidencia"
             conteos[estado] += 1
-            if estado == "lista":
-                compatibilidades += len(candidatos)
             resultados.append({
                 "id": posicion, "user_product_id": fila[0], "titulo": fila[1], "sku": fila[2],
-                "estado": estado, "aprobacion_masiva_segura": estado == "lista" and bool(candidatos),
+                "estado": estado, "aprobacion_masiva_segura": False,
                 "motivo": " ".join(bloqueos), "extraido": parsed, "candidatos": candidatos,
             })
             continue

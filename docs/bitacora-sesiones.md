@@ -3075,3 +3075,18 @@ resultado: 864/547/361 y 26,205. Se inspeccionaron las 46 promociones a listas y
 los cambios de candidatos; 18 listas pasan a revisión. Detalle, índices y límites
 en `docs/publicaciones-autozur.md`. Se preservaron cambios locales de documentación
 ajenos al alcance. Regresión: 58/58, contador real; compilación frontend correcta.
+
+
+## 2026-11-12 — Autozur Suspensión por modelo y año
+
+Suspensión busca modelos en todas las marcas y cruza cada año del rango detectado,
+aunque el título incluya una marca. Mantiene todas las variantes de motor. Todas
+las propuestas quedan en revisión y requieren aprobación individual; sin modelo
+o año utilizable no hay candidatos aprobables. El modo general conserva sus
+filtros y reglas de inferencia y aprobación. Se actualizó la ayuda de pantalla y
+el contrato `docs/publicaciones-autozur.md`.
+
+Verificación: 87/87 comprobaciones sin red en `test_publicaciones_autozur.py`,
+incluyendo Matiz Pontiac/Chevrolet con y sin marca explícita, marca contradictoria,
+rango acotado, modelo de una sola marca, datos incompletos, aislamiento del general
+y exportación con aprobación/exclusión. `npm run build` compiló correctamente.

@@ -219,5 +219,61 @@ check("modelo/motor/años compartidos entre marcas no ofrecen propuestas aprobab
 check("K3500 explica que falta identificar la marca",
       "se requiere identificar la marca" in k3500["motivo"], k3500["motivo"])
 
+# Suspensión cruza modelo/años en todas las marcas y exige aprobación explícita.
+for marca in ["PONTIAC", "CHEVROLET"]:
+    catalogo.por_fabricante_modelo[(marca, "MATIZ")] = [
+        [marca.title(), "Matiz", str(anio), "Base", "1.0", "4", "", "", "", "", "", ""]
+        for anio in range(2009, 2013)
+    ]
+    catalogo.fabricantes_por_modelo.setdefault("MATIZ", []).append(marca)
+if "PONTIAC" not in catalogo.fabricantes:
+    catalogo.fabricantes.append("PONTIAC")
+
+def suspension_resultado(titulo):
+    filas = [["SM", titulo, "SM-SKU"] + [""] * 14]
+    return {"publicaciones": filas, **analizar(filas, catalogo, "suspension")}
+
+for titulo in ["Amortiguador Matiz 2010", "Amortiguador Pontiac Matiz 2010",
+               "Amortiguador Chevrolet Matiz 2010", "Amortiguador Ford Matiz 2010"]:
+    sesion = suspension_resultado(titulo)
+    r = sesion["resultados"][0]
+    check("suspensión incluye ambas marcas: " + titulo,
+          {(f[0], f[2]) for f in r["candidatos"]} == {("Pontiac", "2010"), ("Chevrolet", "2010")}, r)
+    check("suspensión requiere aprobación: " + titulo,
+          r["estado"] == "revision" and not r["aprobacion_masiva_segura"], r)
+
+r = suspension_resultado("Resorte Pontiac Matiz 2010-2011")["resultados"][0]
+check("rango de suspensión incluye cada año y excluye años externos",
+      {(f[0], f[2]) for f in r["candidatos"]} ==
+      {(marca, str(anio)) for marca in ["Pontiac", "Chevrolet"] for anio in [2010, 2011]}, r)
+check("suspensión de una sola marca conserva candidatos",
+      suspension_resultado("Horquilla Camaro 1976")["resultados"][0]["candidatos"] ==
+      r_suspension["resultados"][0]["candidatos"])
+for titulo in ["Horquilla Matiz", "Horquilla Matiz 10-11", "Horquilla 2010", "Horquilla Desconocido 2010"]:
+    r = suspension_resultado(titulo)["resultados"][0]
+    check("sin modelo/año utilizable no hay candidatos: " + titulo,
+          not r["candidatos"] and not r["aprobacion_masiva_segura"], r)
+check("general sigue restringiendo marca explícita",
+      {f[0] for f in resolver("Pontiac Matiz 1.0 2010")["candidatos"]} == {"Pontiac"})
+check("general sigue bloqueando modelo compartido sin marca",
+      not resolver("Matiz 1.0 2010")["candidatos"])
+with tempfile.TemporaryDirectory() as carpeta:
+    ruta = Path(carpeta) / "suspension.xlsx"
+    sesion = suspension_resultado("Amortiguador Matiz 2010")
+    try:
+        escribir_resultado(sesion, [], [], ruta)
+        check("suspensión no se exporta sin aprobación", False)
+    except ValueError as exc:
+        check("suspensión no se exporta sin aprobación", "No hay compatibilidades aprobadas" in str(exc))
+    check("suspensión aprobada exporta ambas marcas", escribir_resultado(sesion, [0], [], ruta) == 2)
+    wb = openpyxl.load_workbook(ruta, read_only=True)
+    check("Excel aprobado contiene ambas marcas", {f[3] for f in wb.active.iter_rows(min_row=2, values_only=True)} == {"Pontiac", "Chevrolet"})
+    wb.close()
+    try:
+        escribir_resultado(sesion, [0], [0], ruta)
+        check("exclusión de suspensión prevalece", False)
+    except ValueError as exc:
+        check("exclusión de suspensión prevalece", "No hay compatibilidades aprobadas" in str(exc))
+
 print(f"\n{total_checks - fallos} pasaron · {fallos} fallaron")
 raise SystemExit(1 if fallos else 0)
