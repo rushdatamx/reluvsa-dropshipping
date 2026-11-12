@@ -2,18 +2,39 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { actualizarDevolucion, descargarEvidenciaDevolucion, detalleDevolucion, listarDevoluciones, subirEvidenciaDevolucion } from '../services/api';
 
-const fecha = (value) => value ? new Date(value).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) : 'Sin fecha';
+const fecha = (value) => value ? new Date(value).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Monterrey' }) : 'Sin fecha';
+const plazo = (item, ahora) => {
+  const limite = Date.parse(item.fecha_limite);
+  if (!Number.isFinite(limite)) return { tipo: 'sin_fecha', texto: 'Sin fecha informada por ML', color: 'text-gray-500' };
+  if (item.estado_ml !== 'opened') return { tipo: 'cerrado', texto: 'Caso cerrado', color: 'text-gray-500' };
+  const restante = limite - ahora;
+  const minutos = Math.max(1, Math.ceil(Math.abs(restante) / 60000));
+  const duracion = minutos >= 1440 ? `${Math.floor(minutos / 1440)} d ${Math.floor((minutos % 1440) / 60)} h` : `${Math.floor(minutos / 60)} h ${minutos % 60} min`;
+  return { tipo: restante <= 0 ? 'vencido' : 'pendiente', restante,
+    texto: restante <= 0 ? `Vencido hace ${duracion}` : `Vence en ${duracion}`,
+    color: restante <= 86400000 ? 'text-red-700' : restante <= 172800000 ? 'text-amber-700' : restante <= 259200000 ? 'text-yellow-800' : 'text-gray-600' };
+};
+
 const mostrar = (value) => value === null || value === undefined || value === '' ? 'Sin dato' : value;
 
 const iniciador = (item) => ({ reluvsa: 'RELUVSA', cliente: 'Cliente', mercado_libre: 'Mercado Libre', no_identificado: 'No identificado' }[item.mediacion_iniciada_por] || (item.mediacion_historial_consultado_en ? '—' : 'No identificado'));
 
 export default function Devoluciones() {
   const [filtros, setFiltros] = useState({ cuenta: '', almacen: '', mediacion: '', revisado: '' });
+  const [vencimiento, setVencimiento] = useState('');
+  const [ahora, setAhora] = useState(Date.now);
+  useEffect(() => {
+    const actualizar = () => setAhora(Date.now());
+    const timer = setInterval(actualizar, 60000);
+    window.addEventListener('focus', actualizar);
+    document.addEventListener('visibilitychange', actualizar);
+    return () => { clearInterval(timer); window.removeEventListener('focus', actualizar); document.removeEventListener('visibilitychange', actualizar); };
+  }, []);
   const [data, setData] = useState({ total: 0, sin_revisar: 0, sin_mediacion: 0, almacenes: [], items: [] });
   const [detalle, setDetalle] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [orden, setOrden] = useState({ campo: 'fecha_limite', direccion: 'desc' });
+  const [orden, setOrden] = useState({ campo: 'fecha_limite', direccion: 'asc' });
 
   const cargar = useCallback(async () => {
     try {
@@ -60,6 +81,13 @@ export default function Devoluciones() {
     </select>
   </label>;
   const almacenes = data.almacenes || [];
+  const itemsFiltrados = useMemo(() => data.items.filter((item) => {
+    if (!vencimiento) return true;
+    const estado = plazo(item, ahora);
+    if (vencimiento === 'vencido' || vencimiento === 'sin_fecha') return estado.tipo === vencimiento;
+    return estado.tipo === 'pendiente' && estado.restante <= Number(vencimiento) * 3600000;
+  }), [data.items, vencimiento, ahora]);
+  const resumenPlazo = (item) => { const estado = plazo(item, ahora); return <span className={`block text-xs mt-1 ${estado.color}`}>{estado.texto}</span>; };
   const itemsOrdenados = useMemo(() => {
     const camposFecha = new Set(['fecha_limite', 'fecha_albaran']);
     const camposNumero = new Set(['unidades_reclamadas']);
@@ -71,7 +99,7 @@ export default function Devoluciones() {
       if (campo === 'estado') return item.estado_devolucion || item.estado_ml;
       return item[campo];
     };
-    return [...data.items].sort((a, b) => {
+    return [...itemsFiltrados].sort((a, b) => {
       const av = valor(a, orden.campo);
       const bv = valor(b, orden.campo);
       const aVacio = av === null || av === undefined || av === '';
@@ -89,7 +117,7 @@ export default function Devoluciones() {
       }
       return orden.direccion === 'asc' ? comparacion : -comparacion;
     });
-  }, [data.items, orden]);
+  }, [itemsFiltrados, orden]);
 
   const ordenarPor = (campo) => setOrden((actual) => ({
     campo,
@@ -111,8 +139,14 @@ export default function Devoluciones() {
       {filtro('almacen', 'Almacén', [['', 'Todos'], ...almacenes.map((a) => [a, a])])}
       {filtro('mediacion', 'Mediación', [['', 'Todas'], ['true', 'Con mediación'], ['false', 'Sin mediación']])}
       {filtro('revisado', 'Revisado', [['', 'Todos'], ['true', 'Revisado'], ['false', 'No revisado']])}
+      <label className="text-sm text-gray-600">Vencimiento
+        <select className="ml-2 border rounded px-2 py-1 bg-white" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)}>
+          {[['', 'Todos'], ['24', 'Próximas 24 horas'], ['48', 'Próximas 48 horas'], ['72', 'Próximas 72 horas'], ['vencido', 'Vencidos'], ['sin_fecha', 'Sin fecha informada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
     </div>
-    <div className="flex gap-4 text-sm mb-4"><strong>{data.total} casos</strong><span>{data.sin_revisar} sin revisar</span><span>{data.sin_mediacion} sin mediación</span></div>
+    <p className="text-xs text-gray-500 mb-3">Plazo para responder informado por ML · Horario de Monterrey · Datos de la última sincronización.</p>
+    <div className="flex gap-4 text-sm mb-4"><strong>{itemsFiltrados.length} casos</strong><span>{itemsFiltrados.filter(i => !i.revisado).length} sin revisar</span><span>{itemsFiltrados.filter(i => !i.mediacion).length} sin mediación</span></div>
     <div className="overflow-x-auto bg-white rounded-lg border">
       <table className="min-w-full text-sm"><thead className="bg-gray-50 text-left"><tr>
         {encabezado('Cuenta', 'cuenta_ml')}{encabezado('Venta', 'numero_venta')}{encabezado('SKU', 'sku')}{encabezado('Almacén', 'almacen')}{encabezado('Unidades reclamadas', 'unidades_reclamadas')}{encabezado('Motivo', 'motivo')}{encabezado('Fecha límite', 'fecha_limite')}{encabezado('Albarán', 'albaran')}{encabezado('Fecha albarán', 'fecha_albaran')}{encabezado('Estado ML', 'estado')}{encabezado('Mediación', 'mediacion')}{encabezado('Mediación iniciada por', 'mediacion_iniciada_por')}{encabezado('Revisión', 'revisado')}
@@ -121,11 +155,11 @@ export default function Devoluciones() {
         <td className="p-3 font-medium">{item.numero_venta || 'Pendiente de identificar'}{item.sin_cruce && item.numero_venta ? <span className="block text-xs text-amber-700">Sin cruce local</span> : null}</td>
         <td className="p-3">{mostrar(item.sku)}</td><td className="p-3">{mostrar(item.almacen)}</td>
         <td className="p-3">{mostrar(item.unidades_reclamadas)}</td><td className="p-3 max-w-xs truncate" title={item.motivo || ''}>{mostrar(item.motivo)}</td>
-        <td className="p-3 whitespace-nowrap">{fecha(item.fecha_limite)}</td><td className="p-3">{mostrar(item.albaran)}</td>
+        <td className="p-3 whitespace-nowrap">{fecha(item.fecha_limite)}{resumenPlazo(item)}</td><td className="p-3">{mostrar(item.albaran)}</td>
         <td className="p-3">{item.fecha_albaran || 'Sin fecha'}</td><td className="p-3">{mostrar(item.estado_devolucion || item.estado_ml)}</td>
         <td className="p-3">{item.mediacion ? 'Con mediación' : 'Sin mediación'}</td><td className="p-3">{iniciador(item)}</td><td className="p-3">{item.revisado ? 'Revisado' : 'Sin revisar'}</td>
       </tr>)}</tbody></table>
-      {!data.items.length && <p className="p-6 text-gray-500">No hay devoluciones para estos filtros.</p>}
+      {!itemsFiltrados.length && <p className="p-6 text-gray-500">No hay devoluciones para estos filtros.</p>}
     </div>
     {detalle && <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setDetalle(null)}>
       <section className="bg-white w-full max-w-2xl h-full overflow-y-auto p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -136,7 +170,7 @@ export default function Devoluciones() {
           <div><dt className="text-gray-500">Estado ML</dt><dd>{mostrar(detalle.estado_devolucion || detalle.estado_ml)}</dd></div>
           <div><dt className="text-gray-500">Mediación iniciada por</dt><dd>{iniciador(detalle)} · {fecha(detalle.mediacion_fecha_apertura)}</dd></div>
           <div><dt className="text-gray-500">Acción pendiente</dt><dd>{mostrar(detalle.accion_pendiente)}</dd></div>
-          <div><dt className="text-gray-500">Fecha límite</dt><dd>{fecha(detalle.fecha_limite)}</dd></div>
+          <div><dt className="text-gray-500">Fecha límite</dt><dd>{fecha(detalle.fecha_limite)}{resumenPlazo(detalle)}</dd></div>
           <div><dt className="text-gray-500">Unidades reclamadas</dt><dd>{mostrar(detalle.unidades_reclamadas)}</dd></div>
           <div><dt className="text-gray-500">Motivo</dt><dd>{mostrar(detalle.motivo)}</dd></div>
           <div><dt className="text-gray-500">Almacén</dt><dd>{mostrar(detalle.almacen)}</dd></div>
