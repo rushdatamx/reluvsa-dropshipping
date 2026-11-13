@@ -23,17 +23,27 @@ La pantalla incluye un apartado **Suspensión** que recibe los mismos archivos y
 procesa sólo títulos con “horquilla”, “amortiguador(es)” o “resorte(s)”. En ese
 apartado se proponen vehículos por modelo y cada año del rango detectado, de
 todas las marcas del catálogo incluso si el título menciona una. No se filtra por
-fabricante, litros ni cilindros. Con un único modelo, años completos de cuatro
-dígitos y candidatos, queda **Lista** e incluye automáticamente todas las marcas,
-motores y submodelos coincidentes en la descarga. Sólo modelos múltiples o años
-ambiguos/abreviados requieren revisión; sin modelo, año utilizable o coincidencias
-queda sin coincidencia. La exclusión manual prevalece sobre el estado Lista. Las
-decisiones de aprobación/exclusión y la descarga se limitan a las publicaciones
-de suspensión. El apartado general conserva el cruce descrito abajo.
+fabricante, litros ni cilindros. Todas las coincidencias de todos los modelos
+reales detectados quedan **Listas para descargar**, sin aprobaciones. La conjunción
+Y se ignora entre componentes o modelos y antes de Para/P/; un modelo vehicular
+Y identificado solo o con fabricante se conserva. Los nombres compuestos tienen
+prioridad sobre el modelo que contienen.
 
-Las listas permiten consultar opcionalmente todas sus compatibilidades, además
-del desglose por marca. No es necesario abrirlas ni aprobarlas para descargar.
-Las sesiones anteriores conservan su clasificación: hay que volver a analizar.
+Los años completos conservan el rango mínimo–máximo. Las abreviaturas se contrastan
+con el catálogo entre 1900 y 2099; sólo se acepta una interpretación válida. Un
+rango mixto usa el siglo del año completo como ancla y no se invierten rangos.
+Sin modelo, año inequívoco o coincidencias queda **Sin coincidencia**, con motivo.
+Nunca hay revisión en Suspensión (`revision = 0`). La exclusión manual prevalece.
+
+Las listas muestran el desglose por marca y todos los modelos detectados. Consultar
+las compatibilidades completas es opcional: todas se exportan aunque sólo se vea
+una muestra de cinco. El Excel conserva 17 columnas, posición y notas y elimina
+vehículos idénticos por publicación. Sin filas exportables se informa «No hay
+compatibilidades para descargar».
+
+Las sesiones de Suspensión llevan `reglas_suspension = 2`; las anteriores se
+rechazan en consulta y exportación y piden volver a analizar. Las sesiones generales
+conservan su funcionamiento. No cambian endpoints ni campos existentes.
 
 ## Regla de seguridad del cruce general
 
@@ -147,3 +157,17 @@ incluyen títulos sin marcador y múltiples modelos, sin aprobación automática
 
 Regresión sin red: `PYTHONPATH=backend python3 backend/scripts/test_publicaciones_autozur.py`
 (58 verificaciones contadas realmente). Frontend: `npm run build` satisfactorio.
+
+## Verificación de Suspensión sin aprobaciones (2026-11-13)
+
+Regresión: 124 comprobaciones sin red y build de frontend satisfactorio. Sobre los
+archivos reales: 276 publicaciones de suspensión, 263 listas, 0 revisiones,
+13 sin coincidencia y 11,354 filas exportadas con `aprobadas_revision=[]`, sin abrir
+detalles. Swift y Corolla Cross conservan todas sus variantes. Se comparó el
+resultado íntegro del modo general contra el commit anterior: idéntico para las
+1,772 publicaciones (864 listas, 547 revisiones, 361 sin coincidencia y 26,205
+compatibilidades automáticas). Casos sintéticos cubren Attitude 2011, G3 2006–2007,
+Y real/conjunción, varios modelos, años ambiguos e invertidos, duplicados,
+exclusiones, muestras y sesiones antiguas. Los títulos completos de Gaby con Y
+no están en los archivos disponibles; se reprodujeron las combinaciones indicadas
+en el plan y se verificaron los títulos G3 presentes en el Excel real.

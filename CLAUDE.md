@@ -535,9 +535,11 @@ Convenciones:
   y cilindradas enteras inferidas requieren revisión. Los modelos numéricos exigen
   marca explícita y un token separado del motor. Conservar aprobación por publicación
   y las 17 columnas; no recalcular sesiones antiguas.
-  **Suspensión:** un único modelo y años completos con coincidencias queda Lista
-  automáticamente e incluye todas las marcas, motores y submodelos. Sólo modelos
-  múltiples o años ambiguos requieren revisión; la exclusión manual prevalece.
+  **Suspensión:** todas las coincidencias de todos los modelos reales quedan Listas,
+  sin aprobaciones; incluye marcas, motores y submodelos y respeta exclusiones.
+  Años abreviados sólo con interpretación única en catálogo; sin ella, Sin coincidencia.
+  Ignorar Y como conjunción, conservar el modelo real Y y nombres compuestos.
+  Sesiones con reglas anteriores deben reanalizarse (`reglas_suspension = 2`).
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 

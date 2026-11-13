@@ -64,7 +64,7 @@ export default function PublicacionesAutozur() {
     try {
       const { data } = await autozurAnalizar(publicaciones, catalogo, modo);
       setAnalisis(data);
-      setEstado(data.revision ? 'revision' : 'lista');
+      setEstado(modo !== 'suspension' && data.revision ? 'revision' : 'lista');
     } catch (err) {
       setError(err.response?.data?.detail || 'No pude analizar los archivos de Autozur.');
     } finally {
@@ -107,7 +107,7 @@ export default function PublicacionesAutozur() {
 
   const generar = async () => {
     setGenerando(true); setError(null);
-    const aprobadas = Object.entries(decisiones).filter(([, v]) => v === 'aprobada').map(([id]) => Number(id));
+    const aprobadas = modo === 'suspension' ? [] : Object.entries(decisiones).filter(([, v]) => v === 'aprobada').map(([id]) => Number(id));
     const excluidas = Object.entries(decisiones).filter(([, v]) => v === 'excluida').map(([id]) => Number(id));
     try {
       const respuesta = await autozurGenerar(analisis.session_id, aprobadas, excluidas);
@@ -129,7 +129,7 @@ export default function PublicacionesAutozur() {
   return (
     <div>
       <PageHeader title="Publicaciones Autozur"
-        subtitle="Cruza publicaciones existentes con el catálogo vehicular y revisa sólo los casos ambiguos" />
+        subtitle={modo === 'suspension' ? 'Carga, analiza y descarga todas las coincidencias de suspensión' : 'Cruza publicaciones existentes con el catálogo vehicular y revisa sólo los casos ambiguos'} />
 
       {error && <div className="mb-4 p-3 bg-red-50 text-danger rounded-lg text-sm flex gap-2">
         <AlertTriangle size={16} className="shrink-0 mt-0.5" /> {error}
@@ -154,7 +154,7 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
-        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. El cruce busca en el catálogo por modelo y por cada año detectado; puede encontrar varias marcas aunque el título mencione una. Con un único modelo y años completos, todas las marcas, motores y submodelos coincidentes quedan listos y se incluyen en la descarga. Sólo los modelos múltiples o años ambiguos requieren revisión.</p>}
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Todos los modelos detectados y sus coincidencias por año se incluyen automáticamente, con todas las marcas, motores y submodelos. Los años abreviados se resuelven con el catálogo cuando tienen una interpretación única. Puedes excluir publicaciones o consultar sus compatibilidades completas.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
@@ -174,12 +174,12 @@ export default function PublicacionesAutozur() {
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             {[
               ['Publicaciones', analisis.publicaciones, ''],
-              ['Listas', analisis.listas, 'text-success'],
+              [modo === 'suspension' ? 'Listas para descargar' : 'Listas', analisis.listas, 'text-success'],
               ['A revisión', analisis.revision, 'text-amber-700'],
               ['Sin coincidencia', analisis.sin_coincidencia, 'text-reluvsa-red'],
               ['Compatibilidades', analisis.compatibilidades_automaticas, ''],
               ['Vehículos catálogo', analisis.filas_catalogo, ''],
-            ].map(([label, valor, cls]) => <div key={label} className="bg-notion-bg rounded-lg p-3">
+            ].filter(([label]) => modo !== 'suspension' || label !== 'A revisión').map(([label, valor, cls]) => <div key={label} className="bg-notion-bg rounded-lg p-3">
               <p className="text-xs text-notion-text-secondary">{label}</p>
               <p className={`text-2xl font-semibold ${cls}`}>{Number(valor).toLocaleString('es-MX')}</p>
             </div>)}
@@ -189,23 +189,23 @@ export default function PublicacionesAutozur() {
         <div className="bg-white rounded-xl border border-notion-border p-5 mb-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
             <div>
-              <h3 className="font-semibold">Revisión de publicaciones</h3>
-              <p className="text-xs text-notion-text-secondary mt-1">Las listas ya se incluyen en la descarga, salvo exclusión manual. Las ambiguas sólo se exportan después de aprobarlas.</p>
+              <h3 className="font-semibold">{modo === 'suspension' ? 'Resultados' : 'Revisión de publicaciones'}</h3>
+              <p className="text-xs text-notion-text-secondary mt-1">{modo === 'suspension' ? 'Todas las coincidencias se incluyen aunque sólo veas una muestra. La consulta y la exclusión son opcionales.' : 'Las listas ya se incluyen en la descarga, salvo exclusión manual. Las ambiguas sólo se exportan después de aprobarlas.'}</p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
-              <button onClick={() => setDecisiones((prev) => ({ ...prev, ...Object.fromEntries(analisis.resultados.filter((r) => r.aprobacion_masiva_segura).map((r) => [r.id, 'aprobada'])) }))}
+              {modo !== 'suspension' && <button onClick={() => setDecisiones((prev) => ({ ...prev, ...Object.fromEntries(analisis.resultados.filter((r) => r.aprobacion_masiva_segura).map((r) => [r.id, 'aprobada'])) }))}
                 disabled={!analisis.resultados.some((r) => r.aprobacion_masiva_segura)}
                 className="px-3 py-2 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
                 Aprobar coincidencias seguras
-              </button>
+              </button>}
               <div className="relative">
                 <Search size={15} className="absolute left-3 top-3 text-gray-400" />
                 <input value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }}
                   placeholder="ID, SKU o título" className={`${inputCls} mt-0 pl-9 sm:w-64`} />
               </div>
               <select value={estado} onChange={(e) => cambiarFiltro(e.target.value)} className={`${inputCls} mt-0 sm:w-44`}>
-                <option value="revision">A revisión</option>
-                <option value="lista">Listas</option>
+                {modo !== 'suspension' && <option value="revision">A revisión</option>}
+                <option value="lista">{modo === 'suspension' ? 'Listas para descargar' : 'Listas'}</option>
                 <option value="sin_coincidencia">Sin coincidencia</option>
                 <option value="todos">Todas</option>
               </select>
@@ -232,7 +232,7 @@ export default function PublicacionesAutozur() {
                     {r.motivo && <p className={`text-xs mt-1 ${r.estado === 'lista' ? 'text-green-700' : 'text-amber-800'}`}>{r.motivo}</p>}
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    {r.estado === 'revision' && r.compatibilidades > 0 && detalleCompleto &&
+                    {modo !== 'suspension' && r.estado === 'revision' && r.compatibilidades > 0 && detalleCompleto &&
                       <button onClick={() => decidir(r.id, 'aprobada')}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 flex items-center gap-1">
                         <Check size={13} /> Aprobar propuestas
@@ -262,7 +262,7 @@ export default function PublicacionesAutozur() {
                         </span>)}</div>
                       : <p className="text-sm font-medium">—</p>}
                   </div> : <Dato label="Fabricante" value={x.fabricante} />}
-                  <Dato label="Modelo" value={x.modelo} />
+                  <Dato label="Modelo" value={modo === 'suspension' ? x.modelo_detectado : x.modelo} />
                   <Dato label="Años" value={x.anio_desde ? `${x.anio_desde}–${x.anio_hasta}` : ''} />
                   <Dato label={x.origen_litros === 'entero_inferido' ? 'Litros propuestos' : 'Litros'} value={x.litros} />
                   <Dato label="Cilindros" value={x.cilindros} />
@@ -281,8 +281,7 @@ export default function PublicacionesAutozur() {
                   </table>
                   </div>
                   {!detalleCompleto && <p className="text-[11px] text-notion-text-secondary mt-1">{r.estado === 'lista' ? 'Se muestran 5. Todas las compatibilidades ya están incluidas; puedes consultar la lista completa.' : 'Se muestran 5. Abre todas las propuestas antes de aprobar.'}</p>}
-                  {modo === 'suspension' && detalleCompleto && r.estado === 'revision' && decision !== 'aprobada' && decision !== 'excluida' &&
-                    <p className="text-[11px] text-amber-800 mt-2">Revisaste el conjunto completo. Al aprobar, se incluirán todas estas compatibilidades de la publicación.</p>}
+
                 </div>}
               </article>;
             })}
@@ -306,7 +305,7 @@ export default function PublicacionesAutozur() {
             <span className="w-6 h-6 rounded-full bg-reluvsa-black text-reluvsa-yellow text-xs font-bold flex items-center justify-center">3</span>
             <h3 className="font-semibold">Descarga la plantilla</h3>
           </div>
-          <p className="text-xs text-notion-text-secondary mb-4">Incluye todas las compatibilidades de las publicaciones listas y las revisiones aprobadas. Las exclusiones manuales y las revisiones pendientes quedan fuera.</p>
+          <p className="text-xs text-notion-text-secondary mb-4">{modo === 'suspension' ? 'Incluye todas las coincidencias, salvo exclusiones manuales. Puedes descargar sin abrir los detalles.' : 'Incluye todas las compatibilidades de las publicaciones listas y las revisiones aprobadas. Las exclusiones manuales y las revisiones pendientes quedan fuera.'}</p>
           <button onClick={generar} disabled={generando || (analisis.listas === 0 && !Object.values(decisiones).includes('aprobada'))}
             className="px-4 py-2 bg-reluvsa-yellow text-reluvsa-black rounded-lg text-sm font-bold hover:brightness-95 disabled:opacity-50 flex items-center gap-2">
             {generando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

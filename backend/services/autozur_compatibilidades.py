@@ -302,6 +302,76 @@ def es_publicacion_suspension(fila: Sequence[str]) -> bool:
     return bool(_SUSPENSION.search(normalizar(fila[1])))
 
 
+REGLAS_SUSPENSION = 2
+
+
+def _resolver_suspension(titulo: str, catalogo: CatalogoIndexado):
+    texto = normalizar(titulo)
+    # La descripción de componentes previa al marcador no identifica vehículos.
+    partes = re.split(r"\bPARA\b|\bP/", texto, maxsplit=1)
+    vehiculo = partes[-1].strip()
+    # Y sólo es modelo cuando encabeza la identificación vehicular, con marca
+    # opcional. Entre componentes o modelos funciona como conjunción.
+    y_real = bool(re.match(r"^(?:" + "|".join(re.escape(m) for m in catalogo.fabricantes)
+                           + r")?\s*Y(?=\s+(?:19|20)\d{2}\b|\s+\d{2}(?:[-/ ]|$)|$)", vehiculo))
+    if not y_real and re.search(r"\bY\s+(?:(?:19|20)\d{2}|\d{2})(?:\b|$)", vehiculo):
+        otros = interpretar_titulo(re.sub(r"\bY\b", " ", vehiculo), catalogo, ignorar_marca=True)
+        y_real = not otros["modelos"]
+    if not y_real:
+        vehiculo = re.sub(r"\bY\b", " ", vehiculo)
+    parsed = interpretar_titulo(vehiculo, catalogo, ignorar_marca=True)
+    parsed.update(litros="", litros_detectados=[], cilindros="", ambiguedades=[])
+    modelos = parsed["modelos"]
+    filas = [f for (_, mod), fs in catalogo.por_fabricante_modelo.items() if mod in modelos for f in fs]
+    anios_catalogo = {int(f[2]) for f in filas}
+    # Los tokens abreviados deben estar separados de modelos, motores y medidas.
+    patron = r"(?<![A-Z0-9.,])((?:19|20)\d{2}|\d{2})(?:\s*[-/]\s*((?:19|20)\d{2}|\d{2}))?(?![A-Z0-9.,])"
+    rangos = []
+    error = ""
+    for m in re.finditer(patron, vehiculo):
+        if any(a.start() <= m.start() < a.end() for mod in modelos for a in _apariciones(vehiculo, mod)):
+            continue
+        a, b = m.group(1), m.group(2) or m.group(1)
+        opciones_a = [int(a)] if len(a) == 4 else [1900 + int(a), 2000 + int(a)]
+        opciones_b = [int(b)] if len(b) == 4 else [1900 + int(b), 2000 + int(b)]
+        if len(a) != len(b):
+            if len(a) == 4:
+                opciones_b = [int(a) // 100 * 100 + int(b)]
+            else:
+                opciones_a = [int(b) // 100 * 100 + int(a)]
+        opciones = [(ini, fin) for ini in opciones_a for fin in opciones_b
+                    if ini <= fin and (len(a) == len(b) == 4 or
+                       (ini // 100 == fin // 100 and any(ini <= y <= fin for y in anios_catalogo)))]
+        if len(opciones) != 1:
+            error = "Los años no tienen una interpretación única válida en el catálogo."
+            break
+        rangos.append(opciones[0])
+    if not modelos:
+        error = "No se identificó un modelo del catálogo."
+    elif not rangos and not error:
+        error = "El título no contiene un año utilizable."
+    desde = min((a for a, _ in rangos), default=None)
+    hasta = max((b for _, b in rangos), default=None)
+    parsed.update(anio_desde=desde, anio_hasta=hasta)
+    candidatos, vistos = [], set()
+    if not error:
+        for f in filas:
+            if desde <= int(f[2]) <= hasta:
+                llave = tuple(normalizar(v) for v in f)
+                if llave not in vistos:
+                    vistos.add(llave)
+                    candidatos.append(f)
+    motivo = ("Todas las coincidencias de los modelos y años detectados, con todas las marcas, motores y submodelos, "
+              "están incluidas en la descarga, salvo exclusión manual.") if candidatos else (
+                  error or "No se encontraron vehículos de esos modelos y años en el catálogo.")
+    return parsed, candidatos, motivo
+
+
+def _validar_reglas_suspension(session: dict):
+    if session.get("resumen", {}).get("modo") == "suspension" and session.get("reglas_suspension") != REGLAS_SUSPENSION:
+        raise ValueError("Las reglas de Suspensión cambiaron. Vuelve a analizar los archivos.")
+
+
 def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: str = "general") -> dict:
     if modo not in ("general", "suspension"):
         raise ValueError("El apartado solicitado no es válido.")
@@ -314,42 +384,20 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
     compatibilidades = 0
 
     for posicion, fila in enumerate(publicaciones):
-        parsed = interpretar_titulo(fila[1], catalogo, ignorar_marca=modo == "suspension")
         if modo == "suspension":
-            parsed["litros"] = ""
-            parsed["litros_detectados"] = []
-            parsed["cilindros"] = ""
-            # La marca del título es informativa: buscar en todo el catálogo.
-            candidatos = _filtrar_candidatos(
-                {**parsed, "fabricante": "", "fabricantes_detectados": []}, catalogo
-            ) if parsed["modelos"] and parsed["anio_desde"] is not None else []
-            # Sólo modelo y años bloquean este apartado; marca y motor son informativos.
-            bloqueos = [a for a in parsed["ambiguedades"]
-                        if "modelos" in a or "años" in a]
-            if re.search(r"(?<!\d)(?:19|20)\d{2}\s*[-/]\s*\d{2}(?!\d)", parsed["texto_vehiculo"]):
-                bloqueos.append("El título contiene años abreviados; requiere revisión.")
-            if len(parsed["modelos"]) != 1:
-                bloqueos.append("El modelo no es inequívoco; confirma el modelo del vehículo.")
-            if parsed["anio_desde"] is None:
-                bloqueos.append("El título no contiene un año utilizable.")
-            if not candidatos and parsed["modelo"]:
-                bloqueos.append("No se encontraron vehículos de ese modelo y año en el catálogo.")
-            estado = ("lista" if not bloqueos else "revision") if candidatos else "sin_coincidencia"
-            mensaje = (
-                "Las coincidencias por modelo y años incluyen todas las marcas, motores y submodelos. "
-                + ("Ya están incluidas en la descarga, salvo exclusión manual." if estado == "lista" else
-                   "Revisa y aprueba las propuestas antes de descargarlas.")
-            )
+            parsed, candidatos, motivo = _resolver_suspension(fila[1], catalogo)
+            estado = "lista" if candidatos else "sin_coincidencia"
             conteos[estado] += 1
             if estado == "lista":
                 compatibilidades += len(candidatos)
             resultados.append({
                 "id": posicion, "user_product_id": fila[0], "titulo": fila[1], "sku": fila[2],
                 "estado": estado, "aprobacion_masiva_segura": False,
-                "motivo": " ".join([mensaje, *bloqueos]), "extraido": parsed, "candidatos": candidatos,
+                "motivo": motivo, "extraido": parsed, "candidatos": candidatos,
             })
             continue
 
+        parsed = interpretar_titulo(fila[1], catalogo)
         candidatos = _filtrar_candidatos(parsed, catalogo)
         marcas_candidatas = sorted({normalizar(c[0]) for c in candidatos})
         marca_ambigua = not parsed["fabricante"] and len(marcas_candidatas) > 1
@@ -422,6 +470,7 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
         })
 
     return {
+        **({"reglas_suspension": REGLAS_SUSPENSION} if modo == "suspension" else {}),
         "resultados": resultados,
         "resumen": {
             "publicaciones": len(publicaciones),
@@ -445,6 +494,8 @@ def guardar_sesion(publicaciones: List[List[str]], analisis: dict) -> str:
             pass
     session_id = uuid.uuid4().hex
     ruta = SESSION_DIR / f"{session_id}.json"
+    if analisis["resumen"].get("modo") == "suspension":
+        publicaciones = [f for f in publicaciones if es_publicacion_suspension(f)]
     payload = {"publicaciones": publicaciones, **analisis}
     ruta.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return session_id
@@ -456,7 +507,9 @@ def cargar_sesion(session_id: str) -> dict:
     ruta = SESSION_DIR / f"{session_id}.json"
     if not ruta.exists():
         raise ValueError("La sesión de análisis expiró. Vuelve a cargar los dos archivos.")
-    return json.loads(ruta.read_text(encoding="utf-8"))
+    session = json.loads(ruta.read_text(encoding="utf-8"))
+    _validar_reglas_suspension(session)
+    return session
 
 
 def resumen_para_cliente(session_id: str, analisis: dict) -> dict:
@@ -479,6 +532,8 @@ def resumen_para_cliente(session_id: str, analisis: dict) -> dict:
 
 
 def escribir_resultado(session: dict, aprobadas_revision: Iterable[int], excluidas: Iterable[int], destino) -> int:
+    _validar_reglas_suspension(session)
+    suspension = session.get("resumen", {}).get("modo") == "suspension"
     aprobadas = {int(i) for i in aprobadas_revision}
     excluidas_ids = {int(i) for i in excluidas}
     resultados = {r["id"]: r for r in session["resultados"]}
@@ -491,7 +546,7 @@ def escribir_resultado(session: dict, aprobadas_revision: Iterable[int], excluid
     total = 0
     for posicion, original in enumerate(session["publicaciones"]):
         resultado = resultados[posicion]
-        incluir = posicion not in excluidas_ids and (resultado["estado"] == "lista" or (
+        incluir = posicion not in excluidas_ids and (suspension or resultado["estado"] == "lista" or (
             resultado["estado"] == "revision" and posicion in aprobadas
         ))
         if not incluir:
@@ -506,7 +561,7 @@ def escribir_resultado(session: dict, aprobadas_revision: Iterable[int], excluid
             total += 1
 
     if not total:
-        raise ValueError("No hay compatibilidades aprobadas para generar el archivo.")
+        raise ValueError("No hay compatibilidades para descargar")
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions

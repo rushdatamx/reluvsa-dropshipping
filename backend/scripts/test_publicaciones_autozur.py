@@ -256,7 +256,7 @@ check("rango de suspensión incluye cada año y excluye años externos",
 check("suspensión de una sola marca conserva candidatos",
       suspension_resultado("Horquilla Camaro 1976")["resultados"][0]["candidatos"] ==
       r_suspension["resultados"][0]["candidatos"])
-for titulo in ["Horquilla Matiz", "Horquilla Matiz 10-11", "Horquilla 2010", "Horquilla Desconocido 2010"]:
+for titulo in ["Horquilla Matiz", "Horquilla 2010", "Horquilla Desconocido 2010"]:
     r = suspension_resultado(titulo)["resultados"][0]
     check("sin modelo/año utilizable no hay candidatos: " + titulo,
           not r["candidatos"] and not r["aprobacion_masiva_segura"], r)
@@ -275,7 +275,7 @@ with tempfile.TemporaryDirectory() as carpeta:
         escribir_resultado(sesion, [0], [0], ruta)
         check("exclusión de suspensión prevalece", False)
     except ValueError as exc:
-        check("exclusión de suspensión prevalece", "No hay compatibilidades aprobadas" in str(exc))
+        check("exclusión de suspensión prevalece", "No hay compatibilidades para descargar" in str(exc))
 
 # Casos del flujo de Gaby: rangos completos, variantes y consulta paginada.
 for modelo, marca, inicio, fin in [("SWIFT", "SUZUKI", 2014, 2015), ("COROLLA CROSS", "TOYOTA", 2022, 2026)]:
@@ -303,10 +303,60 @@ for modelo, marca, inicio, fin in [("SWIFT", "SUZUKI", 2014, 2015), ("COROLLA CR
         wb.close()
 for titulo in ["Horquilla Matiz Camaro 2010", "Horquilla Matiz 2010-11", "Horquilla Matiz 2010 10-11"]:
     r = suspension_resultado(titulo)["resultados"][0]
-    check("modelos múltiples o años abreviados requieren revisión: " + titulo, r["estado"] == "revision", r)
+    check("modelos múltiples y años resueltos quedan listos: " + titulo, r["estado"] == "lista", r)
 for titulo in ["Horquilla Pontiac Chevrolet Matiz 8.0 2010", "Horquilla Matiz 1.0 2.0 V6 L4 2010"]:
     r = suspension_resultado(titulo)["resultados"][0]
     check("marca y motor no bloquean suspensión: " + titulo, r["estado"] == "lista" and len(r["candidatos"]) == 2, r)
+
+
+# Colisiones con la conjunción Y, abreviaturas ambiguas y versiones de sesión.
+from services.autozur_compatibilidades import guardar_sesion, cargar_sesion, SESSION_DIR
+for marca, modelo, anios in [("DODGE", "ATTITUDE", [2011]), ("PONTIAC", "G3", [2006, 2007]),
+                              ("TESLA", "Y", [2011]), ("TOYOTA", "COROLLA", [2022]),
+                              ("TEST", "AMBIGUO", [1910, 1911, 2010, 2011])]:
+    catalogo.fabricantes_por_modelo[modelo] = [marca]
+    catalogo.fabricantes.append(marca)
+    catalogo.por_fabricante_modelo[(marca, modelo)] = [
+        [marca, modelo, str(a), "Base", "1.6", "4", "", "", "", "", "", ""] for a in anios]
+for titulo, modelos in [
+    ("Horquilla Y Resorte Para Attitude 2011", ["ATTITUDE"]),
+    ("Amortiguador Y Resorte P/ G3 2006–2007", ["G3"]),
+    ("Horquilla Attitude Y G3 2006-2011", ["ATTITUDE", "G3"]),
+    ("Horquilla Para Tesla Y 2011", ["Y"]),
+    ("Horquilla Para Y 2011", ["Y"]),
+    ("Amortiguador Tesla Y 2011", ["Y"]),
+    ("Amortiguador Y 2011", ["Y"]),
+    ("Horquilla Corolla Cross 2022", ["COROLLA CROSS"]),
+]:
+    sesion = suspension_resultado(titulo)
+    r = sesion["resultados"][0]
+    check("modelos reales: " + titulo, r["extraido"]["modelos"] == modelos and r["estado"] == "lista", r)
+    with tempfile.TemporaryDirectory() as d:
+        check("descarga sin consultar detalles: " + titulo,
+              escribir_resultado(sesion, [], [], Path(d) / "out.xlsx") == len(r["candidatos"]))
+for titulo in ["Horquilla Ambiguo 10-11", "Horquilla Matiz 11-10", "Horquilla Matiz 2011-2010", "Horquilla Matiz 2011-10", "Horquilla Matiz 80-81"]:
+    r = suspension_resultado(titulo)["resultados"][0]
+    check("años sin interpretación única: " + titulo, r["estado"] == "sin_coincidencia" and not r["candidatos"], r)
+check("abreviaturas únicas", suspension_resultado("Horquilla Matiz 10-11")["resultados"][0]["estado"] == "lista")
+filas_matiz = catalogo.por_fabricante_modelo[("PONTIAC", "MATIZ")]
+filas_matiz.append(filas_matiz[1][:])
+check("elimina vehículos idénticos", len(suspension_resultado("Horquilla Matiz 2010")["resultados"][0]["candidatos"]) == 2)
+filas_matiz.pop()
+sesion = suspension_resultado("Horquilla Matiz 2010")
+id_sesion = guardar_sesion(sesion["publicaciones"], sesion)
+try:
+    check("sesión vigente se puede recuperar", cargar_sesion(id_sesion)["reglas_suspension"] == 2)
+    import json
+    antigua = dict(sesion)
+    antigua.pop("reglas_suspension")
+    (SESSION_DIR / (id_sesion + ".json")).write_text(json.dumps(antigua))
+    try:
+        cargar_sesion(id_sesion)
+        check("sesión antigua exige reanálisis", False)
+    except ValueError as exc:
+        check("sesión antigua exige reanálisis", "Vuelve a analizar" in str(exc))
+finally:
+    (SESSION_DIR / (id_sesion + ".json")).unlink()
 
 print(f"\n{total_checks - fallos} pasaron · {fallos} fallaron")
 raise SystemExit(1 if fallos else 0)

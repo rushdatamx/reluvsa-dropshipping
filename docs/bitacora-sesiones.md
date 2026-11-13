@@ -3136,3 +3136,21 @@ revisiones, 361 sin coincidencia y 26,205 compatibilidades automáticas. Suspens
 sin aprobaciones con 9,276 filas. Swift 2014–2015: Lista, 12 compatibilidades;
 Corolla Cross 2022–2026: Lista, 46. Pruebas cubren variantes, varias marcas, más de
 cinco filas, años abreviados y exclusión manual.
+
+
+## 2026-11-13 — Autozur Suspensión sin aprobaciones
+
+Implementado el plan aprobado: parser de Suspensión separado de las decisiones
+del general, varios modelos y variantes incluidos automáticamente, Y contextual,
+años abreviados resueltos por catálogo o sin coincidencia, deduplicación y export
+sin aprobación ni consulta de detalles. UI con Resultados, Listas para descargar y
+Sin coincidencia; conserva consulta y exclusión opcionales. Sesiones antiguas de
+Suspensión rechazadas por versión; generales vigentes.
+
+Validación: 124 comprobaciones de Autozur, build CRA correcto, comparación íntegra
+del modo general idéntica al código anterior sobre 1,772 publicaciones. Suspensión
+real: 276 publicaciones, 263 listas, cero revisiones, 13 sin coincidencia y 11,354
+filas exportadas sin aprobaciones. Swift y Corolla Cross verificados. Attitude 2011
+y G3 2006–2007 con conjunción Y cubiertos sintéticamente; los títulos completos
+reportados por Gaby no constan en los archivos disponibles. Contrato actualizado
+en docs/publicaciones-autozur.md. Se preservaron cambios locales ajenos.
