@@ -154,7 +154,7 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
-        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Las propuestas se cruzan por modelo y cada año del rango detectado, incluyendo todas las marcas del catálogo aunque el título mencione una. Requieren revisión y aprobación; el motor no limita los resultados.</p>}
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. El cruce busca en el catálogo por modelo y por cada año detectado; puede encontrar varias marcas aunque el título mencione una. Revisa todas las propuestas: aprobar aplica al conjunto completo de esa publicación.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
@@ -218,6 +218,9 @@ export default function PublicacionesAutozur() {
               const x = r.extraido;
               const propuestas = detalles[r.id] || r.muestra;
               const detalleCompleto = r.compatibilidades <= r.muestra.length || !!detalles[r.id];
+              const marcasTitulo = x.fabricantes_detectados?.length
+                ? x.fabricantes_detectados.join(', ')
+                : (x.fabricante || 'No detectada');
               return <article key={r.id} className="border border-notion-border rounded-xl p-4 hover:border-gray-400 transition-colors">
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -238,7 +241,7 @@ export default function PublicacionesAutozur() {
                       <button onClick={() => cargarPropuestas(r.id)} disabled={cargandoDetalle === r.id}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1">
                         {cargandoDetalle === r.id ? <Loader2 size={13} className="animate-spin" /> : <CarFront size={13} />}
-                        Revisar {r.compatibilidades.toLocaleString('es-MX')} propuestas
+                        {modo === 'suspension' ? `Ver y revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas` : `Revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas`}
                       </button>}
                     {(r.estado === 'lista' || r.estado === 'revision') &&
                       <button onClick={() => decidir(r.id, 'excluida')}
@@ -249,7 +252,16 @@ export default function PublicacionesAutozur() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4 p-3 bg-notion-bg rounded-lg">
-                  <Dato label="Fabricante" value={x.fabricante} />
+                  {modo === 'suspension' && <Dato label="Marca en el título" value={marcasTitulo} />}
+                  {modo === 'suspension' ? <div>
+                    <p className="text-[11px] uppercase tracking-wide text-notion-text-secondary">Marcas en las propuestas</p>
+                    {r.marcas_propuestas?.length
+                      ? <div className="flex flex-wrap gap-1 mt-1">{r.marcas_propuestas.map((marca) =>
+                        <span key={marca.fabricante} className="px-2 py-0.5 rounded-full bg-white border border-notion-border text-xs">
+                          {marca.fabricante} · {marca.compatibilidades.toLocaleString('es-MX')}
+                        </span>)}</div>
+                      : <p className="text-sm font-medium">—</p>}
+                  </div> : <Dato label="Fabricante" value={x.fabricante} />}
                   <Dato label="Modelo" value={x.modelo} />
                   <Dato label="Años" value={x.anio_desde ? `${x.anio_desde}–${x.anio_hasta}` : ''} />
                   <Dato label={x.origen_litros === 'entero_inferido' ? 'Litros propuestos' : 'Litros'} value={x.litros} />
@@ -257,7 +269,7 @@ export default function PublicacionesAutozur() {
                 </div>
 
                 {propuestas.length > 0 && <div className="mt-3 overflow-x-auto">
-                  <p className="text-xs font-semibold mb-2">{r.compatibilidades.toLocaleString('es-MX')} compatibilidades propuestas</p>
+                  <p className="text-xs font-semibold mb-2">{detalleCompleto ? propuestas.length : Math.min(propuestas.length, r.compatibilidades).toLocaleString('es-MX')} de {r.compatibilidades.toLocaleString('es-MX')} compatibilidades propuestas</p>
                   <div className={detalleCompleto && propuestas.length > 5 ? 'max-h-72 overflow-auto border border-notion-border rounded-lg' : ''}>
                   <table className="w-full text-xs">
                     <thead><tr className="text-left text-notion-text-secondary border-b border-notion-border">
@@ -269,6 +281,8 @@ export default function PublicacionesAutozur() {
                   </table>
                   </div>
                   {!detalleCompleto && <p className="text-[11px] text-notion-text-secondary mt-1">Se muestran 5. Abre todas las propuestas antes de aprobar.</p>}
+                  {modo === 'suspension' && detalleCompleto && r.estado === 'revision' && decision !== 'aprobada' && decision !== 'excluida' &&
+                    <p className="text-[11px] text-amber-800 mt-2">Revisaste el conjunto completo. Al aprobar, se incluirán todas estas compatibilidades de la publicación.</p>}
                 </div>}
               </article>;
             })}

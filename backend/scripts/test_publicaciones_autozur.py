@@ -5,7 +5,7 @@ from pathlib import Path
 import openpyxl
 
 from services.autozur_compatibilidades import (
-    CatalogoIndexado, ENCABEZADOS_PUBLICACIONES, analizar, escribir_resultado,
+    CatalogoIndexado, ENCABEZADOS_PUBLICACIONES, analizar, resumen_para_cliente, escribir_resultado,
     interpretar_titulo,
 )
 
@@ -241,6 +241,13 @@ for titulo in ["Amortiguador Matiz 2010", "Amortiguador Pontiac Matiz 2010",
           {(f[0], f[2]) for f in r["candidatos"]} == {("Pontiac", "2010"), ("Chevrolet", "2010")}, r)
     check("suspensión requiere aprobación: " + titulo,
           r["estado"] == "revision" and not r["aprobacion_masiva_segura"], r)
+
+resumen_suspension = resumen_para_cliente("sesion-prueba", suspension_resultado("Amortiguador Pontiac Matiz 2010"))
+check("resumen de suspensión separa marcas candidatas y cuenta compatibilidades",
+      resumen_suspension["resultados"][0]["marcas_propuestas"] == [
+          {"fabricante": "Chevrolet", "compatibilidades": 1},
+          {"fabricante": "Pontiac", "compatibilidades": 1},
+      ], resumen_suspension["resultados"][0])
 
 r = suspension_resultado("Resorte Pontiac Matiz 2010-2011")["resultados"][0]
 check("rango de suspensión incluye cada año y excluye años externos",

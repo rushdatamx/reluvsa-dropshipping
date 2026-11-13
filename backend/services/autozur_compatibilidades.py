@@ -455,11 +455,18 @@ def cargar_sesion(session_id: str) -> dict:
 def resumen_para_cliente(session_id: str, analisis: dict) -> dict:
     items = []
     for r in analisis["resultados"]:
+        marcas_propuestas = defaultdict(int)
+        for candidato in r["candidatos"]:
+            marcas_propuestas[candidato[0]] += 1
         items.append({
             k: r[k] for k in ("id", "user_product_id", "titulo", "sku", "estado", "motivo", "extraido", "aprobacion_masiva_segura")
         } | {
             "compatibilidades": len(r["candidatos"]),
             "muestra": r["candidatos"][:5],
+            "marcas_propuestas": [
+                {"fabricante": fabricante, "compatibilidades": cantidad}
+                for fabricante, cantidad in sorted(marcas_propuestas.items(), key=lambda item: normalizar(item[0]))
+            ],
         })
     return {"session_id": session_id, **analisis["resumen"], "resultados": items}
 
