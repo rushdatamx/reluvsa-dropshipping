@@ -154,7 +154,7 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
-        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. El cruce busca en el catálogo por modelo y por cada año detectado; puede encontrar varias marcas aunque el título mencione una. Revisa todas las propuestas: aprobar aplica al conjunto completo de esa publicación.</p>}
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. El cruce busca en el catálogo por modelo y por cada año detectado; puede encontrar varias marcas aunque el título mencione una. Con un único modelo y años completos, todas las marcas, motores y submodelos coincidentes quedan listos y se incluyen en la descarga. Sólo los modelos múltiples o años ambiguos requieren revisión.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
@@ -190,7 +190,7 @@ export default function PublicacionesAutozur() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="font-semibold">Revisión de publicaciones</h3>
-              <p className="text-xs text-notion-text-secondary mt-1">Las ambiguas sólo se exportan después de aprobarlas.</p>
+              <p className="text-xs text-notion-text-secondary mt-1">Las listas ya se incluyen en la descarga, salvo exclusión manual. Las ambiguas sólo se exportan después de aprobarlas.</p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
               <button onClick={() => setDecisiones((prev) => ({ ...prev, ...Object.fromEntries(analisis.resultados.filter((r) => r.aprobacion_masiva_segura).map((r) => [r.id, 'aprobada'])) }))}
@@ -237,11 +237,11 @@ export default function PublicacionesAutozur() {
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 flex items-center gap-1">
                         <Check size={13} /> Aprobar propuestas
                       </button>}
-                    {r.estado === 'revision' && r.compatibilidades > r.muestra.length && !detalleCompleto &&
+                    {(r.estado === 'revision' || r.estado === 'lista') && r.compatibilidades > r.muestra.length && !detalleCompleto &&
                       <button onClick={() => cargarPropuestas(r.id)} disabled={cargandoDetalle === r.id}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1">
                         {cargandoDetalle === r.id ? <Loader2 size={13} className="animate-spin" /> : <CarFront size={13} />}
-                        {modo === 'suspension' ? `Ver y revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas` : `Revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas`}
+                        {r.estado === 'lista' ? `Consultar ${r.compatibilidades.toLocaleString('es-MX')} compatibilidades` : modo === 'suspension' ? `Ver y revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas` : `Revisar ${r.compatibilidades.toLocaleString('es-MX')} propuestas`}
                       </button>}
                     {(r.estado === 'lista' || r.estado === 'revision') &&
                       <button onClick={() => decidir(r.id, 'excluida')}
@@ -280,7 +280,7 @@ export default function PublicacionesAutozur() {
                     </tr>)}</tbody>
                   </table>
                   </div>
-                  {!detalleCompleto && <p className="text-[11px] text-notion-text-secondary mt-1">Se muestran 5. Abre todas las propuestas antes de aprobar.</p>}
+                  {!detalleCompleto && <p className="text-[11px] text-notion-text-secondary mt-1">{r.estado === 'lista' ? 'Se muestran 5. Todas las compatibilidades ya están incluidas; puedes consultar la lista completa.' : 'Se muestran 5. Abre todas las propuestas antes de aprobar.'}</p>}
                   {modo === 'suspension' && detalleCompleto && r.estado === 'revision' && decision !== 'aprobada' && decision !== 'excluida' &&
                     <p className="text-[11px] text-amber-800 mt-2">Revisaste el conjunto completo. Al aprobar, se incluirán todas estas compatibilidades de la publicación.</p>}
                 </div>}
@@ -306,7 +306,7 @@ export default function PublicacionesAutozur() {
             <span className="w-6 h-6 rounded-full bg-reluvsa-black text-reluvsa-yellow text-xs font-bold flex items-center justify-center">3</span>
             <h3 className="font-semibold">Descarga la plantilla</h3>
           </div>
-          <p className="text-xs text-notion-text-secondary mb-4">Incluye las coincidencias claras —también las autoaprobadas por fabricante inferido— y las revisiones aprobadas. Excluye automáticamente los casos pendientes.</p>
+          <p className="text-xs text-notion-text-secondary mb-4">Incluye todas las compatibilidades de las publicaciones listas y las revisiones aprobadas. Las exclusiones manuales y las revisiones pendientes quedan fuera.</p>
           <button onClick={generar} disabled={generando || (analisis.listas === 0 && !Object.values(decisiones).includes('aprobada'))}
             className="px-4 py-2 bg-reluvsa-yellow text-reluvsa-black rounded-lg text-sm font-bold hover:brightness-95 disabled:opacity-50 flex items-center gap-2">
             {generando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

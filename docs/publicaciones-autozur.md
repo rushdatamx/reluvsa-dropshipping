@@ -23,12 +23,19 @@ La pantalla incluye un apartado **Suspensión** que recibe los mismos archivos y
 procesa sólo títulos con “horquilla”, “amortiguador(es)” o “resorte(s)”. En ese
 apartado se proponen vehículos por modelo y cada año del rango detectado, de
 todas las marcas del catálogo incluso si el título menciona una. No se filtra por
-fabricante, litros ni cilindros. Todas las propuestas requieren revisión y
-aprobación; sin modelo o año utilizable no se ofrecen candidatos aprobables. Las
+fabricante, litros ni cilindros. Con un único modelo, años completos de cuatro
+dígitos y candidatos, queda **Lista** e incluye automáticamente todas las marcas,
+motores y submodelos coincidentes en la descarga. Sólo modelos múltiples o años
+ambiguos/abreviados requieren revisión; sin modelo, año utilizable o coincidencias
+queda sin coincidencia. La exclusión manual prevalece sobre el estado Lista. Las
 decisiones de aprobación/exclusión y la descarga se limitan a las publicaciones
 de suspensión. El apartado general conserva el cruce descrito abajo.
 
-## Regla de seguridad del cruce
+Las listas permiten consultar opcionalmente todas sus compatibilidades, además
+del desglose por marca. No es necesario abrirlas ni aprobarlas para descargar.
+Las sesiones anteriores conservan su clasificación: hay que volver a analizar.
+
+## Regla de seguridad del cruce general
 
 Una publicación queda lista automáticamente cuando un único modelo, años de cuatro
 dígitos y una cilindrada explícita producen coincidencias exactas. Los cilindros filtran adicionalmente

@@ -323,23 +323,30 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
             candidatos = _filtrar_candidatos(
                 {**parsed, "fabricante": "", "fabricantes_detectados": []}, catalogo
             ) if parsed["modelos"] and parsed["anio_desde"] is not None else []
-            bloqueos = [
-                "Las propuestas corresponden al modelo y año detectados y pueden incluir varias marcas. "
-                "Revisa y aprueba las compatibilidades antes de descargarlas.",
-                *parsed["ambiguedades"],
-            ]
+            # Sólo modelo y años bloquean este apartado; marca y motor son informativos.
+            bloqueos = [a for a in parsed["ambiguedades"]
+                        if "modelos" in a or "años" in a]
+            if re.search(r"(?<!\d)(?:19|20)\d{2}\s*[-/]\s*\d{2}(?!\d)", parsed["texto_vehiculo"]):
+                bloqueos.append("El título contiene años abreviados; requiere revisión.")
             if len(parsed["modelos"]) != 1:
                 bloqueos.append("El modelo no es inequívoco; confirma el modelo del vehículo.")
             if parsed["anio_desde"] is None:
                 bloqueos.append("El título no contiene un año utilizable.")
             if not candidatos and parsed["modelo"]:
                 bloqueos.append("No se encontraron vehículos de ese modelo y año en el catálogo.")
-            estado = "revision" if candidatos else "sin_coincidencia"
+            estado = ("lista" if not bloqueos else "revision") if candidatos else "sin_coincidencia"
+            mensaje = (
+                "Las coincidencias por modelo y años incluyen todas las marcas, motores y submodelos. "
+                + ("Ya están incluidas en la descarga, salvo exclusión manual." if estado == "lista" else
+                   "Revisa y aprueba las propuestas antes de descargarlas.")
+            )
             conteos[estado] += 1
+            if estado == "lista":
+                compatibilidades += len(candidatos)
             resultados.append({
                 "id": posicion, "user_product_id": fila[0], "titulo": fila[1], "sku": fila[2],
                 "estado": estado, "aprobacion_masiva_segura": False,
-                "motivo": " ".join(bloqueos), "extraido": parsed, "candidatos": candidatos,
+                "motivo": " ".join([mensaje, *bloqueos]), "extraido": parsed, "candidatos": candidatos,
             })
             continue
 

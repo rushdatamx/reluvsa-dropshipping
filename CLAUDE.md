@@ -535,6 +535,9 @@ Convenciones:
   y cilindradas enteras inferidas requieren revisión. Los modelos numéricos exigen
   marca explícita y un token separado del motor. Conservar aprobación por publicación
   y las 17 columnas; no recalcular sesiones antiguas.
+  **Suspensión:** un único modelo y años completos con coincidencias queda Lista
+  automáticamente e incluye todas las marcas, motores y submodelos. Sólo modelos
+  múltiples o años ambiguos requieren revisión; la exclusión manual prevalece.
 
 ### 🔨 Tareas abiertas (menores, ordenadas por prioridad)
 

@@ -3116,3 +3116,23 @@ SUCCESS y frontend Vercel Ready (bundle main.cd399df8.js). El procesamiento
 --solo-historial terminó con 523 procesados, 288 atribuidos, 235 sin apertura,
 0 no identificados y 0 errores. La muestra guardada coincide con GET real:
 5565339781 → RELUVSA; 5583556840 → Cliente. api-guardian APROBADO.
+
+
+## 2026-11-13 — Suspensión Autozur lista por modelo y años
+
+Se implementó el plan aprobado: un único modelo con años completos y candidatos
+queda Lista y suma todas las marcas, motores y submodelos a las compatibilidades
+automáticas. Los modelos múltiples y años abreviados requieren revisión; sin
+modelo, año utilizable o coincidencias queda sin coincidencia. La exclusión manual
+prevalece. La pantalla explica la descarga directa y permite consultar listas
+completas opcionalmente, conservando el desglose por marca. No cambian endpoints,
+17 columnas ni sesiones anteriores: Gaby debe volver a analizar los archivos.
+
+Verificación: 100/100 pruebas sin red y build del frontend satisfactorio. Con los
+archivos reales (349,106 vehículos / 1,772 publicaciones), el modo general conserva
+exactamente todos sus resultados respecto al commit anterior: 864 listas, 547
+revisiones, 361 sin coincidencia y 26,205 compatibilidades automáticas. Suspensión:
+276 publicaciones, 248 listas, 16 revisiones, 12 sin coincidencia; Excel generado
+sin aprobaciones con 9,276 filas. Swift 2014–2015: Lista, 12 compatibilidades;
+Corolla Cross 2022–2026: Lista, 46. Pruebas cubren variantes, varias marcas, más de
+cinco filas, años abreviados y exclusión manual.
