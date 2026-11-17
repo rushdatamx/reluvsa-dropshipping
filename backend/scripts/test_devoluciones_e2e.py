@@ -91,15 +91,15 @@ try:
     assert sync_devoluciones.procesar_pendientes()["procesados"] == 1
     app.dependency_overrides[require_admin] = lambda: UserInfo(user_id=1, email="admin@test.mx", rol="admin", proveedor_id=None)
     client = TestClient(app)
-    listing = client.get("/api/devoluciones").json()
+    listing = client.get("/api/devoluciones?estado_logistico=todos").json()
     assert [i["claim_id"] for i in listing["items"]] == ["101", "103"]
     first = listing["items"][0]
     assert first["sku"] == "SKU-1" and first["unidades_reclamadas"] == 2
     assert first["mediacion"] is True and first["cuenta_ml"] == "principal"
     assert len(first["productos"]) == 2 and first["fecha_limite"]
     assert listing["items"][1]["sku"] == "SKU-1, SKU-2" and listing["items"][1]["almacen"] == "No informado por ML"
-    assert client.get("/api/devoluciones", params={"mediacion": "true"}).json()["total"] == 1
-    assert client.get("/api/devoluciones", params={"almacen": "KIM"}).json()["total"] == 1
+    assert client.get("/api/devoluciones", params={"mediacion": "true", "estado_logistico": "todos"}).json()["total"] == 1
+    assert client.get("/api/devoluciones", params={"almacen": "KIM", "estado_logistico": "todos"}).json()["total"] == 1
     changed = client.patch("/api/devoluciones/principal/101", json={"revisado": True}).json()
     assert changed["mediacion"] and changed["revisado"] and changed["seguimiento_usuario"] == "admin@test.mx"
     assert client.patch("/api/devoluciones/principal/101", json={"mediacion": False}).status_code == 422
@@ -142,16 +142,16 @@ try:
     book.active.append(["order-1", "ALB-1", __import__('datetime').date(2026, 10, 15)])
     excel = Path(tmp.name) / "con_fecha.xlsx"
     book.save(excel)
-    assert parse_albaran(excel)["por_num_venta"] == 1
+    assert parse_albaran(excel)["ambiguos"] == 1
     book = Workbook()
     book.active.append(["# de venta", "# de albarán"])
     book.active.append(["order-1", "ALB-2"])
     excel = Path(tmp.name) / "sin_fecha.xlsx"
     book.save(excel)
-    assert parse_albaran(excel)["por_num_venta"] == 1
+    assert parse_albaran(excel)["ambiguos"] == 1
     with get_db() as conn:
         row = conn.execute("SELECT albaran, fecha_albaran FROM ventas_ml WHERE num_venta='order-1'").fetchone()
-        assert row["albaran"] == "ALB-2" and row["fecha_albaran"] == "2026-10-15"
+        assert row["albaran"] is None and row["fecha_albaran"] is None
         other = conn.execute("SELECT albaran, fecha_albaran FROM ventas_ml WHERE cuenta_ml='secundaria'").fetchone()
         assert other["albaran"] is None and other["fecha_albaran"] is None
     book = Workbook()
@@ -159,11 +159,11 @@ try:
     book.active.append(["pack-1", "ALB-3", __import__('datetime').date(2026, 10, 16)])
     excel = Path(tmp.name) / "carrito.xlsx"
     book.save(excel)
-    assert parse_albaran(excel)["por_pack_id"] == 1
+    assert parse_albaran(excel)["ambiguos"] == 1
     with get_db() as conn:
         own = conn.execute("SELECT albaran, fecha_albaran FROM ventas_ml WHERE num_venta='order-1'").fetchone()
         other = conn.execute("SELECT albaran, fecha_albaran FROM ventas_ml WHERE cuenta_ml='secundaria'").fetchone()
-        assert own["albaran"] == "ALB-3" and own["fecha_albaran"] == "2026-10-16"
+        assert own["albaran"] is None and own["fecha_albaran"] is None
         assert other["albaran"] is None and other["fecha_albaran"] is None
     assert sync_devoluciones.reconciliar("principal") == 0
     rango = next(p["range"] for p in search_params if "range" in p)

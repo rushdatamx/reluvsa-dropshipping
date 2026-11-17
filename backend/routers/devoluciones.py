@@ -2,9 +2,9 @@
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from database import UPLOADS_DIR, get_db
 from models import UserInfo
 from routers.auth import require_admin
+from services.logistica_devoluciones import normalizar_devolucion
 
 router = APIRouter(prefix="/api/devoluciones", tags=["devoluciones"], dependencies=[Depends(require_admin)])
 EVIDENCE_DIR = UPLOADS_DIR / "devoluciones"
@@ -64,13 +65,18 @@ def _caso(conn, cuenta, claim_id):
         (a.get("action") or "").lower() == "send_message_to_mediator"
         for p in claim.get("players") or [] for a in p.get("available_actions") or []))
     item.pop("raw_claim", None)
-    item.pop("raw_return", None)
+    item.update(normalizar_devolucion(item.pop("raw_return", None)))
     return item
 
 
 @router.get("")
 def listar(cuenta: Optional[str] = None, almacen: Optional[str] = None,
-           mediacion: Optional[bool] = None, revisado: Optional[bool] = None):
+           mediacion: Optional[bool] = None, revisado: Optional[bool] = None,
+           estado_logistico: Literal["en_camino", "todos", "preparacion", "entregado", "incidencia", "cancelado", "desconocido"] = "en_camino",
+           fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None,
+           vencimiento: Optional[Literal["24", "48", "72", "vencido", "sin_fecha"]] = None):
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(422, "La fecha inicial debe ser anterior a la final")
     with get_db() as conn:
         rows = conn.execute("SELECT cuenta_ml, claim_id FROM ml_devoluciones").fetchall()
         all_items = [_caso(conn, r["cuenta_ml"], r["claim_id"]) for r in rows]
@@ -79,10 +85,31 @@ def listar(cuenta: Optional[str] = None, almacen: Optional[str] = None,
     items = [i for i in items if (not cuenta or i["cuenta_ml"] == cuenta)
              and (not almacen or almacen in (i["almacen"] or "").split(", "))
              and (mediacion is None or bool(i["mediacion"]) == mediacion)
-             and (revisado is None or bool(i["revisado"]) == revisado)]
+             and (revisado is None or bool(i["revisado"]) == revisado)
+             and (estado_logistico == "todos" or i["estado_logistico"] == estado_logistico)
+             and (fecha_desde is None or (i["creado_ml"] or "")[:10] >= fecha_desde.isoformat())
+             and (fecha_hasta is None or bool(i["creado_ml"]) and i["creado_ml"][:10] <= fecha_hasta.isoformat())]
+    if vencimiento:
+        now = datetime.now(timezone.utc)
+        def coincide_plazo(item):
+            try:
+                limite = datetime.fromisoformat((item["fecha_limite"] or "").replace("Z", "+00:00"))
+                if limite.tzinfo is None:
+                    limite = limite.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                return vencimiento == "sin_fecha"
+            if item["estado_ml"] != "opened":
+                return False
+            segundos = (limite - now).total_seconds()
+            return segundos <= 0 if vencimiento == "vencido" else (
+                vencimiento != "sin_fecha" and 0 < segundos <= int(vencimiento) * 3600)
+        items = [i for i in items if coincide_plazo(i)]
     items.sort(key=lambda i: (not bool(i["fecha_limite"]), i["fecha_limite"] or "9999", i["claim_id"]))
     return {"total": len(items), "almacenes": almacenes, "sin_revisar": sum(not i["revisado"] for i in items),
-            "sin_mediacion": sum(not i["mediacion"] for i in items), "items": items}
+            "sin_mediacion": sum(not i["mediacion"] for i in items),
+            "logistica_consultada_en": min((i["logistica_consultada_en"] for i in items), default=None)
+                if all(i["logistica_consultada_en"] for i in items) else None,
+            "items": items}
 
 
 @router.get("/{cuenta}/{claim_id}")

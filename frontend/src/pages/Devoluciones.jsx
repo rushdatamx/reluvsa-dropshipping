@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { actualizarDevolucion, descargarEvidenciaDevolucion, detalleDevolucion, listarDevoluciones, subirEvidenciaDevolucion } from '../services/api';
 
-// Corte fijo del reinicio operativo, medianoche en Monterrey (UTC-6).
-const INICIO_DEVOLUCIONES = Date.parse('2026-11-12T00:00:00-06:00');
+const estadosLogisticos = [['en_camino', 'En camino'], ['todos', 'Todos'], ['preparacion', 'Preparación'], ['entregado', 'Entregado'], ['incidencia', 'Incidencia'], ['cancelado', 'Cancelado'], ['desconocido', 'Desconocido']];
+const logistica = (valor) => estadosLogisticos.find(([key]) => key === valor)?.[1] || 'Desconocido';
+const destino = (valor) => ({ seller_address: 'Vendedor', warehouse: 'Depósito de Mercado Libre' }[valor] || 'Destino desconocido');
 
 const fecha = (value) => value ? new Date(value).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Monterrey' }) : 'Sin fecha';
 const plazo = (item, ahora) => {
@@ -23,8 +24,7 @@ const mostrar = (value) => value === null || value === undefined || value === ''
 const iniciador = (item) => ({ reluvsa: 'RELUVSA', cliente: 'Cliente', mercado_libre: 'Mercado Libre', no_identificado: 'No identificado' }[item.mediacion_iniciada_por] || (item.mediacion_historial_consultado_en ? '—' : 'No identificado'));
 
 export default function Devoluciones() {
-  const [filtros, setFiltros] = useState({ cuenta: '', almacen: '', mediacion: '', revisado: '' });
-  const [vencimiento, setVencimiento] = useState('');
+  const [filtros, setFiltros] = useState({ cuenta: '', almacen: '', mediacion: '', revisado: '', estado_logistico: 'en_camino', fecha_desde: '', fecha_hasta: '', vencimiento: '' });
   const [ahora, setAhora] = useState(Date.now);
   useEffect(() => {
     const actualizar = () => setAhora(Date.now());
@@ -84,13 +84,7 @@ export default function Devoluciones() {
     </select>
   </label>;
   const almacenes = data.almacenes || [];
-  const itemsFiltrados = useMemo(() => data.items.filter((item) => {
-    if (!(Date.parse(item.creado_ml) >= INICIO_DEVOLUCIONES)) return false;
-    if (!vencimiento) return true;
-    const estado = plazo(item, ahora);
-    if (vencimiento === 'vencido' || vencimiento === 'sin_fecha') return estado.tipo === vencimiento;
-    return estado.tipo === 'pendiente' && estado.restante <= Number(vencimiento) * 3600000;
-  }), [data.items, vencimiento, ahora]);
+  const itemsFiltrados = data.items;
   const resumenPlazo = (item) => { const estado = plazo(item, ahora); return <span className={`block text-xs mt-1 ${estado.color}`}>{estado.texto}</span>; };
   const itemsOrdenados = useMemo(() => {
     const camposFecha = new Set(['fecha_limite', 'fecha_albaran']);
@@ -136,31 +130,34 @@ export default function Devoluciones() {
   </th>;
 
   return <div>
-    <PageHeader title="Devoluciones" subtitle="Casos creados desde el 12 de noviembre de 2026 · Seguimiento interno" />
+    <PageHeader title="Devoluciones" subtitle="Seguimiento logístico de devoluciones · Todas las fechas de solicitud" />
     {error && <p role="alert" className="mb-4 rounded bg-red-50 text-red-700 p-3">{error}</p>}
     <div className="flex flex-wrap gap-4 mb-4">
+      {filtro('estado_logistico', 'Estado logístico', estadosLogisticos)}
       {filtro('cuenta', 'Cuenta', [['', 'Todas'], ['principal', 'Principal'], ['secundaria', 'Secundaria']])}
       {filtro('almacen', 'Almacén', [['', 'Todos'], ...almacenes.map((a) => [a, a])])}
       {filtro('mediacion', 'Mediación', [['', 'Todas'], ['true', 'Con mediación'], ['false', 'Sin mediación']])}
       {filtro('revisado', 'Revisado', [['', 'Todos'], ['true', 'Revisado'], ['false', 'No revisado']])}
-      <label className="text-sm text-gray-600">Vencimiento
-        <select className="ml-2 border rounded px-2 py-1 bg-white" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)}>
-          {[['', 'Todos'], ['24', 'Próximas 24 horas'], ['48', 'Próximas 48 horas'], ['72', 'Próximas 72 horas'], ['vencido', 'Vencidos'], ['sin_fecha', 'Sin fecha informada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
+      {filtro('vencimiento', 'Vencimiento', [['', 'Todos'], ['24', 'Próximas 24 horas'], ['48', 'Próximas 48 horas'], ['72', 'Próximas 72 horas'], ['vencido', 'Vencidos'], ['sin_fecha', 'Sin fecha informada']])}
+      {[['fecha_desde', 'Solicitud desde'], ['fecha_hasta', 'Solicitud hasta']].map(([key, label]) => <label key={key} className="text-sm text-gray-600">{label}
+        <input type="date" className="ml-2 border rounded px-2 py-1" value={filtros[key]} onChange={(e) => setFiltros({ ...filtros, [key]: e.target.value })} />
+      </label>)}
     </div>
-    <p className="text-xs text-gray-500 mb-3">Plazo para responder informado por ML · Horario de Monterrey · Datos de la última sincronización.</p>
-    <div className="flex gap-4 text-sm mb-4"><strong>{itemsFiltrados.length} casos</strong><span>{itemsFiltrados.filter(i => !i.revisado).length} sin revisar</span><span>{itemsFiltrados.filter(i => !i.mediacion).length} sin mediación</span></div>
+    <p className="text-xs text-gray-500 mb-3">Plazo para responder informado por ML · Horario de Monterrey · Última consulta logística del conjunto: {data.logistica_consultada_en ? fecha(data.logistica_consultada_en) : 'Pendiente de consulta en uno o más casos'}. Refresco cada seis horas; cada caso muestra la fecha de sus datos.</p>
+    <div className="flex gap-4 text-sm mb-4"><strong>{data.total} casos</strong><span>{data.sin_revisar} sin revisar</span><span>{data.sin_mediacion} sin mediación</span></div>
     <div className="overflow-x-auto bg-white rounded-lg border">
       <table className="min-w-full text-sm"><thead className="bg-gray-50 text-left"><tr>
-        {encabezado('Cuenta', 'cuenta_ml')}{encabezado('Venta', 'numero_venta')}{encabezado('SKU', 'sku')}{encabezado('Almacén', 'almacen')}{encabezado('Unidades reclamadas', 'unidades_reclamadas')}{encabezado('Motivo', 'motivo')}{encabezado('Fecha límite', 'fecha_limite')}{encabezado('Albarán', 'albaran')}{encabezado('Fecha albarán', 'fecha_albaran')}{encabezado('Estado ML', 'estado')}{encabezado('Mediación', 'mediacion')}{encabezado('Mediación iniciada por', 'mediacion_iniciada_por')}{encabezado('Revisión', 'revisado')}
+        {encabezado('Cuenta', 'cuenta_ml')}{encabezado('Venta', 'numero_venta')}{encabezado('SKU', 'sku')}{encabezado('Almacén', 'almacen')}{encabezado('Unidades reclamadas', 'unidades_reclamadas')}{encabezado('Motivo', 'motivo')}{encabezado('Fecha límite', 'fecha_limite')}{encabezado('Albarán', 'albaran')}{encabezado('Fecha albarán', 'fecha_albaran')}{encabezado('Estado logístico', 'estado_logistico')}{encabezado('Reclamo', 'estado_ml')}{encabezado('Devolución', 'estado_devolucion')}{encabezado('Mediación', 'mediacion')}{encabezado('Mediación iniciada por', 'mediacion_iniciada_por')}{encabezado('Revisión', 'revisado')}
       </tr></thead><tbody>{itemsOrdenados.map((item) => <tr key={`${item.cuenta_ml}-${item.claim_id}`} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => abrir(item)}>
         <td className="p-3">{item.cuenta_ml === 'principal' ? 'Principal' : 'Secundaria'}</td>
         <td className="p-3 font-medium">{item.numero_venta || 'Pendiente de identificar'}{item.sin_cruce && item.numero_venta ? <span className="block text-xs text-amber-700">Sin cruce local</span> : null}</td>
         <td className="p-3">{mostrar(item.sku)}</td><td className="p-3">{mostrar(item.almacen)}</td>
         <td className="p-3">{mostrar(item.unidades_reclamadas)}</td><td className="p-3 max-w-xs truncate" title={item.motivo || ''}>{mostrar(item.motivo)}</td>
         <td className="p-3 whitespace-nowrap">{fecha(item.fecha_limite)}{resumenPlazo(item)}</td><td className="p-3">{mostrar(item.albaran)}</td>
-        <td className="p-3">{item.fecha_albaran || 'Sin fecha'}</td><td className="p-3">{mostrar(item.estado_devolucion || item.estado_ml)}</td>
+        <td className="p-3">{item.fecha_albaran || 'Sin fecha'}</td><td className="p-3"><span className={item.estado_logistico === 'en_camino' ? 'text-blue-700 font-semibold' : 'font-medium'}>{logistica(item.estado_logistico)}</span>
+          {(item.envios || []).filter(e => e.estado_logistico === 'entregado').map((e, idx) => <span key={idx} className="block text-xs text-gray-600">Entregado a {destino(e.destino)}</span>)}
+          <span className="block text-xs text-gray-500">Consulta: {item.logistica_consultada_en ? fecha(item.logistica_consultada_en) : 'Pendiente'}</span></td>
+        <td className="p-3">{mostrar(item.estado_ml)}</td><td className="p-3">{mostrar(item.estado_devolucion)}</td>
         <td className="p-3">{item.mediacion ? 'Con mediación' : 'Sin mediación'}</td><td className="p-3">{iniciador(item)}</td><td className="p-3">{item.revisado ? 'Revisado' : 'Sin revisar'}</td>
       </tr>)}</tbody></table>
       {!itemsFiltrados.length && <p className="p-6 text-gray-500">No hay devoluciones para estos filtros.</p>}
@@ -171,7 +168,10 @@ export default function Devoluciones() {
           <p className="text-sm text-gray-500">{detalle.cuenta_ml} · Venta {detalle.numero_venta || 'pendiente de identificar'}</p></div>
           <button onClick={() => setDetalle(null)} className="text-gray-500 text-xl" aria-label="Cerrar">×</button></div>
         <dl className="grid grid-cols-2 gap-3 my-6 text-sm">
-          <div><dt className="text-gray-500">Estado ML</dt><dd>{mostrar(detalle.estado_devolucion || detalle.estado_ml)}</dd></div>
+          <div><dt className="text-gray-500">Estado logístico</dt><dd>{logistica(detalle.estado_logistico)}</dd></div>
+          <div><dt className="text-gray-500">Última consulta satisfactoria</dt><dd>{detalle.logistica_consultada_en ? fecha(detalle.logistica_consultada_en) : 'Pendiente'}</dd></div>
+          <div><dt className="text-gray-500">Estado del reclamo</dt><dd>{mostrar(detalle.estado_ml)}</dd></div>
+          <div><dt className="text-gray-500">Estado de la devolución</dt><dd>{mostrar(detalle.estado_devolucion)}</dd></div>
           <div><dt className="text-gray-500">Mediación iniciada por</dt><dd>{iniciador(detalle)} · {fecha(detalle.mediacion_fecha_apertura)}</dd></div>
           <div><dt className="text-gray-500">Acción pendiente</dt><dd>{mostrar(detalle.accion_pendiente)}</dd></div>
           <div><dt className="text-gray-500">Fecha límite</dt><dd>{fecha(detalle.fecha_limite)}{resumenPlazo(detalle)}</dd></div>
@@ -182,6 +182,14 @@ export default function Devoluciones() {
           <div><dt className="text-gray-500">Fecha de albarán</dt><dd>{detalle.fecha_albaran || 'Sin fecha'}</dd></div>
         </dl>
         {detalle.detalle && <p className="my-4 text-sm">{detalle.detalle}</p>}
+        <h3 className="font-semibold mb-2">Envíos de la devolución</h3>
+        <ul className="mb-6 text-sm space-y-2">{(detalle.envios || []).map((envio, idx) => <li key={idx} className="border rounded p-3">
+          <strong>{logistica(envio.estado_logistico)}</strong> · {destino(envio.destino)}
+          <p>Envío: {mostrar(envio.id)} · Tipo: {mostrar(envio.tipo)} · Estado ML: {mostrar(envio.estado)}</p>
+          <p>Seguimiento: {mostrar(envio.seguimiento)}</p>
+          {envio.estado_logistico === 'entregado' && envio.destino === 'warehouse' && <p className="text-amber-700">Entrega al depósito de Mercado Libre; recepción del proveedor sin confirmar.</p>}
+        </li>)}</ul>
+        {!detalle.envios?.length && <p className="text-sm text-gray-500 mb-4">Mercado Libre no informó envíos. No se puede confirmar movimiento.</p>}
         <h3 className="font-semibold mb-2">Productos</h3>
         <ul className="mb-6 text-sm space-y-1">{(detalle.productos.length ? detalle.productos : detalle.ventas).map((p, idx) =>
           <li key={idx} className="border rounded p-2">{mostrar(p.sku)} · {mostrar(p.titulo)}{p.unidades_vendidas ? ` · ${p.unidades_vendidas} vendidas` : ''}</li>)}</ul>

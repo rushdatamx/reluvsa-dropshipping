@@ -89,8 +89,11 @@ Venta Mercado Libre  →  Envío de colecta  →  Factura del proveedor
 
 Gaby captura el número que ML le muestra **en pantalla**, que es el `pack_id` cuando la venta
 es de carrito y el `order.id` cuando no — mezclados sin distintivo. Por eso su reporte marcaba
-ventas "no encontradas" que **sí existían**. `parser_albaran.py` hace **dos UPDATE
-secuenciales**: `num_venta` primero y, sólo si `rowcount == 0`, `pack_id`.
+ventas "no encontradas" que **sí existían**. `parser_albaran.py` busca primero `num_venta_origen` en ambas cuentas (PK legacy sólo
+en principal); sólo si no hay venta busca `pack_id`. Si el número coincide en varias
+cuentas, no se aplica y sale como ambiguo en el reporte XLSX completo de filas sin aplicar.
+Las consultas de venta y carrito permanecen separadas; el carrito único actualiza todas
+sus ventas en esa cuenta. Ver `docs/albaranes-logistica-devoluciones.md`.
 
 🔴 **4 reglas fijadas en `test_albaran_pack_id.py` (23/23) — no romperlas:**
 1. **NUNCA `WHERE num_venta = ? OR pack_id = ?` en una sola consulta**, y `num_venta` SIEMPRE
@@ -514,7 +517,7 @@ Convenciones:
 
 ### 📍 PRÓXIMA SESIÓN: en qué está el proyecto
 
-- **Devoluciones:** desplegada y verificada en producción. El worker consumió el backlog; 192 casos, cero avisos pendientes, BD íntegra. Filtro de reconciliación `type=returns` verificado con GET 200 en ambas cuentas (bitácora 2026-10-16).
+- **Devoluciones:** cambio de logística implementado localmente (En camino por defecto, sin corte fijo de solicitud y refresco cada seis horas). Commit y push autorizados explícitamente por Mario tras reportar el conflicto literal del checklist de `api-guardian` con las exclusiones canónicas de dependencia/MockTransport; sin hallazgos nuevos de seguridad. Contrato: `docs/albaranes-logistica-devoluciones.md`. La versión anterior está desplegada y verificada en producción. El worker consumió el backlog; 192 casos, cero avisos pendientes, BD íntegra. Filtro de reconciliación `type=returns` verificado con GET 200 en ambas cuentas (bitácora 2026-10-16).
   Auditoría `api-guardian` aprobada; el hit literal de `httpx` quedó documentado como
   dependencia/test MockTransport preexistentes. Respaldo pre-migración creado en
   `/data/dropshipping.db.bak-20261016_170244`. Ver `docs/bitacora-sesiones.md` (2026-10-16).

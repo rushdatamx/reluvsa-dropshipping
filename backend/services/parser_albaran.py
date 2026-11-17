@@ -1,42 +1,18 @@
+"""Carga de albaranes de Gaby: venta original → carrito, entre ambas cuentas.
+
+Cada paso busca primero candidatos; más de una cuenta implica ambigüedad y no
+escribe nada. La venta gana globalmente sobre el carrito. Sólo la principal puede
+resolver por su PK legacy cuando no tiene número original. Un carrito único
+actualiza todas sus ventas dentro de esa cuenta. Los duplicados se aplican en
+orden del archivo y las celdas vacías conservan los valores previos.
+
+Sólo UPDATE sobre ventas existentes, nunca INSERT. Las filas sin aplicar se
+reportan completas con su posición y valores originales; el XLSX es efímero.
 """
-Parser del Excel de números de albarán que aporta Gaby.
-
-Es un archivo simple de 2 columnas: # de venta + # de albarán. Gaby lo arma a mano
-con los albaranes que va recibiendo y lo re-sube cuando tiene más. El portal cruza
-contra ventas_ml y guarda el albarán en ventas_ml.albaran para mostrarlo en la
-pestaña Ventas.
-
-⭐ EL CRUCE ES EN DOS PASOS (2026-08-12), no sólo por num_venta:
-
-    paso 1: num_venta  (= order.id, la PK)   -> si hay match, GANA y no se sigue
-    paso 2: pack_id    (= el # de carrito)   -> sólo si el paso 1 no encontró nada
-
-Gaby captura el número que ML le muestra EN PANTALLA, y ML muestra el `pack_id`
-cuando la venta viene de un carrito y el `order.id` cuando no. Su archivo trae los
-dos tipos mezclados sin que ella pueda distinguirlos. Medido contra prod con el
-archivo real de KIMS: 79 cruzaban por num_venta y 52 por pack_id — exactamente los
-"79 actualizados / 52 no encontrados" que reportó. 79+52=131 = todas las filas.
-
-🔴 NUNCA consultar las dos llaves en un solo WHERE con un OR. Hay 268 números que son
-order.id de una venta y pack_id de OTRA distinta: la consulta única devolvería 2
-ventas y escribiría el albarán en la equivocada. El orden importa y los pasos van
-SEPARADOS. (Misma regla ya fijada para el matcher de facturas en CLAUDE.md.)
-
-Un pack_id puede colgar VARIAS ventas (787 packs multi-venta en prod, de 2 a 6): el
-albarán se escribe en TODAS, porque el carrito es un solo paquete físico y la nota de
-entrega ampara todo lo que viaja dentro (decisión de Mario, 2026-08-12).
-
-Solo ENRIQUECE ventas ya cargadas (UPDATE, nunca INSERT): si un número del Excel no
-existe ni como num_venta ni como pack_id, se reporta como no_encontrado y no se crea
-fila huérfana. Una fila con albarán vacío se ignora (no borra el albarán existente,
-por si Gaby re-sube parcial).
-
-El header se detecta por contenido (texto ancla, tolerante a variaciones de nombre),
-no por posición fija de columna.
-"""
+import base64
+from io import BytesIO
 import re
 from pathlib import Path
-from typing import Optional
 
 import openpyxl
 
@@ -48,8 +24,7 @@ _ANCLAS_VENTA = ("# de venta", "num de venta", "numero de venta", "num venta", "
 _ANCLAS_ALBARAN = ("# de albaran", "# de albarán", "num de albaran", "numero de albaran",
                    "num albaran", "albaran", "albarán")
 
-# Cuántos números no encontrados se devuelven al frontend. Gaby necesita verlos para
-# ir a buscarlos a ML, pero un archivo roto no debe devolver miles de filas.
+# Compatibilidad: la vista antigua conserva 25 ejemplos; el detalle y XLSX van completos.
 MAX_EJEMPLOS = 25
 
 
@@ -113,21 +88,24 @@ def parse_albaran(path: Path) -> dict:
     idx_fecha = next((i for i, cell in enumerate(rows[header_idx])
                       if _norm(cell) in ("fecha de albarán", "fecha de albaran")), None)
 
-    por_num_venta = 0        # filas que cruzaron por order.id (paso 1)
-    por_pack_id = 0          # filas que cruzaron por pack_id  (paso 2)
-    ventas_actualizadas = 0  # filas de ventas_ml escritas (un pack puede ser >1)
-    no_encontrados = 0
-    sin_albaran = 0
-    ejemplos_no_encontrados = []
+    por_num_venta = por_pack_id = ventas_actualizadas = 0
+    no_encontrados = sin_albaran = ambiguos = 0
+    pendientes = []
+
+    def pendiente(fila, row, numero, albaran, fecha, resultado, candidatas=()):
+        pendientes.append({
+            "fila": fila,
+            "fila_original": [v.isoformat() if hasattr(v, "isoformat") else
+                              (str(v) if v is not None else "") for v in row],
+            "numero_recibido": numero, "albaran": albaran, "fecha": fecha,
+            "resultado": resultado, "cuentas_candidatas": sorted(candidatas),
+        })
 
     with get_db() as conn:
-        for row in rows[header_idx + 1:]:
-            if idx_venta >= len(row):
+        for fila, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
+            if not any(v is not None and str(v).strip() for v in row):
                 continue
-            num_venta = _celda_a_texto(row[idx_venta])
-            if not num_venta:
-                continue
-
+            num_venta = _celda_a_texto(row[idx_venta]) if idx_venta < len(row) else ""
             albaran = _celda_a_texto(row[idx_albaran]) if idx_albaran < len(row) else ""
             fecha = None
             if idx_fecha is not None and idx_fecha < len(row) and row[idx_fecha] is not None:
@@ -140,44 +118,89 @@ def parse_albaran(path: Path) -> dict:
                     fecha = str(valor).strip() or None
             if not albaran and not fecha:
                 sin_albaran += 1
-                continue  # no tocar: evita borrar un albarán existente al re-subir parcial
-
-            # ── Paso 1: por num_venta (order.id). Si cruza, gana y no se sigue. ──
-            cur = conn.execute(
-                "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE num_venta = ?",
-                (albaran, fecha, num_venta),
-            )
-            if cur.rowcount:
-                por_num_venta += 1
-                ventas_actualizadas += cur.rowcount
+                pendiente(fila, row, num_venta, albaran, fecha, "Sin albarán ni fecha")
                 continue
 
-            # ── Paso 2: por pack_id (el # de carrito que ML muestra en pantalla). ──
-            # Consulta SEPARADA a propósito: combinarla con el paso 1 cruzaría números
-            # que son order.id de una venta y pack_id de otra distinta.
-            cur = conn.execute(
-                "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE pack_id = ? AND cuenta_ml = 'principal'",
-                (albaran, fecha, num_venta),
-            )
-            if cur.rowcount:
-                # El carrito viaja junto: el albarán ampara todas sus ventas.
+            # IDs originales en ambas cuentas; sólo principal admite la PK legacy.
+            ventas = conn.execute(
+                """SELECT num_venta, cuenta_ml FROM ventas_ml
+                   WHERE num_venta_origen = ?
+                   UNION
+                   SELECT num_venta, cuenta_ml FROM ventas_ml
+                   WHERE cuenta_ml = 'principal' AND num_venta = ?
+                     AND NULLIF(num_venta_origen, '') IS NULL""",
+                (num_venta, num_venta),
+            ).fetchall() if num_venta else []
+            cuentas = {v["cuenta_ml"] for v in ventas}
+            if len(cuentas) > 1:
+                ambiguos += 1
+                pendiente(fila, row, num_venta, albaran, fecha, "Coincidencia ambigua", cuentas)
+                continue
+            if ventas:
+                for venta in ventas:
+                    cur = conn.execute(
+                        "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE num_venta = ? AND cuenta_ml = ?",
+                        (albaran, fecha, venta["num_venta"], venta["cuenta_ml"]),
+                    )
+                    ventas_actualizadas += cur.rowcount
+                por_num_venta += 1
+                continue
+
+            # Sólo si ninguna venta coincidió, resolver el carrito por separado.
+            cuentas = {v["cuenta_ml"] for v in conn.execute(
+                "SELECT DISTINCT cuenta_ml FROM ventas_ml WHERE pack_id = ?", (num_venta,),
+            ).fetchall()} if num_venta else set()
+            if len(cuentas) > 1:
+                ambiguos += 1
+                pendiente(fila, row, num_venta, albaran, fecha, "Coincidencia ambigua", cuentas)
+                continue
+            if cuentas:
+                cur = conn.execute(
+                    "UPDATE ventas_ml SET albaran = COALESCE(NULLIF(?, ''), albaran), fecha_albaran = COALESCE(?, fecha_albaran) WHERE pack_id = ? AND cuenta_ml = ?",
+                    (albaran, fecha, num_venta, next(iter(cuentas))),
+                )
                 por_pack_id += 1
                 ventas_actualizadas += cur.rowcount
                 continue
-
-            no_encontrados += 1  # venta no cargada aún; no creamos fila huérfana
-            if len(ejemplos_no_encontrados) < MAX_EJEMPLOS:
-                ejemplos_no_encontrados.append(num_venta)
+            no_encontrados += 1
+            pendiente(fila, row, num_venta, albaran, fecha, "Sin coincidencia local")
 
     return {
         "ok": True,
-        # `actualizados` = filas del Excel que encontraron su venta. Se conserva el
-        # nombre porque es lo que Gaby lee como "cuántos entraron".
         "actualizados": por_num_venta + por_pack_id,
         "por_num_venta": por_num_venta,
         "por_pack_id": por_pack_id,
         "ventas_actualizadas": ventas_actualizadas,
         "no_encontrados": no_encontrados,
         "sin_albaran": sin_albaran,
-        "ejemplos_no_encontrados": ejemplos_no_encontrados,
+        "ambiguos": ambiguos,
+        "sin_aplicar": len(pendientes),
+        "filas_sin_aplicar": pendientes,
+        "ejemplos_no_encontrados": [p["numero_recibido"] for p in pendientes
+                                    if p["resultado"] == "Sin coincidencia local"][:MAX_EJEMPLOS],
+        "reporte_sin_aplicar_base64": _reporte_pendientes(pendientes, rows[header_idx]) if pendientes else None,
     }
+
+
+def _reporte_pendientes(pendientes, encabezados):
+    """Reporte efímero: IDs como texto, sin fórmulas ejecutables ni histórico nuevo."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Filas sin aplicar"
+    ws.append(["Fila original", "Número recibido", "Albarán", "Fecha", "Resultado",
+               "Cuentas candidatas"] + [str(v or "") for v in encabezados])
+    for p in pendientes:
+        ws.append([str(p["fila"]), p["numero_recibido"], p["albaran"], p["fecha"] or "",
+                   p["resultado"], ", ".join(p["cuentas_candidatas"])] + p["fila_original"])
+    for row in ws:
+        for cell in row:
+            cell.data_type = "s"
+            cell.number_format = "@"
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for col, ancho in {"A": 15, "B": 25, "C": 22, "D": 18, "E": 30, "F": 25}.items():
+        ws.column_dimensions[col].width = ancho
+    salida = BytesIO()
+    wb.save(salida)
+    wb.close()
+    return base64.b64encode(salida.getvalue()).decode("ascii")

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from database import get_db
 from services import ml_client
+from services.logistica_devoluciones import normalizar_devolucion
 from services.sync_ml import get_config, set_config
 
 CLAIM_RE = re.compile(r"^/?post-purchase/v1/claims/(\d+)(?:/)?$")
@@ -95,6 +96,14 @@ def procesar_reclamo(cuenta, claim_id):
     path = f"/post-purchase/v1/claims/{claim_id}"
     claim = ml_client.get(path, cuenta_ml=cuenta)
     returned = ml_client.get_opcional(f"/post-purchase/v2/claims/{claim_id}/returns", cuenta_ml=cuenta)
+    if returned is not None and not isinstance(returned, dict):
+        raise ml_client.MLError("Formato de devolución no reconocido")
+    if returned is None:
+        with get_db() as conn:
+            previo = conn.execute("SELECT raw_return FROM ml_devoluciones WHERE cuenta_ml=? AND claim_id=?",
+                                  (cuenta, str(claim_id))).fetchone()
+        if previo and previo["raw_return"]:
+            raise ml_client.MLError("Devolución previa no disponible; se conserva para reintentar")
     tipo = claim.get("type")
     # Registrar el resultado negativo antes de confirmar el aviso. Una futura
     # notificación del mismo claim puede convertirlo en devolución.
@@ -132,8 +141,8 @@ def procesar_reclamo(cuenta, claim_id):
             (cuenta_ml, claim_id, order_id, pack_id, return_id, estado_ml, estado_devolucion,
              accion_pendiente, fecha_limite, unidades_reclamadas, motivo, reason_id, detalle,
              creado_ml, actualizado_ml, raw_claim, raw_return, productos_json, mediacion,
-             mediacion_iniciada_por, mediacion_fecha_apertura, mediacion_historial_consultado_en)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             mediacion_iniciada_por, mediacion_fecha_apertura, mediacion_historial_consultado_en, logistica_consultada_en)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(cuenta_ml,claim_id) DO UPDATE SET
              order_id=excluded.order_id, pack_id=excluded.pack_id, return_id=excluded.return_id,
              estado_ml=excluded.estado_ml, estado_devolucion=excluded.estado_devolucion,
@@ -142,6 +151,7 @@ def procesar_reclamo(cuenta, claim_id):
              reason_id=excluded.reason_id, detalle=excluded.detalle,
              actualizado_ml=excluded.actualizado_ml, raw_claim=excluded.raw_claim,
              raw_return=excluded.raw_return, productos_json=excluded.productos_json,
+             logistica_consultada_en=excluded.logistica_consultada_en,
              mediacion=excluded.mediacion,
              mediacion_iniciada_por=ml_devoluciones.mediacion_iniciada_por""",
             (cuenta, str(claim_id), str(order_id) if order_id else None,
@@ -152,7 +162,7 @@ def procesar_reclamo(cuenta, claim_id):
              claim.get("last_updated") or now, json.dumps(claim, ensure_ascii=False),
              json.dumps(returned, ensure_ascii=False) if returned else None,
              json.dumps(productos, ensure_ascii=False), int(_hay_mediacion(claim)),
-             None, None, None))
+             None, None, None, now))
     actualizar_historial(cuenta, str(claim_id), claim)
     return True
 
@@ -261,6 +271,39 @@ def reconciliar(cuenta):
     return total
 
 
+def encolar_refresco_logistico(cuenta):
+    """Una consulta inicial para todos; luego cada seis horas para retornos activos.
+
+    Los avisos usan el mismo consumidor y backoff que los webhooks. La deduplicación
+    mantiene una única tarea pendiente por cuenta y reclamo, incluso tras reinicios.
+    """
+    now = datetime.now(timezone.utc)
+    total = 0
+    with get_db() as conn:
+        seller = get_config(conn, "seller_id", cuenta)
+        if not seller:
+            return 0
+        rows = conn.execute("""SELECT claim_id, raw_return, logistica_consultada_en
+            FROM ml_devoluciones WHERE cuenta_ml=?""", (cuenta,)).fetchall()
+        for row in rows:
+            last = _fecha_utc(row["logistica_consultada_en"])
+            estado = normalizar_devolucion(row["raw_return"])["estado_logistico"]
+            if last and (estado not in ("preparacion", "en_camino", "incidencia") or
+                         now - datetime.fromisoformat(last) < timedelta(hours=6)):
+                continue
+            resource = f"/post-purchase/v1/claims/{row['claim_id']}"
+            pending = conn.execute("""SELECT 1 FROM ml_notificaciones WHERE cuenta_ml=?
+                AND topic='post_purchase' AND resource=? AND procesada=0 LIMIT 1""",
+                (cuenta, resource)).fetchone()
+            if not pending:
+                conn.execute("""INSERT INTO ml_notificaciones
+                    (topic, resource, user_id, recibido_en, procesada, cuenta_ml)
+                    VALUES ('post_purchase', ?, ?, ?, 0, ?)""",
+                    (resource, seller, datetime.now().isoformat(timespec="seconds"), cuenta))
+                total += 1
+    return total
+
+
 def _loop():
     while True:
         try:
@@ -269,6 +312,7 @@ def _loop():
             for cuenta in accounts:
                 if not ml_client.hay_conexion(cuenta):
                     continue
+                encolar_refresco_logistico(cuenta)
                 with get_db() as conn:
                     last = get_config(conn, "devoluciones_ultima_reconciliacion", cuenta)
                 try:

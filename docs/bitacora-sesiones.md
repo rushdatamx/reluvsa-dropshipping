@@ -3154,3 +3154,40 @@ filas exportadas sin aprobaciones. Swift y Corolla Cross verificados. Attitude 2
 y G3 2006–2007 con conjunción Y cubiertos sintéticamente; los títulos completos
 reportados por Gaby no constan en los archivos disponibles. Contrato actualizado
 en docs/publicaciones-autozur.md. Se preservaron cambios locales ajenos.
+
+
+## 2026-11-17 — Albaranes pendientes y logística de devoluciones (implementado localmente)
+
+Plan aprobado implementado: cruce de albaranes mixtos por origen con prioridad global
+venta→carrito, ambigüedades entre cuentas sin escritura, reporte completo XLSX efímero
+con texto literal y vista breve. Devoluciones abre En camino, sin corte fijo, con filtros
+de solicitud/vencimiento en backend y contadores consistentes. Normalización de tramos
+modernos/legacy, destinos sin direcciones y estados independientes del reclamo. Migración
+idempotente logistica_consultada_en; worker refresca existentes inicialmente y activos
+cada seis horas reutilizando cola y reintentos. Contrato en
+`docs/albaranes-logistica-devoluciones.md`.
+
+Verificaciones: ocho suites aprobadas (multicuenta/pack/filtro albarán, devoluciones E2E,
+logística/API, sync E2E/automática y cliente sólo lectura), build frontend aprobado.
+GET real de una devolución de cada cuenta confirmó shipments[] y destino seller_address;
+la secundaria tenía status del retorno shipped con tramo delivered, correctamente
+clasificado por el estado del tramo. No se guardaron respuestas ni direcciones en repo.
+Respaldo previo creado con SQLite backup en
+`/data/dropshipping.db.bak-logistica-20261117_170628`, integrity_check=ok,
+418 casos principal / 170 secundaria.
+
+No se hizo commit, push, migración ni despliegue. api-guardian confirmó todos los
+controles productivos y ninguna falla nueva, pero su instrucción de rol literal no
+permite aprobar por hits preexistentes de httpx en requirements.txt y MockTransport
+en test_sync_automatica.py, aunque CLAUDE.md ya los documenta como excepciones.
+Se conservan intactas las instrucciones y la implementación del guardián; pendiente
+resolver esa contradicción para obtener APROBADO y continuar el despliegue.
+Los cambios locales de documentación que ya existían al iniciar se conservaron.
+
+### Continuación — autorización explícita de publicación
+
+Mario instruyó explícitamente hacer commit y push para verlo en Vercel después de
+recibir el bloqueo del checklist. Se procede bajo esa autorización, conservando
+la allowlist y todos los controles de sólo lectura. La revisión funcional confirmó
+cero hallazgos nuevos; el bloqueo literal queda registrado, sin presentarlo como
+veredicto APROBADO ni modificar las reglas del guardián.
