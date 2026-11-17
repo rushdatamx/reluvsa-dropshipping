@@ -295,14 +295,7 @@ def _filtrar_candidatos(parsed: dict, catalogo: CatalogoIndexado) -> List[List[s
     return unicos
 
 
-_SUSPENSION = re.compile(r"\b(?:HORQUILLA|AMORTIGUADOR(?:ES)?|RESORTES?)\b", re.IGNORECASE)
-
-
-def es_publicacion_suspension(fila: Sequence[str]) -> bool:
-    return bool(_SUSPENSION.search(normalizar(fila[1])))
-
-
-REGLAS_SUSPENSION = 2
+REGLAS_SUSPENSION = 3
 
 
 def _resolver_suspension(titulo: str, catalogo: CatalogoIndexado):
@@ -376,9 +369,8 @@ def analizar(publicaciones: List[List[str]], catalogo: CatalogoIndexado, modo: s
     if modo not in ("general", "suspension"):
         raise ValueError("El apartado solicitado no es válido.")
     if modo == "suspension":
-        publicaciones = [fila for fila in publicaciones if es_publicacion_suspension(fila)]
         if not publicaciones:
-            raise ValueError("No se encontraron publicaciones de suspensión (horquillas, amortiguadores o resortes).")
+            raise ValueError("El archivo de publicaciones no contiene filas para analizar.")
     resultados = []
     conteos = defaultdict(int)
     compatibilidades = 0
@@ -494,8 +486,6 @@ def guardar_sesion(publicaciones: List[List[str]], analisis: dict) -> str:
             pass
     session_id = uuid.uuid4().hex
     ruta = SESSION_DIR / f"{session_id}.json"
-    if analisis["resumen"].get("modo") == "suspension":
-        publicaciones = [f for f in publicaciones if es_publicacion_suspension(f)]
     payload = {"publicaciones": publicaciones, **analisis}
     ruta.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return session_id

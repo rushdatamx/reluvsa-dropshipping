@@ -154,7 +154,7 @@ export default function PublicacionesAutozur() {
           <CampoArchivo label="Catálogo de vehículos México"
             hint="Catálogo maestro con fabricante, modelo, años y motor" onChange={setCatalogo} />
         </div>
-        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Incluye títulos con horquilla, amortiguador o resorte. Todos los modelos detectados y sus coincidencias por año se incluyen automáticamente, con todas las marcas, motores y submodelos. Los años abreviados se resuelven con el catálogo cuando tienen una interpretación única. Puedes excluir publicaciones o consultar sus compatibilidades completas.</p>}
+        {modo === 'suspension' && <p className="text-xs text-notion-text-secondary mt-3">Se analizan todas las publicaciones del archivo. El cruce considera los modelos y años reconocibles en cada título; las coincidencias incluyen todas las marcas, motores y submodelos del catálogo. Los años abreviados se resuelven cuando tienen una interpretación única. Si falta un modelo o año utilizable, la publicación queda Sin coincidencia. Puedes excluir publicaciones o consultar sus compatibilidades completas.</p>}
         <div className="mt-4 flex items-center gap-3">
           <button onClick={analizar} disabled={!publicaciones || !catalogo || cargando}
             className="px-4 py-2 bg-reluvsa-black text-reluvsa-yellow rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">

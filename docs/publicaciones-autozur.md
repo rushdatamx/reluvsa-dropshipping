@@ -20,7 +20,8 @@ Autozur espera una fila por compatibilidad. Por eso `UserProductID`, `TITULO` y
 7. Descarga un Excel con las mismas 17 columnas y una fila por compatibilidad.
 
 La pantalla incluye un apartado **Suspensión** que recibe los mismos archivos y
-procesa sólo títulos con “horquilla”, “amortiguador(es)” o “resorte(s)”. En ese
+procesa todas las filas válidas de la plantilla, sin filtrar por palabras del
+título (incluidos títulos de limpiaparabrisas o que mencionen “amort”). En ese
 apartado se proponen vehículos por modelo y cada año del rango detectado, de
 todas las marcas del catálogo incluso si el título menciona una. No se filtra por
 fabricante, litros ni cilindros. Todas las coincidencias de todos los modelos
@@ -41,7 +42,7 @@ una muestra de cinco. El Excel conserva 17 columnas, posición y notas y elimina
 vehículos idénticos por publicación. Sin filas exportables se informa «No hay
 compatibilidades para descargar».
 
-Las sesiones de Suspensión llevan `reglas_suspension = 2`; las anteriores se
+Las sesiones de Suspensión llevan `reglas_suspension = 3`; las anteriores se
 rechazan en consulta y exportación y piden volver a analizar. Las sesiones generales
 conservan su funcionamiento. No cambian endpoints ni campos existentes.
 

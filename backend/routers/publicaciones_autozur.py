@@ -12,7 +12,7 @@ from starlette.background import BackgroundTask
 from routers.auth import require_admin
 from services.autozur_compatibilidades import (
     SESSION_DIR, analizar, cargar_sesion, escribir_resultado, guardar_sesion,
-    es_publicacion_suspension, leer_catalogo, leer_publicaciones, resumen_para_cliente,
+    leer_catalogo, leer_publicaciones, resumen_para_cliente,
 )
 
 router = APIRouter(prefix="/api/publicaciones-autozur", tags=["publicaciones-autozur"])
@@ -40,8 +40,6 @@ def analizar_archivos(
         try:
             filas_publicaciones = leer_publicaciones(ruta_publicaciones)
             indice_catalogo = leer_catalogo(ruta_catalogo)
-            if modo == "suspension":
-                filas_publicaciones = [f for f in filas_publicaciones if es_publicacion_suspension(f)]
             resultado = analizar(filas_publicaciones, indice_catalogo, modo)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
