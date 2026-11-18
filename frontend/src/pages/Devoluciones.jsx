@@ -133,11 +133,13 @@ export default function Devoluciones() {
     <PageHeader title="Devoluciones" subtitle="Seguimiento logístico de devoluciones · Todas las fechas de solicitud" />
     {error && <p role="alert" className="mb-4 rounded bg-red-50 text-red-700 p-3">{error}</p>}
     <div className="flex flex-wrap gap-4 mb-4">
-      {filtro('estado_logistico', 'Estado logístico', estadosLogisticos)}
+      {filtro('estado_logistico', 'Estado logístico', [
+        estadosLogisticos[0], ['entregado_al_vendedor', 'Entregado al vendedor'], ...estadosLogisticos.slice(1),
+      ])}
       {filtro('cuenta', 'Cuenta', [['', 'Todas'], ['principal', 'Principal'], ['secundaria', 'Secundaria']])}
       {filtro('almacen', 'Almacén', [['', 'Todos'], ...almacenes.map((a) => [a, a])])}
       {filtro('mediacion', 'Mediación', [['', 'Todas'], ['true', 'Con mediación'], ['false', 'Sin mediación']])}
-      {filtro('revisado', 'Revisado', [['', 'Todos'], ['true', 'Revisado'], ['false', 'No revisado']])}
+      {filtro('revisado', 'Revisado', [['', 'Todos'], ['true', 'Revisado'], ['false', 'Sin revisar']])}
       {filtro('vencimiento', 'Vencimiento', [['', 'Todos'], ['24', 'Próximas 24 horas'], ['48', 'Próximas 48 horas'], ['72', 'Próximas 72 horas'], ['vencido', 'Vencidos'], ['sin_fecha', 'Sin fecha informada']])}
       {[['fecha_desde', 'Solicitud desde'], ['fecha_hasta', 'Solicitud hasta']].map(([key, label]) => <label key={key} className="text-sm text-gray-600">{label}
         <input type="date" className="ml-2 border rounded px-2 py-1" value={filtros[key]} onChange={(e) => setFiltros({ ...filtros, [key]: e.target.value })} />
