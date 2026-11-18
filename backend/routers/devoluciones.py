@@ -69,10 +69,17 @@ def _caso(conn, cuenta, claim_id):
     return item
 
 
+def _coincide_estado_logistico(item, estado):
+    if estado == "entregado_al_vendedor":
+        return any(envio["estado_logistico"] == "entregado" and envio["destino"] == "seller_address"
+                   for envio in item["envios"])
+    return estado == "todos" or item["estado_logistico"] == estado
+
+
 @router.get("")
 def listar(cuenta: Optional[str] = None, almacen: Optional[str] = None,
            mediacion: Optional[bool] = None, revisado: Optional[bool] = None,
-           estado_logistico: Literal["en_camino", "todos", "preparacion", "entregado", "incidencia", "cancelado", "desconocido"] = "en_camino",
+           estado_logistico: Literal["en_camino", "entregado_al_vendedor", "todos", "preparacion", "entregado", "incidencia", "cancelado", "desconocido"] = "en_camino",
            fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None,
            vencimiento: Optional[Literal["24", "48", "72", "vencido", "sin_fecha"]] = None):
     if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
@@ -86,7 +93,7 @@ def listar(cuenta: Optional[str] = None, almacen: Optional[str] = None,
              and (not almacen or almacen in (i["almacen"] or "").split(", "))
              and (mediacion is None or bool(i["mediacion"]) == mediacion)
              and (revisado is None or bool(i["revisado"]) == revisado)
-             and (estado_logistico == "todos" or i["estado_logistico"] == estado_logistico)
+             and _coincide_estado_logistico(i, estado_logistico)
              and (fecha_desde is None or (i["creado_ml"] or "")[:10] >= fecha_desde.isoformat())
              and (fecha_hasta is None or bool(i["creado_ml"]) and i["creado_ml"][:10] <= fecha_hasta.isoformat())]
     if vencimiento:

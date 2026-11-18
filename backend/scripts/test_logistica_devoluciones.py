@@ -1,4 +1,5 @@
 """Estados explícitos, privacidad y refresco independiente del reclamo (sin red)."""
+import json
 import os
 import sys
 import tempfile
@@ -102,6 +103,41 @@ try:
     detail = client.get('/api/devoluciones/principal/5').json()
     assert detail['estado_logistico'] == 'en_camino' and detail['estado_ml'] == 'closed'
     assert 'raw_return' not in detail
+
+    vendedor = {'type': 'return_from_triage', 'status': 'delivered',
+                'destination': {'name': 'seller_address'}}
+    with get_db() as conn:
+        for cid, cuenta, raw, revisado, claim in [
+            ('7', 'principal', {'shipments': [vendedor]}, 0, {}),
+            ('8', 'principal', {'shipments': [vendedor, {'type': 'return', 'status': 'shipped'}]}, 0, {'stage': 'dispute'}),
+            ('9', 'principal', {'shipments': [{**vendedor, 'destination': {'name': 'warehouse'}}]}, 0, {}),
+            ('10', 'principal', {'shipments': [{**vendedor, 'destination': None}]}, 0, {}),
+            ('11', 'secundaria', {'shipping': {'status': 'delivered'}, 'destination': 'seller_address'}, 0, {}),
+            ('12', 'principal', {'shipments': [vendedor]}, 1, {}),
+            ('13', 'principal', {'shipments': [{**vendedor, 'type': 'forward'}]}, 0, {}),
+        ]:
+            conn.execute("""INSERT INTO ml_devoluciones(cuenta_ml,claim_id,raw_return,revisado,raw_claim)
+                            VALUES (?,?,?,?,?)""", (cuenta, cid, json.dumps(raw), revisado, json.dumps(claim)))
+
+    def verificar_listado(estado, ids, sin_revisar, sin_mediacion, **params):
+        response = client.get('/api/devoluciones', params={'estado_logistico': estado, **params})
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert {i['claim_id'] for i in data['items']} == ids
+        assert data['total'] == len(data['items']) == len(ids)
+        assert data['sin_revisar'] == sin_revisar
+        assert data['sin_mediacion'] == sin_mediacion
+        return data['items']
+
+    items = verificar_listado('entregado_al_vendedor', {'7', '8', '11', '12'}, 3, 3)
+    mixto = next(i for i in items if i['claim_id'] == '8')
+    assert mixto['estado_logistico'] == 'en_camino'
+    assert [(e['estado_logistico'], e['destino']) for e in mixto['envios']] == [
+        ('entregado', 'seller_address'), ('en_camino', None)]
+    verificar_listado('entregado_al_vendedor', {'7', '8'}, 2, 1, cuenta='principal', revisado='false')
+    verificar_listado('entregado_al_vendedor', {'11'}, 1, 1, cuenta='secundaria', revisado='false')
+    verificar_listado('en_camino', {'5', '8'}, 1, 1)
+    verificar_listado('entregado', {'1', '4', '6', '7', '9', '10', '11', '12'}, 4, 8)
 finally:
     app.dependency_overrides.clear()
 print('API logística: filtros, contadores, fechas anteriores y reclamos cerrados OK')

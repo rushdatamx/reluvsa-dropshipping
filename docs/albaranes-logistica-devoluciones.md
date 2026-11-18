@@ -33,6 +33,12 @@ cada categoría, fechas de solicitud opcionales (`fecha_desde`/`fecha_hasta`, in
 y vencimiento. Listado y contadores aplican el mismo universo. No existe corte fijo.
 Reclamo, devolución y logística son campos independientes.
 
+`estado_logistico=entregado_al_vendedor` selecciona casos con al menos un tramo
+de retorno entregado a `seller_address`, usando los envíos guardados, incluidos
+los del formato legacy. Un caso con otro tramo en tránsito también aparece en
+**En camino** y conserva ese estado general. **Entregado** sigue consultando
+el estado general, que puede incluir entregas a depósitos de ML o sin destino.
+
 La migración idempotente añade `logistica_consultada_en`, inicialmente NULL. El worker
 encola todos los existentes una vez y luego preparación, tránsito e incidencia cada
 seis horas, incluso sin cambio del reclamo. Reutiliza cola, deduplicación y backoff.
